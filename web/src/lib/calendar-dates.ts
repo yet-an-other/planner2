@@ -4,6 +4,10 @@ const monthNameFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'long',
 })
 
+const shortMonthNameFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+})
+
 const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
   weekday: 'long',
   year: 'numeric',
@@ -79,6 +83,10 @@ export function isWeekend(date: Date) {
 
 export function formatVisibleMonth(date: Date) {
   return `${date.getFullYear()} ${monthNameFormatter.format(date)}`
+}
+
+export function formatShortMonth(date: Date) {
+  return shortMonthNameFormatter.format(date)
 }
 
 export function formatFullDate(date: Date) {

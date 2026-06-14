@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   addDays,
   formatFullDate,
+  formatShortMonth,
   formatVisibleMonth,
   getCalendarRange,
   isSameCalendarDate,
@@ -13,7 +14,7 @@ import {
 import { PRODUCT_VERSION } from '@/lib/product-version'
 import { cn } from '@/lib/utils'
 
-const WEEK_ROW_HEIGHT = 96
+const WEEK_ROW_HEIGHT = 128
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const WEEK_ROW_OVERSCAN = 20
 
@@ -140,26 +141,42 @@ export function CalendarSurface() {
                   const date = addDays(weekStart, dayIndex)
                   const todayCell = isSameCalendarDate(date, today)
                   const weekendCell = isWeekend(date)
+                  const monthMarker = date.getDate() === 1
 
                   return (
                     <div
                       className={cn(
-                        'relative border-r border-border p-3 last:border-r-0 sm:p-4',
+                        'relative border-r border-border p-1 last:border-r-0 sm:p-1',
                         weekendCell && 'bg-muted/20 text-muted-foreground',
                       )}
                       key={`${virtualWeek.key}-${weekday}`}
                     >
-                      <time
-                        aria-label={`${todayCell ? 'Today, ' : ''}${formatFullDate(date)}`}
-                        className={cn(
-                          'inline-flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-medium tabular-nums',
-                          todayCell &&
-                            'bg-primary text-primary-foreground shadow-sm',
-                        )}
-                        dateTime={toISODate(date)}
-                      >
-                        {date.getDate()}
-                      </time>
+                      {monthMarker && (
+                        <div
+                          aria-hidden="true"
+                          className="absolute inset-y-0 left-0 w-[3px] bg-[#8b8f72]"
+                        />
+                      )}
+                      <div className="flex items-center px-1 justify-between gap-2">
+                        <div className="min-w-0">
+                          {monthMarker && (
+                            <span className="block truncate text-xs font-extrabold uppercase tracking-[0.2em] text-[#6f725a]">
+                              {formatShortMonth(date)}
+                            </span>
+                          )}
+                        </div>
+                        <time
+                          aria-label={`${todayCell ? 'Today, ' : ''}${formatFullDate(date)}`}
+                          className={cn(
+                            'inline-flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full px-2 text-sm font-medium tabular-nums',
+                            todayCell &&
+                              'bg-primary text-primary-foreground shadow-sm',
+                          )}
+                          dateTime={toISODate(date)}
+                        >
+                          {date.getDate()}
+                        </time>
+                      </div>
                     </div>
                   )
                 })}

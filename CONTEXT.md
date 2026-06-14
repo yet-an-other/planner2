@@ -29,8 +29,12 @@ A Monday-through-Sunday row of seven consecutive Date Cells in the Calendar Surf
 _Avoid_: Date row, calendar row
 
 **Date Cell**:
-A single date in the Calendar Surface, represented by its day-of-month number.
+A single date in the Calendar Surface.
 _Avoid_: Day card, calendar tile, date box
+
+**Month Marker**:
+The first Date Cell of a calendar month, labeled with that month's short name.
+_Avoid_: Month divider, month label, month start
 
 **Today**:
 The current calendar date in the viewer's local timezone.
@@ -55,6 +59,7 @@ _Avoid_: Infinite range, endless dates, all dates
 - A **Week Row** contains exactly seven **Date Cells**.
 - A **Visible Month** is derived from exactly one topmost visible **Week Row** in the **Calendar Surface**.
 - A **Calendar Surface** contains one **Date Cell** for each consecutive date it presents.
+- Each calendar month in the **Calendar Surface** has exactly one **Month Marker**.
 - **Today** belongs to exactly one **Date Cell** in the **Calendar Surface**.
 - A **Today Jump** targets the **Week Row** containing **Today**.
 
