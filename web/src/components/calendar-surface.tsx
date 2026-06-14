@@ -10,6 +10,7 @@ import {
   toISODate,
   toLocalDate,
 } from '@/lib/calendar-dates'
+import { PRODUCT_VERSION } from '@/lib/product-version'
 import { cn } from '@/lib/utils'
 
 const WEEK_ROW_HEIGHT = 96
@@ -58,20 +59,52 @@ export function CalendarSurface() {
     )
   }
 
+  function jumpToToday() {
+    const behavior = prefersReducedMotion() ? 'auto' : 'smooth'
+
+    weekVirtualizer.scrollToIndex(range.todayWeekIndex, {
+      align: 'start',
+      behavior,
+    })
+
+    if (behavior === 'auto') {
+      setTopWeekIndex(range.todayWeekIndex)
+    }
+  }
+
   return (
     <main className="flex h-svh min-h-0 flex-col overflow-hidden bg-background text-foreground">
-      <header className="shrink-0 border-b border-border bg-background/95 backdrop-blur">
-        <div className="flex h-16 items-center px-4 sm:px-6">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            {visibleMonth}
+      <header className="shrink-0 border-b border-[#d8d1bd] bg-[#f5f1e6] text-[#252819] shadow-sm">
+        <div className="grid h-20 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-4 sm:px-6">
+          <div className="justify-self-start">
+            <div className="inline-flex flex-col">
+              <div className="whitespace-nowrap text-[clamp(18px,6vw,40px)] font-extrabold leading-none tracking-[-0.08em] text-[#777b60]">
+                The Planner
+              </div>
+              <div className="mt-1 self-end text-[10px] font-medium leading-none tracking-[0.28em] text-[#8b8f72]">
+                v{PRODUCT_VERSION}
+              </div>
+            </div>
+          </div>
+          <h1 className="justify-self-center whitespace-nowrap text-[clamp(14px,4vw,26px)] font-extrabold tracking-tight">
+            <button
+              aria-label={`Return to Today, ${formatFullDate(today)}`}
+              className="rounded-full px-4 py-2 transition-colors hover:bg-[#ebe4d2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d855f] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f1e6]"
+              onClick={jumpToToday}
+              title="Return to Today"
+              type="button"
+            >
+              {visibleMonth}
+            </button>
           </h1>
+          <div aria-hidden="true" />
         </div>
-        <div className="grid h-10 grid-cols-7 border-t border-border text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+        <div className="grid h-10 grid-cols-7 border-t border-[#d8d1bd] text-xs font-medium uppercase tracking-[0.2em] text-[#6f725a]">
           {WEEKDAY_LABELS.map((weekday, index) => (
             <div
               className={cn(
-                'flex items-center justify-center border-r border-border last:border-r-0',
-                index >= 5 && 'bg-muted/20',
+                'flex items-center justify-center border-r border-[#d8d1bd] last:border-r-0',
+                index >= 5 && 'bg-[#eee8d8]/70',
               )}
               key={weekday}
             >
@@ -141,4 +174,8 @@ export function CalendarSurface() {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }

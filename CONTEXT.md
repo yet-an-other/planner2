@@ -9,8 +9,16 @@ A Monday-first, bidirectionally scrollable seven-column calendar grid that prese
 _Avoid_: Planner app, full planner, schedule manager, infinite calendar
 
 **Calendar Header**:
-The non-scrolling area that displays the Visible Month and Monday-first weekday labels for the Calendar Surface.
+The non-scrolling area that displays the Product Name, Visible Month, and Monday-first weekday labels for the Calendar Surface.
 _Avoid_: Top bar, sticky header, current month header
+
+**Product Name**:
+The public name of the product: The Planner.
+_Avoid_: App name, site title, brand label
+
+**Product Version**:
+The public version identifier displayed with the Product Name.
+_Avoid_: Build number, package version, release tag
 
 **Visible Month**:
 The month and year containing the first date in the topmost visible Week Row of the Calendar Surface.
@@ -28,6 +36,10 @@ _Avoid_: Day card, calendar tile, date box
 The current calendar date in the viewer's local timezone.
 _Avoid_: Current day, system date, UTC date
 
+**Today Jump**:
+A Calendar Header action that returns the Calendar Surface to Today's Week Row.
+_Avoid_: Back to today, scroll home, month click
+
 **Extended Calendar Range**:
 The complete Monday-through-Sunday Week Rows from the week containing ten years before Today through the week containing ten years after Today.
 _Avoid_: Infinite range, endless dates, all dates
@@ -35,6 +47,8 @@ _Avoid_: Infinite range, endless dates, all dates
 ## Relationships
 
 - A **Calendar Header** belongs to exactly one **Calendar Surface**.
+- A **Calendar Header** displays one **Product Name**.
+- A **Calendar Header** displays one **Product Version**.
 - A **Calendar Header** displays one **Visible Month**.
 - A **Calendar Surface** presents the **Extended Calendar Range**.
 - A **Calendar Surface** contains **Week Rows** ordered by date.
@@ -42,6 +56,7 @@ _Avoid_: Infinite range, endless dates, all dates
 - A **Visible Month** is derived from exactly one topmost visible **Week Row** in the **Calendar Surface**.
 - A **Calendar Surface** contains one **Date Cell** for each consecutive date it presents.
 - **Today** belongs to exactly one **Date Cell** in the **Calendar Surface**.
+- A **Today Jump** targets the **Week Row** containing **Today**.
 
 ## Example dialogue
 
