@@ -20,6 +20,18 @@ _Avoid_: App name, site title, brand label
 The public version identifier displayed with the Product Name.
 _Avoid_: Build number, package version, release tag
 
+**Google Account Connection**:
+The user's authorization for The Planner to identify them with Google and later access their Google Calendar.
+_Avoid_: Login, Google auth, OAuth token
+
+**Account Control**:
+The Calendar Header control that displays the Google Account Connection state and lets the user connect or manage the connected account.
+_Avoid_: Login button, profile button, auth widget
+
+**Header Status**:
+A Calendar Header area for short connection information, progress messages, or errors related to the Calendar Surface.
+_Avoid_: Toast, alert, notification bar
+
 **Visible Month**:
 The month and year containing the first date in the topmost visible Week Row of the Calendar Surface.
 _Avoid_: Current month, active month, shown month
@@ -54,6 +66,10 @@ _Avoid_: Infinite range, endless dates, all dates
 - A **Calendar Header** displays one **Product Name**.
 - A **Calendar Header** displays one **Product Version**.
 - A **Calendar Header** displays one **Visible Month**.
+- A **Calendar Header** contains one **Account Control**.
+- A **Calendar Header** contains one **Header Status**.
+- An **Account Control** displays the **Google Account Connection** state.
+- A **Google Account Connection** is either connected or disconnected.
 - A **Calendar Surface** presents the **Extended Calendar Range**.
 - A **Calendar Surface** contains **Week Rows** ordered by date.
 - A **Week Row** contains exactly seven **Date Cells**.
