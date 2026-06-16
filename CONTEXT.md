@@ -21,7 +21,7 @@ The public version identifier displayed with the Product Name.
 _Avoid_: Build number, package version, release tag
 
 **Google Account Connection**:
-The user's authorization for The Planner to identify them with Google and later access their Google Calendar.
+The user's authorization for The Planner to identify them with Google and read their Google Calendar.
 _Avoid_: Login, Google auth, OAuth token
 
 **Account Control**:

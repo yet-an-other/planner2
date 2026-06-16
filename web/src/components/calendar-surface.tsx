@@ -12,18 +12,22 @@ import {
   toISODate,
   toLocalDate,
 } from '@/lib/calendar-dates'
+import {
+  fetchGoogleAccountProfile,
+  requestGoogleAccessToken,
+  revokeGoogleAccessToken,
+  type GoogleAccountProfile,
+} from '@/lib/google-account-connection'
 import { PRODUCT_VERSION } from '@/lib/product-version'
 import { cn } from '@/lib/utils'
 
 const WEEK_ROW_HEIGHT = 128
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const WEEK_ROW_OVERSCAN = 20
-const MOCK_CONNECTED_ACCOUNT = {
-  displayName: 'Ivan Bodyagin',
-  initials: 'IB',
-}
 
-type GoogleAccountConnectionState = 'connected' | 'disconnected'
+type GoogleAccountConnectionState =
+  | { status: 'connected'; accessToken: string; profile: GoogleAccountProfile }
+  | { status: 'disconnected' }
 
 type HeaderStatus = {
   message: string
@@ -36,8 +40,9 @@ export function CalendarSurface() {
   const range = useMemo(() => getCalendarRange(today), [today])
   const [topWeekIndex, setTopWeekIndex] = useState(range.todayWeekIndex)
   const [googleAccountConnection, setGoogleAccountConnection] =
-    useState<GoogleAccountConnectionState>('disconnected')
+    useState<GoogleAccountConnectionState>({ status: 'disconnected' })
   const [headerStatus, setHeaderStatus] = useState<HeaderStatus | null>(null)
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? ''
 
   // TanStack Virtual intentionally returns non-memoizable helpers; keep the virtualizer local to this component.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -54,7 +59,12 @@ export function CalendarSurface() {
     [range.start, topWeekIndex],
   )
   const visibleMonth = formatVisibleMonth(visibleWeekStart)
-  const googleAccountConnected = googleAccountConnection === 'connected'
+  const googleAccountConnected = googleAccountConnection.status === 'connected'
+  const effectiveHeaderStatus =
+    headerStatus ??
+    (googleClientId
+      ? null
+      : { message: 'Google client ID is not configured', tone: 'error' as const })
 
   function updateTopWeekIndex() {
     const scrollParent = scrollParentRef.current
@@ -90,13 +100,71 @@ export function CalendarSurface() {
   }
 
   function connectGoogleAccount() {
-    setGoogleAccountConnection('connected')
-    setHeaderStatus({ message: 'Google account connected', tone: 'info' })
+    if (!googleClientId) {
+      return
+    }
+
+    setHeaderStatus({ message: 'Connecting Google account...', tone: 'info' })
+
+    try {
+      requestGoogleAccessToken(googleClientId, (response) => {
+        void handleGoogleTokenResponse(response)
+      })
+    } catch (error) {
+      setHeaderStatus({
+        message: getErrorMessage(error, 'Google connection is unavailable'),
+        tone: 'error',
+      })
+    }
+  }
+
+  async function handleGoogleTokenResponse(response: {
+    access_token?: string
+    error?: string
+    error_description?: string
+  }) {
+    if (response.error) {
+      setHeaderStatus({
+        message: response.error_description ?? 'Google connection was cancelled',
+        tone: 'error',
+      })
+      return
+    }
+
+    if (!response.access_token) {
+      setHeaderStatus({
+        message: 'Google connection did not return an access token',
+        tone: 'error',
+      })
+      return
+    }
+
+    try {
+      const profile = await fetchGoogleAccountProfile(response.access_token)
+
+      setGoogleAccountConnection({
+        status: 'connected',
+        accessToken: response.access_token,
+        profile,
+      })
+      setHeaderStatus({ message: 'Google account connected', tone: 'info' })
+    } catch (error) {
+      setHeaderStatus({
+        message: getErrorMessage(error, 'Google profile could not be loaded'),
+        tone: 'error',
+      })
+    }
   }
 
   function disconnectGoogleAccount() {
-    setGoogleAccountConnection('disconnected')
-    setHeaderStatus({ message: 'Google account disconnected', tone: 'info' })
+    if (googleAccountConnection.status !== 'connected') {
+      return
+    }
+
+    revokeGoogleAccessToken(googleAccountConnection.accessToken, () => {
+      setGoogleAccountConnection({ status: 'disconnected' })
+      setHeaderStatus({ message: 'Google account disconnected', tone: 'info' })
+    })
   }
 
   return (
@@ -123,6 +191,12 @@ export function CalendarSurface() {
           <div className="relative z-10 col-start-3 row-start-1 self-center justify-self-end">
             <AccountControl
               connected={googleAccountConnected}
+              disabled={!googleClientId}
+              profile={
+                googleAccountConnection.status === 'connected'
+                  ? googleAccountConnection.profile
+                  : null
+              }
               onConnect={connectGoogleAccount}
               onDisconnect={disconnectGoogleAccount}
             />
@@ -132,11 +206,13 @@ export function CalendarSurface() {
             aria-live="polite"
             className={cn(
               'col-start-2 col-end-4 row-start-2 min-h-3 min-w-0 self-start truncate text-right text-[11px] font-medium leading-none',
-              headerStatus?.tone === 'error' ? 'text-red-700' : 'text-[#7c8066]',
+              effectiveHeaderStatus?.tone === 'error'
+                ? 'text-red-700'
+                : 'text-[#7c8066]',
             )}
             role="status"
           >
-            {headerStatus?.message ?? '\u00A0'}
+            {effectiveHeaderStatus?.message ?? '\u00A0'}
           </div>
         </div>
         <div className="grid h-10 grid-cols-7 border-t border-[#d8d1bd] text-xs font-medium uppercase tracking-[0.2em] text-[#6f725a]">
@@ -230,35 +306,46 @@ export function CalendarSurface() {
 
 type AccountControlProps = {
   connected: boolean
+  disabled?: boolean
+  profile: GoogleAccountProfile | null
   onConnect: () => void
   onDisconnect: () => void
 }
 
 function AccountControl({
   connected,
+  disabled = false,
+  profile,
   onConnect,
   onDisconnect,
 }: AccountControlProps) {
-  const displayText = connected
-    ? MOCK_CONNECTED_ACCOUNT.displayName
-    : 'Connect Google'
+  const displayText = connected && profile ? profile.displayName : 'Connect Google'
   const actionLabel = connected
-    ? `Disconnect Google account for ${MOCK_CONNECTED_ACCOUNT.displayName}`
+    ? `Disconnect Google account for ${displayText}`
     : 'Connect Google account'
   const ActionIcon = connected ? LogOut : LogIn
 
   return (
     <button
       aria-label={actionLabel}
-      className="inline-flex h-7 w-[62px] items-center justify-center gap-1.5 rounded-full border border-[#d8d1bd] bg-white/80 px-2 text-xs font-medium text-[#384052] shadow-sm transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d855f] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f1e6] sm:h-8 md:w-48 md:justify-start"
+      className="inline-flex h-7 w-[62px] items-center justify-center gap-1.5 rounded-full border border-[#d8d1bd] bg-white/80 px-2 text-xs font-medium text-[#384052] shadow-sm transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d855f] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f1e6] disabled:cursor-not-allowed disabled:opacity-60 sm:h-8 md:w-48 md:justify-start"
+      disabled={disabled}
       onClick={connected ? onDisconnect : onConnect}
       title={actionLabel}
       type="button"
     >
-      {connected ? (
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#777b60] text-[9px] font-extrabold tracking-[-0.04em] text-white sm:h-6 sm:w-6 sm:text-[10px]">
-          {MOCK_CONNECTED_ACCOUNT.initials}
-        </span>
+      {connected && profile ? (
+        profile.pictureUrl ? (
+          <img
+            alt={`${profile.displayName} profile`}
+            className="h-5 w-5 shrink-0 rounded-full object-cover sm:h-6 sm:w-6"
+            src={profile.pictureUrl}
+          />
+        ) : (
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#777b60] text-[9px] font-extrabold tracking-[-0.04em] text-white sm:h-6 sm:w-6 sm:text-[10px]">
+            {profile.initials}
+          </span>
+        )
       ) : (
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#e5e7df] text-[#777b60] sm:h-6 sm:w-6">
           <UserRound aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.4} />
@@ -275,6 +362,10 @@ function AccountControl({
       />
     </button>
   )
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback
 }
 
 function clamp(value: number, min: number, max: number) {
