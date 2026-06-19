@@ -80,8 +80,14 @@ export function layoutWeekEvents(events: CalendarEvent[], weekStart: Date): Week
     })
     .sort((a, b) => a.startTime.localeCompare(b.startTime))
 
-  // Build cells from rows only (bars render in the week-level overlay)
+  // Build cells from bars and rows, then apply 4-item cap
   const rawCells: CellItem[][] = Array.from({ length: 7 }, () => [])
+  for (let barIndex = 0; barIndex < placedBars.length; barIndex++) {
+    const pb = placedBars[barIndex]
+    for (let d = pb.startDayIndex; d <= pb.endDayIndex; d++) {
+      rawCells[d].push({ kind: 'bar', barIndex })
+    }
+  }
 
   for (const row of rowsInWeek) {
     const dayIndex = Math.floor((row.date.getTime() - weekStart.getTime()) / 86_400_000)

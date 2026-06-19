@@ -46,7 +46,7 @@ describe('layoutWeekEvents', () => {
     })
     expect(layout.bars[0].event.title).toBe('Team Lunch')
 
-    expect(layout.cells[0].items).toEqual([])
+    expect(layout.cells[0].items).toEqual([{ kind: 'bar', barIndex: 0 }])
     for (let i = 1; i < 7; i++) {
       expect(layout.cells[i].items).toEqual([])
     }
@@ -73,9 +73,9 @@ describe('layoutWeekEvents', () => {
       endDayIndex: 2,
     })
 
-    expect(layout.cells[0].items).toEqual([])
-    expect(layout.cells[1].items).toEqual([])
-    expect(layout.cells[2].items).toEqual([])
+    expect(layout.cells[0].items).toEqual([{ kind: 'bar', barIndex: 0 }])
+    expect(layout.cells[1].items).toEqual([{ kind: 'bar', barIndex: 0 }])
+    expect(layout.cells[2].items).toEqual([{ kind: 'bar', barIndex: 0 }])
     expect(layout.cells[3].items).toEqual([])
   })
 
@@ -103,22 +103,28 @@ describe('layoutWeekEvents', () => {
     const layout = layoutWeekEvents([bar1, bar2], weekStart)
 
     expect(layout.bars).toHaveLength(2)
-    // Sprint Planning is longer → sorts first, gets lane 0
-    // Team Offsite is shorter → sorts second, gets lane 1
     expect(layout.bars[0].event.title).toBe('Sprint Planning')
     expect(layout.bars[0].laneIndex).toBe(0)
     expect(layout.bars[1].event.title).toBe('Team Offsite')
     expect(layout.bars[1].laneIndex).toBe(1)
 
-    // Bars no longer appear in cell items — only rows and overflow do
-    expect(layout.cells[0].items).toEqual([])
-    expect(layout.cells[1].items).toEqual([])
-    expect(layout.cells[2].items).toEqual([])
-    expect(layout.cells[3].items).toEqual([])
-    expect(layout.cells[4].items).toEqual([])
+    expect(layout.cells[0].items).toEqual([
+      { kind: 'bar', barIndex: 0 },
+      { kind: 'bar', barIndex: 1 },
+    ])
+    expect(layout.cells[1].items).toEqual([
+      { kind: 'bar', barIndex: 0 },
+      { kind: 'bar', barIndex: 1 },
+    ])
+    expect(layout.cells[2].items).toEqual([
+      { kind: 'bar', barIndex: 0 },
+      { kind: 'bar', barIndex: 1 },
+    ])
+    expect(layout.cells[3].items).toEqual([{ kind: 'bar', barIndex: 0 }])
+    expect(layout.cells[4].items).toEqual([{ kind: 'bar', barIndex: 0 }])
   })
 
-  it('places rows below the overlay bars', () => {
+  it('places bars before rows when both occupy the same cell', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
     const bar: CalendarEventBar = {
       kind: 'bar',
@@ -144,13 +150,13 @@ describe('layoutWeekEvents', () => {
     expect(layout.bars).toHaveLength(1)
     expect(layout.bars[0].laneIndex).toBe(0)
 
-    // Wed (index 2) — only the row appears in the cell items
     expect(layout.cells[2].items).toEqual([
+      { kind: 'bar', barIndex: 0 },
       { kind: 'row', event: row },
     ])
   })
 
-  it('caps visible rows per cell to 4, with overflow replacing the 4th slot', () => {
+  it('caps visible items per cell to 4, with overflow replacing the 4th slot', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
     const bar: CalendarEventBar = {
       kind: 'bar',
@@ -173,12 +179,12 @@ describe('layoutWeekEvents', () => {
 
     const layout = layoutWeekEvents([bar, ...rows], weekStart)
 
-    // Mon (index 0): 6 rows → capped to 3 rows + overflow
+    // Mon (index 0): 1 bar + 6 rows = 7 items → capped to 3 + overflow
     expect(layout.cells[0].items).toHaveLength(4)
-    expect(layout.cells[0].items[0]).toMatchObject({ kind: 'row' })
+    expect(layout.cells[0].items[0]).toEqual({ kind: 'bar', barIndex: 0 })
     expect(layout.cells[0].items[1]).toMatchObject({ kind: 'row' })
     expect(layout.cells[0].items[2]).toMatchObject({ kind: 'row' })
-    expect(layout.cells[0].items[3]).toEqual({ kind: 'overflow', count: 3 })
+    expect(layout.cells[0].items[3]).toEqual({ kind: 'overflow', count: 4 })
   })
 
   it('orders intraday rows by start time within a cell', () => {
@@ -238,10 +244,9 @@ describe('layoutWeekEvents', () => {
       endDayIndex: 2,   // ends Wednesday
     })
 
-    // Only Mon, Tue, Wed have the bar
-    expect(layout.cells[0].items).toEqual([])
-    expect(layout.cells[1].items).toEqual([])
-    expect(layout.cells[2].items).toEqual([])
+    expect(layout.cells[0].items).toEqual([{ kind: 'bar', barIndex: 0 }])
+    expect(layout.cells[1].items).toEqual([{ kind: 'bar', barIndex: 0 }])
+    expect(layout.cells[2].items).toEqual([{ kind: 'bar', barIndex: 0 }])
     expect(layout.cells[3].items).toEqual([])
   })
 

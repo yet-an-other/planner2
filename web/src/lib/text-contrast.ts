@@ -5,7 +5,7 @@ export function getContrastTextColor(hexColor: string): string {
   const b = parseInt(hex.substring(4, 6), 16)
 
   // YIQ luminance formula
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000
+  const yiq = (r * 299 + g * 587 + b * 100) / 1000
 
   return yiq >= 128 ? '#000000' : '#FFFFFF'
 }

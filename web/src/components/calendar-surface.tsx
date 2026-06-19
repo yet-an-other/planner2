@@ -241,12 +241,12 @@ export function CalendarSurface() {
             {effectiveHeaderStatus?.message ?? '\u00A0'}
           </div>
         </div>
-        <div className="grid h-10 grid-cols-7 border-t border-[#d8d1bd] text-xs font-medium uppercase tracking-[0.2em] text-[#6f725a]">
+        <div className="grid h-10 grid-cols-7 bg-[#e8e2d0] text-xs font-medium uppercase tracking-[0.2em] text-[#6f725a]">
           {WEEKDAY_LABELS.map((weekday, index) => (
             <div
               className={cn(
-                'flex items-center justify-center border-r border-[#d8d1bd] last:border-r-0',
-                index >= 5 && 'bg-[#eee8d8]/70',
+                'flex items-center justify-center',
+                index >= 5 && 'bg-[#ded8c8]/50',
               )}
               key={weekday}
             >
@@ -269,12 +269,12 @@ export function CalendarSurface() {
           {weekVirtualizer.getVirtualItems().map((virtualWeek) => {
             const weekStart = addDays(range.start, virtualWeek.index * 7)
             const weekLayout = layoutWeekEvents(events, weekStart)
-            const maxLaneIndex =
-              weekLayout.bars.length > 0
-                ? Math.max(...weekLayout.bars.map((b) => b.laneIndex))
-                : -1
-            const rowContainerMarginTop =
-              maxLaneIndex >= 0 ? 26 + maxLaneIndex * 22 : undefined
+            const dayMaxLane = Array.from({ length: 7 }, () => -1)
+            for (const bar of weekLayout.bars) {
+              for (let d = bar.startDayIndex; d <= bar.endDayIndex; d++) {
+                dayMaxLane[d] = Math.max(dayMaxLane[d], bar.laneIndex)
+              }
+            }
 
             return (
               <div
@@ -290,13 +290,13 @@ export function CalendarSurface() {
                   {weekLayout.bars.map((bar) => {
                     const left = (bar.startDayIndex / 7) * 100
                     const width = ((bar.endDayIndex - bar.startDayIndex + 1) / 7) * 100
-                    const top = bar.laneIndex * 22 + 4
+                    const top = bar.laneIndex * 24
                     const textColor = getContrastTextColor(bar.event.color)
 
                     return (
                       <div
                         key={bar.event.id}
-                        className="absolute h-[18px] overflow-hidden truncate px-1 text-[10px] font-medium leading-[18px]"
+                        className="absolute h-[18px] overflow-hidden truncate pl-4 pr-1 text-[10px] font-medium leading-[18px]"
                         style={{
                           left: `${left}%`,
                           width: `${width}%`,
@@ -359,18 +359,25 @@ export function CalendarSurface() {
                       </div>
 
                       {/* Event rows and overflow */}
-                      <div
-                        className="space-y-[2px]"
-                        style={
-                          rowContainerMarginTop
-                            ? { marginTop: `${rowContainerMarginTop}px` }
-                            : undefined
-                        }
-                      >
-                        {cellLayout.items.map((item, i) => (
-                          <CellItemRenderer key={i} item={item} />
-                        ))}
-                      </div>
+                      {(() => {
+                        const maxLane = dayMaxLane[dayIndex]
+                        const cellMarginTop =
+                          maxLane >= 0 ? 28 + maxLane * 24 : undefined
+                        return (
+                          <div
+                            className="space-y-[2px] overflow-y-clip"
+                            style={
+                              cellMarginTop
+                                ? { marginTop: `${cellMarginTop}px` }
+                                : undefined
+                            }
+                          >
+                            {cellLayout.items.map((item, i) => (
+                              <CellItemRenderer key={i} item={item} />
+                            ))}
+                          </div>
+                        )
+                      })()}
                     </div>
                   )
                 })}
@@ -417,16 +424,16 @@ function AccountControl({
         profile.pictureUrl ? (
           <img
             alt={`${profile.displayName} profile`}
-            className="h-5 w-5 shrink-0 rounded-full object-cover sm:h-6 sm:w-6"
+            className="-ml-1 h-5 w-5 shrink-0 rounded-full object-cover sm:h-6 sm:w-6"
             src={profile.pictureUrl}
           />
         ) : (
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#777b60] text-[9px] font-extrabold tracking-[-0.04em] text-white sm:h-6 sm:w-6 sm:text-[10px]">
+          <span className="-ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#777b60] text-[9px] font-extrabold tracking-[-0.04em] text-white sm:h-6 sm:w-6 sm:text-[10px]">
             {profile.initials}
           </span>
         )
       ) : (
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#e5e7df] text-[#777b60] sm:h-6 sm:w-6">
+        <span className="-ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#e5e7df] text-[#777b60] sm:h-6 sm:w-6">
           <UserRound aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.4} />
         </span>
       )}
@@ -434,7 +441,7 @@ function AccountControl({
       <ActionIcon
         aria-hidden="true"
         className={cn(
-          'h-4 w-4 shrink-0',
+          'ml-auto h-4 w-4 shrink-0',
           connected ? 'text-[#384052]' : 'text-[#777b60]',
         )}
         strokeWidth={2.4}
