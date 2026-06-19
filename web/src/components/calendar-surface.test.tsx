@@ -231,7 +231,121 @@ describe('Scroll-driven fetching', () => {
       expect(screen.getByRole('status')).not.toHaveTextContent('Loading events…')
     })
   })
+
+  it('clears the loading status when a scroll fetch fails and retries on the next scroll', async () => {
+    const user = userEvent.setup()
+    const { mockFetch, rejectSlab } =
+      stubSuccessfulGoogleConnectionWithDeferredEvents()
+    const today = toLocalDate(new Date(2026, 5, 19))
+
+    render(<CalendarSurface />)
+
+    await user.click(screen.getByRole('button', { name: /connect google/i }))
+    await screen.findByText('Ada Lovelace')
+    await vi.waitFor(() => {
+      expect(
+        mockFetch.mock.calls.some((call) =>
+          String(call[0]).includes('calendars/primary/events'),
+        ),
+      ).toBe(true)
+    })
+    mockFetch.mockClear()
+
+    const { surface, scrollIntoFutureTrigger } =
+      mountScrollSurface(today)
+
+    scrollIntoFutureTrigger()
+    expect(await screen.findByText('Loading events…')).toBeInTheDocument()
+
+    // The failed slab must not extend the Fetched Window, so the loading
+    // status clears and the next scroll into the same zone retries.
+    rejectSlab(new Error('Network error'))
+    await vi.waitFor(() => {
+      expect(screen.getByRole('status')).not.toHaveTextContent('Loading events…')
+    })
+
+    mockFetch.mockClear()
+    scrollIntoFutureTrigger()
+
+    await vi.waitFor(() => {
+      const slabCalls = mockFetch.mock.calls.filter((call) =>
+        String(call[0]).includes('calendars/primary/events'),
+      )
+      expect(slabCalls.length).toBeGreaterThan(0)
+    })
+    // surface is referenced to keep the helper bound to the right element.
+    expect(surface).toBeInTheDocument()
+  })
 })
+
+describe('Account lifecycle and error recovery', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    vi.setSystemTime(new Date(2026, 5, 19))
+  })
+
+  it('clears events on disconnect and performs a fresh initial fetch on reconnect', async () => {
+    const user = userEvent.setup()
+    const mockFetch = stubSuccessfulGoogleConnectionWithEvents()
+    const today = toLocalDate(new Date(2026, 5, 19))
+
+    render(<CalendarSurface />)
+
+    await user.click(screen.getByRole('button', { name: /connect google/i }))
+    await screen.findByText('Ada Lovelace')
+    await vi.waitFor(() => {
+      expect(eventsFetchCount(mockFetch)).toBeGreaterThanOrEqual(1)
+    })
+
+    // Disconnecting clears the event array and resets the Fetched Window: a
+    // subsequent scroll must not fire any slab fetch.
+    await user.click(
+      screen.getByRole('button', {
+        name: /disconnect google account for ada lovelace/i,
+      }),
+    )
+    mockFetch.mockClear()
+
+    const { scrollIntoFutureTrigger } = mountScrollSurface(today)
+    scrollIntoFutureTrigger()
+    await Promise.resolve()
+    expect(eventsFetchCount(mockFetch)).toBe(0)
+
+    // Reconnecting performs a fresh ±6-month initial fetch.
+    await user.click(screen.getByRole('button', { name: /connect google/i }))
+    await vi.waitFor(() => {
+      expect(eventsFetchCount(mockFetch)).toBeGreaterThanOrEqual(1)
+    })
+  })
+})
+
+function eventsFetchCount(mockFetch: { mock: { calls: unknown[][] } }) {
+  return mockFetch.mock.calls.filter((call) =>
+    String(call[0]).includes('calendars/primary/events'),
+  ).length
+}
+
+function mountScrollSurface(today: Date) {
+  const surface = document.querySelector(
+    '[aria-label="Calendar Surface"]',
+  ) as HTMLElement
+  Object.defineProperty(surface, 'clientHeight', {
+    configurable: true,
+    value: 128,
+  })
+  const range = getCalendarRange(today)
+
+  const scrollIntoFutureTrigger = () => {
+    const triggerWeekStart = startOfMondayWeek(addMonths(today, 5))
+    const triggerWeekIndex =
+      differenceInCalendarDays(triggerWeekStart, range.start) / 7
+    fireEvent.scroll(surface, { target: { scrollTop: triggerWeekIndex * 128 } })
+  }
+
+  return { surface, scrollIntoFutureTrigger }
+}
 
 function stubSuccessfulGoogleConnection() {
   const requestAccessToken = vi.fn()
@@ -371,7 +485,10 @@ function stubSuccessfulGoogleConnectionWithDeferredEvents() {
     },
   })
 
-  const pendingSlabResolvers: Array<(items: unknown[]) => void> = []
+  const pendingSlabResolvers: Array<{
+    resolve: (items: unknown[]) => void
+    reject: (error: Error) => void
+  }> = []
 
   const mockFetch = vi.fn((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString()
@@ -406,10 +523,11 @@ function stubSuccessfulGoogleConnectionWithDeferredEvents() {
         !!timeMin && new Date(timeMin) >= addMonths(new Date(2026, 5, 19), 5)
 
       if (isFutureSlab) {
-        // Defer resolution so the loading status is observable.
-        return new Promise((resolve) => {
-          pendingSlabResolvers.push((items) => {
-            resolve({ ok: true, json: async () => ({ items }) })
+        // Defer resolution so the loading status and rollback are observable.
+        return new Promise((resolve, reject) => {
+          pendingSlabResolvers.push({
+            resolve: (items) => resolve({ ok: true, json: async () => ({ items }) }),
+            reject,
           })
         })
       }
@@ -425,11 +543,15 @@ function stubSuccessfulGoogleConnectionWithDeferredEvents() {
 
   vi.stubGlobal('fetch', mockFetch)
 
+  const drainPending = () => pendingSlabResolvers.splice(0)
+
   return {
     mockFetch,
     resolveSlab: (items: unknown[]) => {
-      const resolvers = pendingSlabResolvers.splice(0)
-      resolvers.forEach((resolve) => resolve(items))
+      drainPending().forEach(({ resolve }) => resolve(items))
+    },
+    rejectSlab: (error: Error) => {
+      drainPending().forEach(({ reject }) => reject(error))
     },
   }
 }
