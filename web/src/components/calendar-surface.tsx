@@ -22,6 +22,8 @@ import {
 import { fetchPrimaryCalendarEvents, type CalendarEvent } from '@/lib/google-calendar-events'
 import {
   computeScrollTrigger,
+  createFetchedWindow,
+  extendFetchedWindow,
   FETCHED_WINDOW_SLAB_MONTHS,
   type FetchedWindow,
 } from '@/lib/fetched-window'
@@ -73,7 +75,7 @@ export function CalendarSurface() {
       end: latest,
     }
 
-    fetchedWindowRef.current = { earliest, latest }
+    fetchedWindowRef.current = createFetchedWindow(earliest, latest)
 
     fetchPrimaryCalendarEvents(accessToken, fetchRange)
       .then(setEvents)
@@ -149,9 +151,13 @@ export function CalendarSurface() {
   }
 
   function fetchNextFutureSlab(accessToken: string, fetchedWindow: FetchedWindow) {
-    const desiredLatest = addMonths(fetchedWindow.latest, FETCHED_WINDOW_SLAB_MONTHS)
+    const extended = extendFetchedWindow(
+      fetchedWindow,
+      'future',
+      FETCHED_WINDOW_SLAB_MONTHS,
+    )
     const newLatest =
-      desiredLatest.getTime() > range.end.getTime() ? range.end : desiredLatest
+      extended.latest.getTime() > range.end.getTime() ? range.end : extended.latest
 
     if (newLatest.getTime() <= fetchedWindow.latest.getTime()) {
       return

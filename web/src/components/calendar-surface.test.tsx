@@ -120,7 +120,9 @@ describe('Scroll-driven fetching', () => {
 
     // Scroll so the visible range reaches the future trigger zone (~1 month
     // before the +6-month edge of the Fetched Window).
-    const surface = document.querySelector('[aria-label="Calendar Surface"]') as HTMLElement
+    const surface = document.querySelector(
+      '[aria-label="Calendar Surface"]',
+    ) as HTMLElement
     Object.defineProperty(surface, 'clientHeight', {
       configurable: true,
       value: 128,
@@ -131,6 +133,10 @@ describe('Scroll-driven fetching', () => {
       differenceInCalendarDays(triggerWeekStart, range.start) / 7
     fireEvent.scroll(surface, { target: { scrollTop: triggerWeekIndex * 128 } })
 
+    // A future slab fetch was fired with a range starting near the +6-month edge.
+    // (Merged events then render via the existing overlay path, exercised by the
+    // layout-engine tests; driving the virtualizer to a specific week is not
+    // feasible in jsdom because it has no viewport size.)
     await vi.waitFor(() => {
       const slabCalls = mockFetch.mock.calls.filter((call) => {
         if (!String(call[0]).includes('calendars/primary/events')) return false
@@ -278,7 +284,11 @@ function stubSuccessfulGoogleConnectionWithEvents() {
               id: 'evt-1',
               summary: 'Team Lunch',
               start: { date: new Date().toISOString().split('T')[0] },
-              end: { date: new Date(Date.now() + 86400000).toISOString().split('T')[0] },
+              end: {
+                date: new Date(Date.now() + 86_400_000)
+                  .toISOString()
+                  .split('T')[0],
+              },
             },
           ],
         }),
