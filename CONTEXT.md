@@ -5,7 +5,7 @@ Planner is a personal planning product whose first slice is a calendar-only surf
 ## Language
 
 **Calendar Surface**:
-A Monday-first, bidirectionally scrollable seven-column calendar grid that presents dates in an Extended Calendar Range for planning without event, task, or reminder content.
+A Monday-first, bidirectionally scrollable seven-column calendar grid that presents dates in an Extended Calendar Range and overlays the user's Calendar Events for planning.
 _Avoid_: Planner app, full planner, schedule manager, infinite calendar
 
 **Calendar Header**:
@@ -56,6 +56,22 @@ _Avoid_: Current day, system date, UTC date
 A Calendar Header action that returns the Calendar Surface to Today's Week Row.
 _Avoid_: Back to today, scroll home, month click
 
+**Calendar Event**:
+A Google Calendar event fetched from the primary calendar and rendered on the Calendar Surface while the Google Account Connection is active.
+_Avoid_: Event item, schedule entry, appointment
+
+**Calendar Event Bar**:
+A visual representation of a multiday or all-day Calendar Event rendered as a solid colored bar spanning one or more Date Cells.
+_Avoid_: Event strip, block, banner
+
+**Calendar Event Row**:
+A visual representation of an intraday Calendar Event rendered inside a single Date Cell with a dot, start time, and title.
+_Avoid_: Event chip, pill, card
+
+**Saved Busy Block**:
+A privacy-preserving placeholder persisted for offline use that retains a Calendar Event's timing and color but not its title.
+_Avoid_: Cached event, local event, offline event
+
 **Extended Calendar Range**:
 The complete Monday-through-Sunday Week Rows from the week containing ten years before Today through the week containing ten years after Today.
 _Avoid_: Infinite range, endless dates, all dates
@@ -73,18 +89,30 @@ _Avoid_: Infinite range, endless dates, all dates
 - A **Calendar Surface** presents the **Extended Calendar Range**.
 - A **Calendar Surface** contains **Week Rows** ordered by date.
 - A **Week Row** contains exactly seven **Date Cells**.
+- A **Calendar Surface** displays **Calendar Events** when the **Google Account Connection** is connected.
+- A **Calendar Surface** displays **Saved Busy Blocks** when the **Google Account Connection** is disconnected.
 - A **Visible Month** is derived from exactly one topmost visible **Week Row** in the **Calendar Surface**.
 - A **Calendar Surface** contains one **Date Cell** for each consecutive date it presents.
 - Each calendar month in the **Calendar Surface** has exactly one **Month Marker**.
 - **Today** belongs to exactly one **Date Cell** in the **Calendar Surface**.
 - A **Today Jump** targets the **Week Row** containing **Today**.
+- A **Calendar Event** is either a **Calendar Event Bar** or a **Calendar Event Row**.
+- A **Calendar Event Bar** spans one or more **Date Cells**.
+- A **Calendar Event Bar** shows its title starting in the leftmost **Date Cell** and continuing across subsequent **Date Cells**.
+- A **Calendar Event Bar** belongs to a vertical lane within each **Date Cell** it spans; bars are globally ordered by start date then start time then duration (longer first), and rows by start time.
+- A **Calendar Event Row** belongs to exactly one **Date Cell**.
 
 ## Example dialogue
 
 > **Dev:** "Should the first version of the planner include tasks or events?"
 > **Domain expert:** "No — the first version is only the **Calendar Surface**, anchored on **Today** in the viewer's local timezone."
+>
+> **Dev:** "What happens to Calendar Events when the user disconnects their Google Account Connection?"
+> **Domain expert:** "The Calendar Surface falls back to **Saved Busy Blocks** — placeholders that keep the shape of the calendar without exposing the original event titles."
 
 ## Flagged ambiguities
 
 - "planner app" could mean a full planning product with events, tasks, and reminders; resolved: this first slice is the **Calendar Surface** only.
 - "infinite scroll" could mean literally unbounded dates; resolved: the Calendar Surface uses an **Extended Calendar Range**.
+- "event-free" was the original definition of the Calendar Surface; resolved: the Calendar Surface now displays **Calendar Events** while connected and **Saved Busy Blocks** while disconnected.
+- "all-day" vs "multiday" in Google Calendar: an all-day event spanning multiple days is visually treated the same as a multiday timed event and rendered as a single **Calendar Event Bar** spanning all affected **Date Cells**.

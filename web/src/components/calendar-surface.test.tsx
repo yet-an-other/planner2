@@ -40,6 +40,24 @@ describe('Google Account Connection', () => {
     )
   })
 
+  it('fetches calendar events after connecting', async () => {
+    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    const user = userEvent.setup()
+    const mockFetch = stubSuccessfulGoogleConnectionWithEvents()
+
+    render(<CalendarSurface />)
+
+    await user.click(screen.getByRole('button', { name: /connect google/i }))
+    await screen.findByText('Ada Lovelace')
+
+    // Verify calendar API was called
+    const calendarCalls = mockFetch.mock.calls.filter((call) => {
+      const url = String(call[0])
+      return url.includes('calendars/primary/events')
+    })
+    expect(calendarCalls.length).toBeGreaterThan(0)
+  })
+
   it('disconnects a Google Account by revoking the current access token', async () => {
     vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
     const user = userEvent.setup()
@@ -98,4 +116,81 @@ function stubSuccessfulGoogleConnection() {
   )
 
   return { revoke }
+}
+
+function stubSuccessfulGoogleConnectionWithEvents() {
+  const requestAccessToken = vi.fn()
+  const revoke = vi.fn((_accessToken: string, done: () => void) => {
+    done()
+  })
+  const initTokenClient = vi.fn(({ callback }) => {
+    requestAccessToken.mockImplementation(() => {
+      callback({ access_token: 'access-token' })
+    })
+
+    return { requestAccessToken }
+  })
+
+  vi.stubGlobal('google', {
+    accounts: {
+      oauth2: {
+        initTokenClient,
+        revoke,
+      },
+    },
+  })
+
+  const mockFetch = vi.fn((input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString()
+
+    if (url.includes('oauth2/v3/userinfo')) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          name: 'Ada Lovelace',
+          picture: 'https://example.com/ada.png',
+        }),
+      })
+    }
+
+    if (url.includes('calendarList/primary')) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          backgroundColor: '#2952a3',
+        }),
+      })
+    }
+
+    if (url.includes('calendar/v3/colors')) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          event: {},
+        }),
+      })
+    }
+
+    if (url.includes('calendars/primary/events')) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              id: 'evt-1',
+              summary: 'Team Lunch',
+              start: { date: new Date().toISOString().split('T')[0] },
+              end: { date: new Date(Date.now() + 86400000).toISOString().split('T')[0] },
+            },
+          ],
+        }),
+      })
+    }
+
+    return Promise.resolve({ ok: false })
+  })
+
+  vi.stubGlobal('fetch', mockFetch)
+
+  return mockFetch
 }

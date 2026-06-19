@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { LogIn, LogOut, UserRound } from 'lucide-react'
 import {
@@ -18,6 +18,9 @@ import {
   revokeGoogleAccessToken,
   type GoogleAccountProfile,
 } from '@/lib/google-account-connection'
+import { fetchPrimaryCalendarEvents, type CalendarEvent } from '@/lib/google-calendar-events'
+import { layoutWeekEvents } from '@/lib/event-layout'
+import { getContrastTextColor } from '@/lib/text-contrast'
 import { PRODUCT_VERSION } from '@/lib/product-version'
 import { cn } from '@/lib/utils'
 
@@ -42,6 +45,29 @@ export function CalendarSurface() {
   const [googleAccountConnection, setGoogleAccountConnection] =
     useState<GoogleAccountConnectionState>({ status: 'disconnected' })
   const [headerStatus, setHeaderStatus] = useState<HeaderStatus | null>(null)
+  const [events, setEvents] = useState<CalendarEvent[]>([])
+
+  useEffect(() => {
+    if (googleAccountConnection.status !== 'connected') {
+      setEvents([])
+      return
+    }
+
+    const accessToken = googleAccountConnection.accessToken
+    const fetchRange = {
+      start: addDays(today, -180),
+      end: addDays(today, 180),
+    }
+
+    fetchPrimaryCalendarEvents(accessToken, fetchRange)
+      .then(setEvents)
+      .catch(() => {
+        setHeaderStatus({
+          message: 'Calendar events could not be loaded',
+          tone: 'error',
+        })
+      })
+  }, [googleAccountConnection, today])
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? ''
 
   // TanStack Virtual intentionally returns non-memoizable helpers; keep the virtualizer local to this component.
@@ -242,6 +268,13 @@ export function CalendarSurface() {
         >
           {weekVirtualizer.getVirtualItems().map((virtualWeek) => {
             const weekStart = addDays(range.start, virtualWeek.index * 7)
+            const weekLayout = layoutWeekEvents(events, weekStart)
+            const maxLaneIndex =
+              weekLayout.bars.length > 0
+                ? Math.max(...weekLayout.bars.map((b) => b.laneIndex))
+                : -1
+            const rowContainerMarginTop =
+              maxLaneIndex >= 0 ? 26 + maxLaneIndex * 22 : undefined
 
             return (
               <div
@@ -252,11 +285,43 @@ export function CalendarSurface() {
                   transform: `translateY(${virtualWeek.start}px)`,
                 }}
               >
+                {/* Event bars layer */}
+                <div className="pointer-events-none absolute inset-x-0 top-10 z-10 h-[calc(100%-2.5rem)]">
+                  {weekLayout.bars.map((bar) => {
+                    const left = (bar.startDayIndex / 7) * 100
+                    const width = ((bar.endDayIndex - bar.startDayIndex + 1) / 7) * 100
+                    const top = bar.laneIndex * 22 + 4
+                    const textColor = getContrastTextColor(bar.event.color)
+
+                    return (
+                      <div
+                        key={bar.event.id}
+                        className="absolute h-[18px] overflow-hidden truncate px-1 text-[10px] font-medium leading-[18px]"
+                        style={{
+                          left: `${left}%`,
+                          width: `${width}%`,
+                          top: `${top}px`,
+                          backgroundColor: bar.event.color,
+                          color: textColor,
+                          borderTopLeftRadius: bar.isStartTruncated ? 0 : 4,
+                          borderBottomLeftRadius: bar.isStartTruncated ? 0 : 4,
+                          borderTopRightRadius: bar.isEndTruncated ? 0 : 4,
+                          borderBottomRightRadius: bar.isEndTruncated ? 0 : 4,
+                        }}
+                        title={bar.event.title}
+                      >
+                        {bar.event.title}
+                      </div>
+                    )
+                  })}
+                </div>
+
                 {WEEKDAY_LABELS.map((weekday, dayIndex) => {
                   const date = addDays(weekStart, dayIndex)
                   const todayCell = isSameCalendarDate(date, today)
                   const weekendCell = isWeekend(date)
                   const monthMarker = date.getDate() === 1
+                  const cellLayout = weekLayout.cells[dayIndex]
 
                   return (
                     <div
@@ -291,6 +356,20 @@ export function CalendarSurface() {
                         >
                           {date.getDate()}
                         </time>
+                      </div>
+
+                      {/* Event rows and overflow */}
+                      <div
+                        className="space-y-[2px]"
+                        style={
+                          rowContainerMarginTop
+                            ? { marginTop: `${rowContainerMarginTop}px` }
+                            : undefined
+                        }
+                      >
+                        {cellLayout.items.map((item, i) => (
+                          <CellItemRenderer key={i} item={item} />
+                        ))}
                       </div>
                     </div>
                   )
@@ -362,6 +441,38 @@ function AccountControl({
       />
     </button>
   )
+}
+
+type CellItemRendererProps = {
+  item: import('@/lib/event-layout').CellItem
+  weekLayout: import('@/lib/event-layout').WeekLayout
+}
+
+function CellItemRenderer({ item }: Omit<CellItemRendererProps, 'weekLayout'>) {
+  if (item.kind === 'bar') {
+    // Bars are rendered once at the week level; skip here to avoid duplication
+    return null
+  }
+
+  if (item.kind === 'row') {
+    return (
+      <div className="flex items-center gap-1 truncate text-[10px] leading-[18px] text-foreground">
+        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: item.event.color }} />
+        <span className="tabular-nums">{item.event.startTime}</span>
+        <span className="truncate">{item.event.title}</span>
+      </div>
+    )
+  }
+
+  if (item.kind === 'overflow') {
+    return (
+      <div className="text-[10px] leading-[18px] text-muted-foreground">
+        +{item.count} events
+      </div>
+    )
+  }
+
+  return null
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
