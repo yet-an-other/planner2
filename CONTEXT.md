@@ -4,6 +4,10 @@ Planner is a personal planning product whose first slice is a calendar-only surf
 
 ## Language
 
+**Fetched Window**:
+The continuous date range from the earliest to the latest date that has been fetched from Google Calendar. Represented as two boundary dates (`earliestFetched` and `latestFetched`). The Fetched Window is extended one slab at a time when scrolling past either edge.
+_Avoid_: fetched cache, loaded range, data window
+
 **Calendar Surface**:
 A Monday-first, bidirectionally scrollable seven-column calendar grid that presents dates in an Extended Calendar Range and overlays the user's Calendar Events for planning.
 _Avoid_: Planner app, full planner, schedule manager, infinite calendar
@@ -101,6 +105,7 @@ _Avoid_: Infinite range, endless dates, all dates
 - A **Calendar Event Bar** shows its title starting in the leftmost **Date Cell** and continuing across subsequent **Date Cells**.
 - A **Calendar Event Bar** belongs to a vertical lane within each **Date Cell** it spans; bars are globally ordered by start date then start time then duration (longer first), and rows by start time.
 - A **Calendar Event Row** belongs to exactly one **Date Cell**.
+- A **Fetched Window** belongs to a connected **Google Account Connection** and is expanded by scroll-driven slab fetches.
 
 ## Example dialogue
 
