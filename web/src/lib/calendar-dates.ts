@@ -40,6 +40,15 @@ export function addYears(date: Date, amount: number) {
   return new Date(year, month, day)
 }
 
+export function addMonths(date: Date, amount: number) {
+  const totalMonths = date.getFullYear() * 12 + date.getMonth() + amount
+  const year = Math.floor(totalMonths / 12)
+  const month = ((totalMonths % 12) + 12) % 12
+  const day = Math.min(date.getDate(), daysInMonth(year, month))
+
+  return new Date(year, month, day)
+}
+
 export function startOfMondayWeek(date: Date) {
   const localDate = toLocalDate(date)
   const daysSinceMonday = (localDate.getDay() + 6) % 7
