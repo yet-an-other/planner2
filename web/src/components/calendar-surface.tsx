@@ -20,6 +20,7 @@ import {
   type GoogleAccountProfile,
 } from '@/lib/google-account-connection'
 import { fetchPrimaryCalendarEvents, type CalendarEvent } from '@/lib/google-calendar-events'
+import { mergeCalendarEvents } from '@/lib/merge-calendar-events'
 import {
   computeScrollTrigger,
   createFetchedWindow,
@@ -146,6 +147,8 @@ export function CalendarSurface() {
       const trigger = computeScrollTrigger(visibleRange, fetchedWindow)
       if (trigger === 'fetch-future') {
         fetchNextFutureSlab(googleAccountConnection.accessToken, fetchedWindow)
+      } else if (trigger === 'fetch-past') {
+        fetchNextPastSlab(googleAccountConnection.accessToken, fetchedWindow)
       }
     }
   }
@@ -171,12 +174,51 @@ export function CalendarSurface() {
 
     fetchPrimaryCalendarEvents(accessToken, slabRange)
       .then((slabEvents) => {
-        setEvents((previous) => [...previous, ...slabEvents])
+        setEvents((previous) => mergeCalendarEvents(previous, slabEvents))
       })
       .catch(() => {
         const current = fetchedWindowRef.current
         if (current && current.latest.getTime() === newLatest.getTime()) {
           fetchedWindowRef.current = { ...current, latest: fetchedWindow.latest }
+        }
+      })
+      .finally(() => {
+        setPendingScrollFetchCount((count) => count - 1)
+      })
+  }
+
+  function fetchNextPastSlab(accessToken: string, fetchedWindow: FetchedWindow) {
+    const extended = extendFetchedWindow(
+      fetchedWindow,
+      'past',
+      FETCHED_WINDOW_SLAB_MONTHS,
+    )
+    const newEarliest =
+      extended.earliest.getTime() < range.start.getTime()
+        ? range.start
+        : extended.earliest
+
+    if (newEarliest.getTime() >= fetchedWindow.earliest.getTime()) {
+      return
+    }
+
+    const slabRange = { start: newEarliest, end: fetchedWindow.earliest }
+    // Optimistically extend the Fetched Window so repeated scroll events in the
+    // same trigger zone do not fire the same slab twice. Rolled back on failure.
+    fetchedWindowRef.current = { ...fetchedWindow, earliest: newEarliest }
+    setPendingScrollFetchCount((count) => count + 1)
+
+    fetchPrimaryCalendarEvents(accessToken, slabRange)
+      .then((slabEvents) => {
+        setEvents((previous) => mergeCalendarEvents(previous, slabEvents))
+      })
+      .catch(() => {
+        const current = fetchedWindowRef.current
+        if (current && current.earliest.getTime() === newEarliest.getTime()) {
+          fetchedWindowRef.current = {
+            ...current,
+            earliest: fetchedWindow.earliest,
+          }
         }
       })
       .finally(() => {

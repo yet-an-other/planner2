@@ -148,6 +148,52 @@ describe('Scroll-driven fetching', () => {
     })
   })
 
+  it('fetches a past 3-month slab when scrolling into the past trigger zone', async () => {
+    const user = userEvent.setup()
+    const mockFetch = stubSuccessfulGoogleConnectionWithEvents()
+    const today = toLocalDate(new Date(2026, 5, 19))
+
+    render(<CalendarSurface />)
+
+    await user.click(screen.getByRole('button', { name: /connect google/i }))
+    await screen.findByText('Ada Lovelace')
+
+    await vi.waitFor(() => {
+      expect(
+        mockFetch.mock.calls.some((call) =>
+          String(call[0]).includes('calendars/primary/events'),
+        ),
+      ).toBe(true)
+    })
+    mockFetch.mockClear()
+
+    // Scroll so the visible range reaches the past trigger zone (~1 month
+    // after the -6-month edge of the Fetched Window).
+    const surface = document.querySelector(
+      '[aria-label="Calendar Surface"]',
+    ) as HTMLElement
+    Object.defineProperty(surface, 'clientHeight', {
+      configurable: true,
+      value: 128,
+    })
+    const range = getCalendarRange(today)
+    const triggerWeekStart = startOfMondayWeek(addMonths(today, -5))
+    const triggerWeekIndex =
+      differenceInCalendarDays(triggerWeekStart, range.start) / 7
+    fireEvent.scroll(surface, { target: { scrollTop: triggerWeekIndex * 128 } })
+
+    // A past slab fetch was fired with a range ending near the -6-month edge.
+    await vi.waitFor(() => {
+      const slabCalls = mockFetch.mock.calls.filter((call) => {
+        if (!String(call[0]).includes('calendars/primary/events')) return false
+        const timeMax = new URL(String(call[0])).searchParams.get('timeMax')
+        if (!timeMax) return false
+        return new Date(timeMax) <= addMonths(today, -5)
+      })
+      expect(slabCalls.length).toBeGreaterThan(0)
+    })
+  })
+
   it('shows a loading status while a scroll-driven fetch is in flight', async () => {
     const user = userEvent.setup()
     const { mockFetch, resolveSlab } =
