@@ -91,6 +91,63 @@ describe('computeScrollTrigger', () => {
 
     expect(computeScrollTrigger(visibleRange, tinyWindow)).toBe('fetch-future')
   })
+
+  it('returns no-op at the future edge when the window has reached the calendar range end', () => {
+    const calendarRange = {
+      start: new Date(2025, 0, 19),
+      end: new Date(2026, 11, 19),
+    }
+    const windowAtEdge = createFetchedWindow(
+      new Date(2025, 0, 19),
+      new Date(2026, 11, 19), // latest == calendar range end
+    )
+    const visibleRange = {
+      start: new Date(2026, 11, 1),
+      end: new Date(2026, 11, 19), // within the future trigger zone
+    }
+
+    expect(
+      computeScrollTrigger(visibleRange, windowAtEdge, undefined, calendarRange),
+    ).toBe('no-op')
+  })
+
+  it('returns no-op at the past edge when the window has reached the calendar range start', () => {
+    const calendarRange = {
+      start: new Date(2025, 0, 19),
+      end: new Date(2026, 11, 19),
+    }
+    const windowAtEdge = createFetchedWindow(
+      new Date(2025, 0, 19), // earliest == calendar range start
+      new Date(2026, 11, 19),
+    )
+    const visibleRange = {
+      start: new Date(2025, 0, 19), // within the past trigger zone
+      end: new Date(2025, 0, 25),
+    }
+
+    expect(
+      computeScrollTrigger(visibleRange, windowAtEdge, undefined, calendarRange),
+    ).toBe('no-op')
+  })
+
+  it('still fetches when the window has not reached the calendar range edge', () => {
+    const calendarRange = {
+      start: new Date(2025, 0, 19),
+      end: new Date(2026, 11, 19),
+    }
+    const windowWithRoom = createFetchedWindow(
+      new Date(2025, 0, 19),
+      new Date(2026, 10, 19), // latest well before calendar range end
+    )
+    const visibleRange = {
+      start: new Date(2026, 10, 1),
+      end: new Date(2026, 10, 19), // within the future trigger zone
+    }
+
+    expect(
+      computeScrollTrigger(visibleRange, windowWithRoom, undefined, calendarRange),
+    ).toBe('fetch-future')
+  })
 })
 
 describe('extendFetchedWindow', () => {
@@ -126,5 +183,64 @@ describe('extendFetchedWindow', () => {
     const extended = extendFetchedWindow(window, 'future', 1)
 
     expect(extended.latest).toEqual(new Date(2026, 1, 28)) // Jan 31 + 1 month = Feb 28
+  })
+
+  describe('with a calendar range', () => {
+    const calendarRange = {
+      start: new Date(2025, 11, 1), // Dec 1 2025
+      end: new Date(2026, 11, 31), // Dec 31 2026
+    }
+
+    it('clamps a future extension to the calendar range end', () => {
+      // latest Nov 19 2026 + 3 months would be Feb 19 2027, overshooting the end.
+      const window = createFetchedWindow(
+        new Date(2026, 0, 19),
+        new Date(2026, 10, 19),
+      )
+
+      const extended = extendFetchedWindow(
+        window,
+        'future',
+        3,
+        calendarRange,
+      )
+
+      expect(extended.latest).toEqual(calendarRange.end)
+      expect(extended.earliest).toEqual(window.earliest)
+    })
+
+    it('clamps a past extension to the calendar range start', () => {
+      // earliest Feb 19 2026 - 3 months would be Nov 19 2025, overshooting the start.
+      const window = createFetchedWindow(
+        new Date(2026, 1, 19),
+        new Date(2026, 11, 19),
+      )
+
+      const extended = extendFetchedWindow(
+        window,
+        'past',
+        3,
+        calendarRange,
+      )
+
+      expect(extended.earliest).toEqual(calendarRange.start)
+      expect(extended.latest).toEqual(window.latest)
+    })
+
+    it('does not clamp when the extension stays within the range', () => {
+      const window = createFetchedWindow(
+        new Date(2026, 2, 1),
+        new Date(2026, 4, 1),
+      )
+
+      const extended = extendFetchedWindow(
+        window,
+        'future',
+        1,
+        calendarRange,
+      )
+
+      expect(extended.latest).toEqual(new Date(2026, 5, 1)) // Jun 1, within range
+    })
   })
 })

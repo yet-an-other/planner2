@@ -144,7 +144,10 @@ export function CalendarSurface() {
         start: addDays(range.start, nextTopWeekIndex * 7),
         end: addDays(range.start, bottomWeekIndex * 7 + 6),
       }
-      const trigger = computeScrollTrigger(visibleRange, fetchedWindow)
+      const trigger = computeScrollTrigger(visibleRange, fetchedWindow, undefined, {
+        start: range.start,
+        end: range.end,
+      })
       if (trigger === 'fetch-future') {
         fetchNextFutureSlab(googleAccountConnection.accessToken, fetchedWindow)
       } else if (trigger === 'fetch-past') {
@@ -158,18 +161,19 @@ export function CalendarSurface() {
       fetchedWindow,
       'future',
       FETCHED_WINDOW_SLAB_MONTHS,
+      { start: range.start, end: range.end },
     )
-    const newLatest =
-      extended.latest.getTime() > range.end.getTime() ? range.end : extended.latest
 
-    if (newLatest.getTime() <= fetchedWindow.latest.getTime()) {
+    // The module clamps the new edge to the Extended Calendar Range, so a no-op
+    // move means the window has already reached the far edge.
+    if (extended.latest.getTime() <= fetchedWindow.latest.getTime()) {
       return
     }
 
-    const slabRange = { start: fetchedWindow.latest, end: newLatest }
+    const slabRange = { start: fetchedWindow.latest, end: extended.latest }
     // Optimistically extend the Fetched Window so repeated scroll events in the
     // same trigger zone do not fire the same slab twice. Rolled back on failure.
-    fetchedWindowRef.current = { ...fetchedWindow, latest: newLatest }
+    fetchedWindowRef.current = extended
     setPendingScrollFetchCount((count) => count + 1)
 
     fetchPrimaryCalendarEvents(accessToken, slabRange)
@@ -178,7 +182,7 @@ export function CalendarSurface() {
       })
       .catch(() => {
         const current = fetchedWindowRef.current
-        if (current && current.latest.getTime() === newLatest.getTime()) {
+        if (current && current.latest.getTime() === extended.latest.getTime()) {
           fetchedWindowRef.current = { ...current, latest: fetchedWindow.latest }
         }
       })
@@ -192,20 +196,19 @@ export function CalendarSurface() {
       fetchedWindow,
       'past',
       FETCHED_WINDOW_SLAB_MONTHS,
+      { start: range.start, end: range.end },
     )
-    const newEarliest =
-      extended.earliest.getTime() < range.start.getTime()
-        ? range.start
-        : extended.earliest
 
-    if (newEarliest.getTime() >= fetchedWindow.earliest.getTime()) {
+    // The module clamps the new edge to the Extended Calendar Range, so a no-op
+    // move means the window has already reached the near edge.
+    if (extended.earliest.getTime() >= fetchedWindow.earliest.getTime()) {
       return
     }
 
-    const slabRange = { start: newEarliest, end: fetchedWindow.earliest }
+    const slabRange = { start: extended.earliest, end: fetchedWindow.earliest }
     // Optimistically extend the Fetched Window so repeated scroll events in the
     // same trigger zone do not fire the same slab twice. Rolled back on failure.
-    fetchedWindowRef.current = { ...fetchedWindow, earliest: newEarliest }
+    fetchedWindowRef.current = extended
     setPendingScrollFetchCount((count) => count + 1)
 
     fetchPrimaryCalendarEvents(accessToken, slabRange)
@@ -214,7 +217,7 @@ export function CalendarSurface() {
       })
       .catch(() => {
         const current = fetchedWindowRef.current
-        if (current && current.earliest.getTime() === newEarliest.getTime()) {
+        if (current && current.earliest.getTime() === extended.earliest.getTime()) {
           fetchedWindowRef.current = {
             ...current,
             earliest: fetchedWindow.earliest,
