@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { CalendarEvent } from './google-calendar-events'
-import { mergeCalendarEvents } from './merge-calendar-events'
+import type { CalendarEvent } from '@/lib/google-calendar-events'
+import { mergeCalendarEvents } from '@/lib/merge-calendar-events'
 
 const row = (id: string, title: string): CalendarEvent => ({
   kind: 'row',

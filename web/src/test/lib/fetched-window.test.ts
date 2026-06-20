@@ -3,7 +3,7 @@ import {
   computeScrollTrigger,
   createFetchedWindow,
   extendFetchedWindow,
-} from './fetched-window'
+} from '@/lib/fetched-window'
 
 describe('computeScrollTrigger', () => {
   const fetchedWindow = createFetchedWindow(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getContrastTextColor } from './text-contrast'
+import { getContrastTextColor } from '@/lib/text-contrast'
 
 describe('getContrastTextColor', () => {
   it('returns white for dark colors', () => {

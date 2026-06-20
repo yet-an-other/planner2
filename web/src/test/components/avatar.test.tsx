@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { Avatar } from './avatar'
+import { Avatar } from '@/components/avatar'
 
 describe('Avatar', () => {
   it('renders the profile image with the picture url and accessible alt text', () => {

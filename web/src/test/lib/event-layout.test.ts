@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { CalendarEventBar, CalendarEventRow } from './google-calendar-events'
-import { layoutWeekEvents } from './event-layout'
+import type { CalendarEventBar, CalendarEventRow } from '@/lib/google-calendar-events'
+import { layoutWeekEvents } from '@/lib/event-layout'
 
 function mondayOf(dateStr: string) {
   const date = new Date(dateStr)

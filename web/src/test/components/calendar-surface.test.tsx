@@ -8,7 +8,7 @@ import {
   startOfMondayWeek,
   toLocalDate,
 } from '@/lib/calendar-dates'
-import { CalendarSurface } from './calendar-surface'
+import { CalendarSurface } from '@/components/calendar-surface'
 
 describe('Google Account Connection', () => {
   beforeEach(() => {

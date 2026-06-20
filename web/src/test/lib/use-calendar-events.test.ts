@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { addMonths, toLocalDate } from '@/lib/calendar-dates'
 import type { CalendarEvent } from '@/lib/google-calendar-events'
 import type { GoogleAccountConnectionState } from '@/lib/use-google-account-connection'
-import { useCalendarEvents } from './use-calendar-events'
+import { useCalendarEvents } from '@/lib/use-calendar-events'
 
 const today = toLocalDate(new Date(2026, 5, 19))
 const range = { start: new Date(2016, 5, 19), end: new Date(2036, 5, 19) }
