@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { LogIn, LogOut, UserRound } from 'lucide-react'
 import {
   addDays,
-  addMonths,
   formatFullDate,
   formatShortMonth,
   formatVisibleMonth,
@@ -14,22 +13,8 @@ import {
   toLocalDate,
 } from '@/lib/calendar-dates'
 import { type GoogleAccountProfile } from '@/lib/google-account-connection'
-import { fetchPrimaryCalendarEvents, type CalendarEvent } from '@/lib/google-calendar-events'
-import {
-  mergeCalendarEvents
-} from '@/lib/merge-calendar-events'
-import {
-  computeScrollTrigger,
-  createFetchedWindow,
-  extendFetchedWindow,
-  FETCHED_WINDOW_SLAB_MONTHS,
-  type FetchedWindow,
-  type FetchedWindowDirection,
-} from '@/lib/fetched-window'
-import {
-  useGoogleAccountConnection,
-  type HeaderStatus,
-} from '@/lib/use-google-account-connection'
+import { useGoogleAccountConnection } from '@/lib/use-google-account-connection'
+import { useCalendarEvents } from '@/lib/use-calendar-events'
 import { layoutWeekEvents } from '@/lib/event-layout'
 import { getContrastTextColor } from '@/lib/text-contrast'
 import { PRODUCT_VERSION } from '@/lib/product-version'
@@ -39,50 +24,6 @@ const WEEK_ROW_HEIGHT = 128
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const WEEK_ROW_OVERSCAN = 20
 
-/**
- * Describes one direction of Fetched Window growth as a small set of pure edge
- * operations. Captures everything that differs between past and future slab
- * fetches so the fetch algorithm can be written once, branchlessly.
- */
-type SlabDirection = {
-  direction: FetchedWindowDirection
-  /** The window edge this direction moves (latest for future, earliest for past). */
-  edge: (window: FetchedWindow) => Date
-  /** True when the extended window actually advanced past the original edge. */
-  advanced: (extended: FetchedWindow, original: FetchedWindow) => boolean
-  /** Fetch range spanning from the original edge to the extended edge. */
-  fetchRange: (
-    extended: FetchedWindow,
-    original: FetchedWindow,
-  ) => { start: Date; end: Date }
-  /** Restore this direction's edge after a failed fetch, leaving the other edge. */
-  rollback: (current: FetchedWindow, original: FetchedWindow) => FetchedWindow
-}
-
-const FUTURE_SLAB: SlabDirection = {
-  direction: 'future',
-  edge: (window) => window.latest,
-  advanced: (extended, original) =>
-    extended.latest.getTime() > original.latest.getTime(),
-  fetchRange: (extended, original) => ({
-    start: original.latest,
-    end: extended.latest,
-  }),
-  rollback: (current, original) => ({ ...current, latest: original.latest }),
-}
-
-const PAST_SLAB: SlabDirection = {
-  direction: 'past',
-  edge: (window) => window.earliest,
-  advanced: (extended, original) =>
-    extended.earliest.getTime() < original.earliest.getTime(),
-  fetchRange: (extended, original) => ({
-    start: extended.earliest,
-    end: original.earliest,
-  }),
-  rollback: (current, original) => ({ ...current, earliest: original.earliest }),
-}
-
 export function CalendarSurface() {
   const scrollParentRef = useRef<HTMLDivElement>(null)
   const today = useMemo(() => toLocalDate(new Date()), [])
@@ -90,45 +31,15 @@ export function CalendarSurface() {
   const [topWeekIndex, setTopWeekIndex] = useState(range.todayWeekIndex)
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? ''
   const googleAccountConnection = useGoogleAccountConnection(googleClientId)
-  // Events-related status only (load failure). Connection statuses come from
-  // the hook; both merge into the Header Status area below.
-  const [eventsStatus, setEventsStatus] = useState<HeaderStatus | null>(null)
-  const [events, setEvents] = useState<CalendarEvent[]>([])
-  // The Fetched Window is the source of truth for scroll-trigger decisions. It is
-  // stored in a ref rather than state because it is not rendered directly and the
-  // scroll handler must always read the most recent edges synchronously.
-  const fetchedWindowRef = useRef<FetchedWindow | null>(null)
-  const [pendingScrollFetchCount, setPendingScrollFetchCount] = useState(0)
-
   const connection = googleAccountConnection.connection
-
-  useEffect(() => {
-    if (connection.status !== 'connected') {
-      setEvents([])
-      setEventsStatus(null)
-      fetchedWindowRef.current = null
-      return
-    }
-
-    const accessToken = connection.accessToken
-    const earliest = addMonths(today, -6)
-    const latest = addMonths(today, 6)
-    const fetchRange = {
-      start: earliest,
-      end: latest,
-    }
-
-    fetchedWindowRef.current = createFetchedWindow(earliest, latest)
-
-    fetchPrimaryCalendarEvents(accessToken, fetchRange)
-      .then(setEvents)
-      .catch(() => {
-        setEventsStatus({
-          message: 'Calendar events could not be loaded',
-          tone: 'error',
-        })
-      })
-  }, [connection, today])
+  // The Fetched Window, scroll-driven slab fetching, and loading/error status
+  // live behind this seam; the render module only computes the visible range
+  // from scroll position and hands it to maybeFetchMore.
+  const { events, status: eventsStatus, maybeFetchMore } = useCalendarEvents({
+    connection,
+    today,
+    range,
+  })
 
   // TanStack Virtual intentionally returns non-memoizable helpers; keep the virtualizer local to this component.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -146,10 +57,9 @@ export function CalendarSurface() {
   )
   const visibleMonth = formatVisibleMonth(visibleWeekStart)
   const googleAccountConnected = connection.status === 'connected'
-  const effectiveHeaderStatus =
-    pendingScrollFetchCount > 0
-      ? ({ message: 'Loading events…', tone: 'info' } as const)
-      : eventsStatus ?? googleAccountConnection.status
+  // Loading (from the events module) takes precedence, then its load error, then
+  // the connection status from the Google Account Connection module.
+  const effectiveHeaderStatus = eventsStatus ?? googleAccountConnection.status
 
   function updateTopWeekIndex() {
     const scrollParent = scrollParentRef.current
@@ -171,69 +81,19 @@ export function CalendarSurface() {
         : nextTopWeekIndex,
     )
 
-    const fetchedWindow = fetchedWindowRef.current
-    if (fetchedWindow && connection.status === 'connected') {
-      const bottomWeekIndex = clamp(
-        Math.floor((scrollTop + scrollParent.clientHeight) / WEEK_ROW_HEIGHT),
-        0,
-        range.weekCount - 1,
-      )
-      const visibleRange = {
-        start: addDays(range.start, nextTopWeekIndex * 7),
-        end: addDays(range.start, bottomWeekIndex * 7 + 6),
-      }
-      const trigger = computeScrollTrigger(visibleRange, fetchedWindow, undefined, {
-        start: range.start,
-        end: range.end,
-      })
-      if (trigger === 'fetch-future') {
-        fetchNextSlab(connection.accessToken, fetchedWindow, FUTURE_SLAB)
-      } else if (trigger === 'fetch-past') {
-        fetchNextSlab(connection.accessToken, fetchedWindow, PAST_SLAB)
-      }
-    }
-  }
-
-  function fetchNextSlab(
-    accessToken: string,
-    fetchedWindow: FetchedWindow,
-    slab: SlabDirection,
-  ) {
-    const extended = extendFetchedWindow(
-      fetchedWindow,
-      slab.direction,
-      FETCHED_WINDOW_SLAB_MONTHS,
-      { start: range.start, end: range.end },
-    )
-
-    // The module clamps the new edge to the Extended Calendar Range, so a no-op
-    // move means the window has already reached that edge.
-    if (!slab.advanced(extended, fetchedWindow)) {
+    if (connection.status !== 'connected') {
       return
     }
 
-    const slabRange = slab.fetchRange(extended, fetchedWindow)
-    // Optimistically extend the Fetched Window so repeated scroll events in the
-    // same trigger zone do not fire the same slab twice. Rolled back on failure.
-    fetchedWindowRef.current = extended
-    setPendingScrollFetchCount((count) => count + 1)
-
-    fetchPrimaryCalendarEvents(accessToken, slabRange)
-      .then((slabEvents) => {
-        setEvents((previous) => mergeCalendarEvents(previous, slabEvents))
-      })
-      .catch(() => {
-        const current = fetchedWindowRef.current
-        if (
-          current &&
-          slab.edge(current).getTime() === slab.edge(extended).getTime()
-        ) {
-          fetchedWindowRef.current = slab.rollback(current, fetchedWindow)
-        }
-      })
-      .finally(() => {
-        setPendingScrollFetchCount((count) => count - 1)
-      })
+    const bottomWeekIndex = clamp(
+      Math.floor((scrollTop + scrollParent.clientHeight) / WEEK_ROW_HEIGHT),
+      0,
+      range.weekCount - 1,
+    )
+    maybeFetchMore({
+      start: addDays(range.start, nextTopWeekIndex * 7),
+      end: addDays(range.start, bottomWeekIndex * 7 + 6),
+    })
   }
 
   function jumpToToday() {
