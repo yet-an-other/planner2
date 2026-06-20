@@ -6,7 +6,9 @@ The Calendar Surface currently shows only dates — no events, tasks, or reminde
 
 ## Solution
 
-Fetch Calendar Events from the user's primary Google Calendar and render them directly on the Calendar Surface. Multiday and all-day events appear as colored Calendar Event Bars spanning the Date Cells they occupy. Intraday events appear as Calendar Event Rows inside individual Date Cells, showing a dot, start time, and title. The Calendar Surface remains a passive read-only planning view.
+Fetch Calendar Events from the user's primary Google Calendar and render them directly on the Calendar Surface. Multiday and all-day events appear as colored Calendar Event Bars spanning the Date Cells they occupy. Intraday events appear as Calendar Event Rows inside individual Date Cells, showing a dot, start time, and title. The Calendar Surface remains a **write-read-only** planning view: events can be viewed (including via the separate Event Detail Popover; see ADR 0002 and PRD #003) but never created, edited, or deleted.
+
+> **Amended by ADR 0002:** The original wording said the surface "remains a passive read-only planning view." That phrasing conflated *write-read-only* (no mutation) with *non-interactive* (no clicks/popups). ADR 0002 lifts the non-interactive ban narrowly to permit a read-only Event Detail Popover summoned from the surface; the write-read-only invariant is retained permanently. See PRD #003.
 
 ## User Stories
 
@@ -26,7 +28,9 @@ Fetch Calendar Events from the user's primary Google Calendar and render them di
 14. As a connected user, I want multiday bars to be ordered by start date, then start time, then duration (longer first), so that the visual stacking is deterministic and predictable.
 15. As a connected user, I want intraday rows to be ordered by start time within their Date Cell, so that the chronological sequence is preserved.
 16. As a user with a dense calendar, I want the 4-item cap to apply to the combined total of bars and rows within each Date Cell, so that the layout stays compact and readable.
-17. As a user, I want the Calendar Surface to remain read-only — no clicks, popups, or interactions on events — so that the surface stays calm and focused on overview.
+17. As a user, I want the Calendar Surface to remain read-only — no creating, editing, or deleting of events — so that the surface stays calm and focused on overview.
+
+   > **Amended by ADR 0002 / superseded in part:** The original story read "no clicks, popups, or interactions on events." That absolute non-interactive stance is reversed: a read-only **Event Detail Popover** may now be summoned from the surface. The write-read-only intent (no create/edit/delete) is retained permanently. See ADR 0002 and PRD #003.
 18. As a user, I want the Calendar Surface height per Week Row to remain fixed at 128px regardless of event density, so that scrolling position and virtual rendering stay stable.
 
 ## Implementation Decisions
@@ -64,7 +68,7 @@ Fetch Calendar Events from the user's primary Google Calendar and render them di
 ## Out of Scope
 
 - Auto-refreshing events on a timer (events do not poll; refresh requires reconnect or scroll)
-- Click interaction, event details popup, or any interactivity on Calendar Events
+- Creating, editing, or deleting events (the Calendar Surface is write-read-only forever — see ADR 0002). A read-only Event Detail Popover, previously listed here as out of scope, is now in scope under PRD #003.
 - Variable Week Row height based on event density (height remains fixed at 128px)
 - Events that started before the fetch window but overlap into it (acknowledged limitation)
 - Duration display on Calendar Event Rows (only start time + title)

@@ -76,6 +76,10 @@ _Avoid_: Event chip, pill, card
 A privacy-preserving placeholder persisted for offline use that retains a Calendar Event's timing and color but not its title.
 _Avoid_: Cached event, local event, offline event
 
+**Event Detail Popover**:
+A transient, read-only overlay that presents the details of a single Calendar Event, including a link to that event in Google Calendar. It is summoned from the Calendar Surface but is a separate layer from it; it never allows creating, editing, or deleting events.
+_Avoid_: Event modal, event popup, detail card, edit dialog
+
 **Extended Calendar Range**:
 The complete Monday-through-Sunday Week Rows from the week containing ten years before Today through the week containing ten years after Today.
 _Avoid_: Infinite range, endless dates, all dates
@@ -106,6 +110,9 @@ _Avoid_: Infinite range, endless dates, all dates
 - A **Calendar Event Bar** belongs to a vertical lane within each **Date Cell** it spans; bars are globally ordered by start date then start time then duration (longer first), and rows by start time.
 - A **Calendar Event Row** belongs to exactly one **Date Cell**.
 - A **Fetched Window** belongs to a connected **Google Account Connection** and is expanded by scroll-driven slab fetches.
+- An **Event Detail Popover** presents exactly one **Calendar Event**.
+- An **Event Detail Popover** is summoned from the **Calendar Surface** but is not part of it.
+- An **Event Detail Popover** appears only while the **Google Account Connection** is connected.
 
 ## Example dialogue
 
