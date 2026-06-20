@@ -51,7 +51,7 @@ export function CalendarHeader({
     <header className="shrink-0 border-b border-[#d8d1bd] bg-[#f5f1e6] text-[#252819] shadow-sm">
       <div className="grid h-20 grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[minmax(0,1fr)_auto] items-center gap-x-2 px-1 pb-2 pt-1 sm:gap-x-4 sm:px-6">
         <div className="relative z-10 col-start-1 row-start-1 self-start justify-self-start whitespace-nowrap text-[clamp(18px,6vw,40px)] font-extrabold leading-none tracking-[-0.08em] text-[#777b60]">
-          The Planner
+          Planner
         </div>
         <div className="relative z-10 col-start-1 row-start-2 self-start justify-self-end text-[10px] font-medium leading-none tracking-[0.28em] text-[#8b8f72]">
           v{PRODUCT_VERSION}
