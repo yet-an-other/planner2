@@ -4,6 +4,7 @@ import { addMonths, toLocalDate } from '@/lib/calendar-dates'
 import type { CalendarEvent } from '@/lib/google-calendar-events'
 import type { GoogleAccountConnectionState } from '@/lib/use-google-account-connection'
 import { useCalendarEvents } from '@/lib/use-calendar-events'
+import { makeBar } from './calendar-events.factory'
 
 const today = toLocalDate(new Date(2026, 5, 19))
 const range = { start: new Date(2016, 5, 19), end: new Date(2036, 5, 19) }
@@ -16,19 +17,8 @@ const connected = (accessToken = 'access-token'): GoogleAccountConnectionState =
 
 const disconnected: GoogleAccountConnectionState = { status: 'disconnected' }
 
-const bar = (
-  id: string,
-  title: string,
-  date: Date,
-): CalendarEvent => ({
-  kind: 'bar',
-  eventType: 'all-day',
-  id,
-  title,
-  date,
-  endDate: date,
-  color: '#2952a3',
-})
+const bar = (id: string, title: string, date: Date) =>
+  makeBar({ id, title, date, endDate: date })
 
 describe('useCalendarEvents', () => {
   it('fetches the initial ±6-month window on connect and exposes the events', async () => {

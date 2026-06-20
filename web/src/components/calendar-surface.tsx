@@ -13,7 +13,9 @@ import {
 } from '@/lib/calendar-dates'
 import { useGoogleAccountConnection } from '@/lib/use-google-account-connection'
 import { useCalendarEvents } from '@/lib/use-calendar-events'
+import { useEventDetailPopover } from '@/lib/use-event-detail-popover'
 import { CalendarHeader } from './calendar-header'
+import { EventDetailPopover } from './event-detail-popover'
 import { layoutWeekEvents } from '@/lib/event-layout'
 import { getContrastTextColor } from '@/lib/text-contrast'
 import { cn } from '@/lib/utils'
@@ -38,6 +40,7 @@ export function CalendarSurface() {
     today,
     range,
   })
+  const eventDetailPopover = useEventDetailPopover()
 
   // TanStack Virtual intentionally returns non-memoizable helpers; keep the virtualizer local to this component.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -159,22 +162,46 @@ export function CalendarSurface() {
                     const width = ((bar.endDayIndex - bar.startDayIndex + 1) / 7) * 100
                     const top = bar.laneIndex * 24
                     const textColor = getContrastTextColor(bar.event.color)
+                    const isOpen =
+                      eventDetailPopover.selectedEvent?.id === bar.event.id
+                    const positionStyle = {
+                      left: `${left}%`,
+                      width: `${width}%`,
+                      top: `${top}px`,
+                      backgroundColor: bar.event.color,
+                      color: textColor,
+                      borderTopLeftRadius: bar.isStartTruncated ? 0 : 4,
+                      borderBottomLeftRadius: bar.isStartTruncated ? 0 : 4,
+                      borderTopRightRadius: bar.isEndTruncated ? 0 : 4,
+                      borderBottomRightRadius: bar.isEndTruncated ? 0 : 4,
+                    }
+
+                    if (googleAccountConnected) {
+                      return (
+                        <button
+                          aria-expanded={isOpen}
+                          aria-label={`${bar.event.title} — open details`}
+                          className={cn(
+                            'pointer-events-auto absolute h-[18px] cursor-pointer overflow-hidden truncate pl-4 pr-1 text-left text-[10px] font-medium leading-[18px]',
+                          )}
+                          key={bar.event.id}
+                          onClick={(event) =>
+                            eventDetailPopover.open(bar.event, event.currentTarget)
+                          }
+                          style={positionStyle}
+                          title={bar.event.title}
+                          type="button"
+                        >
+                          {bar.event.title}
+                        </button>
+                      )
+                    }
 
                     return (
                       <div
-                        key={bar.event.id}
                         className="absolute h-[18px] overflow-hidden truncate pl-4 pr-1 text-[10px] font-medium leading-[18px]"
-                        style={{
-                          left: `${left}%`,
-                          width: `${width}%`,
-                          top: `${top}px`,
-                          backgroundColor: bar.event.color,
-                          color: textColor,
-                          borderTopLeftRadius: bar.isStartTruncated ? 0 : 4,
-                          borderBottomLeftRadius: bar.isStartTruncated ? 0 : 4,
-                          borderTopRightRadius: bar.isEndTruncated ? 0 : 4,
-                          borderBottomRightRadius: bar.isEndTruncated ? 0 : 4,
-                        }}
+                        key={bar.event.id}
+                        style={positionStyle}
                         title={bar.event.title}
                       >
                         {bar.event.title}
@@ -240,7 +267,19 @@ export function CalendarSurface() {
                             }
                           >
                             {cellLayout.items.map((item, i) => (
-                              <CellItemRenderer key={i} item={item} />
+                              <CellItemRenderer
+                                key={i}
+                                item={item}
+                                connected={googleAccountConnected}
+                                isOpen={
+                                  item.kind === 'row' &&
+                                  eventDetailPopover.selectedEvent?.id === item.event.id
+                                }
+                                onOpen={(trigger) =>
+                                  item.kind === 'row' &&
+                                  eventDetailPopover.open(item.event, trigger)
+                                }
+                              />
                             ))}
                           </div>
                         )
@@ -253,6 +292,12 @@ export function CalendarSurface() {
           })}
         </div>
       </div>
+
+      <EventDetailPopover
+        anchorRect={eventDetailPopover.anchorRect}
+        event={eventDetailPopover.selectedEvent}
+        onClose={eventDetailPopover.close}
+      />
     </main>
   )
 }
@@ -260,15 +305,39 @@ export function CalendarSurface() {
 type CellItemRendererProps = {
   item: import('@/lib/event-layout').CellItem
   weekLayout: import('@/lib/event-layout').WeekLayout
+  connected: boolean
+  isOpen: boolean
+  onOpen: (trigger: HTMLElement) => void
 }
 
-function CellItemRenderer({ item }: Omit<CellItemRendererProps, 'weekLayout'>) {
+function CellItemRenderer({
+  item,
+  connected,
+  isOpen,
+  onOpen,
+}: Omit<CellItemRendererProps, 'weekLayout'>) {
   if (item.kind === 'bar') {
     // Bars are rendered once at the week level; skip here to avoid duplication
     return null
   }
 
   if (item.kind === 'row') {
+    const label = `${item.event.title}, ${item.event.startTime} — open details`
+    if (connected) {
+      return (
+        <button
+          aria-expanded={isOpen}
+          aria-label={label}
+          className="flex w-full items-center gap-1 truncate text-left text-[10px] leading-[18px] text-foreground"
+          onClick={(event) => onOpen(event.currentTarget)}
+          type="button"
+        >
+          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: item.event.color }} />
+          <span className="tabular-nums">{item.event.startTime}</span>
+          <span className="truncate">{item.event.title}</span>
+        </button>
+      )
+    }
     return (
       <div className="flex items-center gap-1 truncate text-[10px] leading-[18px] text-foreground">
         <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: item.event.color }} />

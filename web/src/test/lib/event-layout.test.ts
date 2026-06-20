@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { CalendarEventBar, CalendarEventRow } from '@/lib/google-calendar-events'
 import { layoutWeekEvents } from '@/lib/event-layout'
+import { makeBar, makeRow } from './calendar-events.factory'
 
 function mondayOf(dateStr: string) {
   const date = new Date(dateStr)
@@ -26,15 +26,12 @@ describe('layoutWeekEvents', () => {
 
   it('places a single all-day bar on Monday in lane 0', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
-    const bar: CalendarEventBar = {
-      kind: 'bar',
-      eventType: 'all-day',
+    const bar = makeBar({
       id: 'evt-1',
       title: 'Team Lunch',
       date: new Date(2026, 5, 15),
       endDate: new Date(2026, 5, 15),
-      color: '#2952a3',
-    }
+    })
 
     const layout = layoutWeekEvents([bar], weekStart)
 
@@ -54,15 +51,13 @@ describe('layoutWeekEvents', () => {
 
   it('places a multiday bar spanning Monday to Wednesday', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
-    const bar: CalendarEventBar = {
-      kind: 'bar',
-      eventType: 'multiday',
+    const bar = makeBar({
       id: 'evt-2',
       title: 'Q3 Planning',
+      eventType: 'multiday',
       date: new Date(2026, 5, 15), // Mon
       endDate: new Date(2026, 5, 17), // Wed
-      color: '#2952a3',
-    }
+    })
 
     const layout = layoutWeekEvents([bar], weekStart)
 
@@ -81,24 +76,21 @@ describe('layoutWeekEvents', () => {
 
   it('stacks overlapping multiday bars in separate vertical lanes', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
-    const bar1: CalendarEventBar = {
-      kind: 'bar',
-      eventType: 'multiday',
+    const bar1 = makeBar({
       id: 'evt-3',
       title: 'Team Offsite',
+      eventType: 'multiday',
       date: new Date(2026, 5, 15), // Mon
       endDate: new Date(2026, 5, 17), // Wed
-      color: '#2952a3',
-    }
-    const bar2: CalendarEventBar = {
-      kind: 'bar',
-      eventType: 'multiday',
+    })
+    const bar2 = makeBar({
       id: 'evt-4',
       title: 'Sprint Planning',
+      eventType: 'multiday',
       date: new Date(2026, 5, 15), // Mon
       endDate: new Date(2026, 5, 19), // Fri
       color: '#0d7377',
-    }
+    })
 
     const layout = layoutWeekEvents([bar1, bar2], weekStart)
 
@@ -126,24 +118,19 @@ describe('layoutWeekEvents', () => {
 
   it('places bars before rows when both occupy the same cell', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
-    const bar: CalendarEventBar = {
-      kind: 'bar',
-      eventType: 'all-day',
+    const bar = makeBar({
       id: 'evt-5',
       title: 'All-hands',
       date: new Date(2026, 5, 17), // Wed
       endDate: new Date(2026, 5, 17), // Wed
-      color: '#2952a3',
-    }
-    const row: CalendarEventRow = {
-      kind: 'row',
+    })
+    const row = makeRow({
       id: 'evt-6',
       title: 'Design Review',
       date: new Date(2026, 5, 17), // Wed
       startTime: '14:00',
-      durationMinutes: 60,
       color: '#0d7377',
-    }
+    })
 
     const layout = layoutWeekEvents([bar, row], weekStart)
 
@@ -158,24 +145,21 @@ describe('layoutWeekEvents', () => {
 
   it('caps visible items per cell to 4, with overflow replacing the 4th slot', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
-    const bar: CalendarEventBar = {
-      kind: 'bar',
-      eventType: 'all-day',
+    const bar = makeBar({
       id: 'evt-b',
       title: 'All-hands',
       date: new Date(2026, 5, 15), // Mon
       endDate: new Date(2026, 5, 15), // Mon
-      color: '#2952a3',
-    }
-    const rows: CalendarEventRow[] = Array.from({ length: 6 }, (_, i) => ({
-      kind: 'row' as const,
-      id: `evt-r-${i}`,
-      title: `Meeting ${i + 1}`,
-      date: new Date(2026, 5, 15), // Mon
-      startTime: `${9 + i}:00`,
-      durationMinutes: 60,
-      color: '#0d7377',
-    }))
+    })
+    const rows = Array.from({ length: 6 }, (_, i) =>
+      makeRow({
+        id: `evt-r-${i}`,
+        title: `Meeting ${i + 1}`,
+        date: new Date(2026, 5, 15), // Mon
+        startTime: `${9 + i}:00`,
+        color: '#0d7377',
+      }),
+    )
 
     const layout = layoutWeekEvents([bar, ...rows], weekStart)
 
@@ -189,25 +173,20 @@ describe('layoutWeekEvents', () => {
 
   it('orders intraday rows by start time within a cell', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
-    const rows: CalendarEventRow[] = [
-      {
-        kind: 'row',
+    const rows = [
+      makeRow({
         id: 'evt-late',
         title: 'Late Meeting',
         date: new Date(2026, 5, 15), // Mon
         startTime: '16:00',
-        durationMinutes: 60,
         color: '#0d7377',
-      },
-      {
-        kind: 'row',
+      }),
+      makeRow({
         id: 'evt-early',
         title: 'Early Standup',
         date: new Date(2026, 5, 15), // Mon
         startTime: '09:00',
-        durationMinutes: 30,
-        color: '#2952a3',
-      },
+      }),
     ]
 
     const layout = layoutWeekEvents(rows, weekStart)
@@ -225,15 +204,13 @@ describe('layoutWeekEvents', () => {
 
   it('shows a bar that started before the week and ends during the week', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
-    const bar: CalendarEventBar = {
-      kind: 'bar',
-      eventType: 'multiday',
+    const bar = makeBar({
       id: 'evt-7',
       title: 'Conference',
+      eventType: 'multiday',
       date: new Date(2026, 5, 13), // Sat (before week)
       endDate: new Date(2026, 5, 17), // Wed
-      color: '#2952a3',
-    }
+    })
 
     const layout = layoutWeekEvents([bar], weekStart)
 
@@ -241,7 +218,7 @@ describe('layoutWeekEvents', () => {
     expect(layout.bars[0]).toMatchObject({
       laneIndex: 0,
       startDayIndex: 0, // starts Monday (first visible day)
-      endDayIndex: 2,   // ends Wednesday
+      endDayIndex: 2, // ends Wednesday
     })
 
     expect(layout.cells[0].items).toEqual([{ kind: 'bar', barIndex: 0 }])
@@ -252,15 +229,13 @@ describe('layoutWeekEvents', () => {
 
   it('marks bars as truncated when clipped by week boundaries', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
-    const bar: CalendarEventBar = {
-      kind: 'bar',
-      eventType: 'multiday',
+    const bar = makeBar({
       id: 'evt-8',
       title: 'Conference',
+      eventType: 'multiday',
       date: new Date(2026, 5, 12), // Fri before week
       endDate: new Date(2026, 5, 23), // Wed after week
-      color: '#2952a3',
-    }
+    })
 
     const layout = layoutWeekEvents([bar], weekStart)
 
@@ -272,15 +247,13 @@ describe('layoutWeekEvents', () => {
 
   it('does not mark bars as truncated when they start and end within the week', () => {
     const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
-    const bar: CalendarEventBar = {
-      kind: 'bar',
-      eventType: 'multiday',
+    const bar = makeBar({
       id: 'evt-9',
       title: 'Workshop',
+      eventType: 'multiday',
       date: new Date(2026, 5, 16), // Tue
       endDate: new Date(2026, 5, 18), // Thu
-      color: '#2952a3',
-    }
+    })
 
     const layout = layoutWeekEvents([bar], weekStart)
 

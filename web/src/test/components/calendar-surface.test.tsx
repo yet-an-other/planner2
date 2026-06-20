@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -318,6 +318,194 @@ describe('Account lifecycle and error recovery', () => {
     await vi.waitFor(() => {
       expect(eventsFetchCount(mockFetch)).toBeGreaterThanOrEqual(1)
     })
+  })
+})
+
+describe('Event Detail Popover', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    vi.setSystemTime(new Date(2026, 5, 19))
+  })
+
+  // jsdom has no layout, so TanStack Virtual renders zero week rows unless the
+  // scroll element reports a real size. This harness installs a controllable
+  // ResizeObserver, sizes the surface, and scrolls it to the week of Today so
+  // the today-week's events actually render.
+  function mountWithEvents(
+    items: Array<Record<string, unknown>>,
+    options: { connect?: boolean } = {},
+  ) {
+    const { connect = true } = options
+    const observers: Array<{ cb: (entries: unknown[]) => void; el: HTMLElement }> = []
+    class TestResizeObserver {
+      cb: (entries: unknown[]) => void
+      constructor(cb: (entries: unknown[]) => void) {
+        this.cb = cb
+      }
+      observe(el: HTMLElement) {
+        observers.push({ cb: this.cb, el })
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', TestResizeObserver)
+
+    const requestAccessToken = vi.fn()
+    const initTokenClient = vi.fn(({ callback }) => {
+      requestAccessToken.mockImplementation(() => callback({ access_token: 'access-token' }))
+      return { requestAccessToken }
+    })
+    vi.stubGlobal('google', { accounts: { oauth2: { initTokenClient, revoke: vi.fn() } } })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url.includes('userinfo'))
+          return Promise.resolve({ ok: true, json: async () => ({ name: 'Ada', picture: 'x' }) })
+        if (url.includes('calendarList/primary'))
+          return Promise.resolve({ ok: true, json: async () => ({ backgroundColor: '#2952a3' }) })
+        if (url.includes('colors'))
+          return Promise.resolve({ ok: true, json: async () => ({ event: {} }) })
+        if (url.includes('calendars/primary/events'))
+          return Promise.resolve({ ok: true, json: async () => ({ items }) })
+        return Promise.resolve({ ok: false })
+      }),
+    )
+
+    const today = toLocalDate(new Date(2026, 5, 19))
+    const range = getCalendarRange(today)
+    const todayWeekIndex = differenceInCalendarDays(startOfMondayWeek(today), range.start) / 7
+
+    render(<CalendarSurface />)
+    if (connect) {
+      fireEvent.click(screen.getByRole('button', { name: /connect google/i }))
+    }
+
+    // jsdom has no layout: size the scroll element and scroll it to Today's week
+    // after the virtualizer has subscribed its ResizeObserver, so the today-week
+    // actually renders.
+    const revealTodayWeek = () => {
+      const surface = document.querySelector(
+        '[aria-label="Calendar Surface"]',
+      ) as HTMLElement
+      Object.defineProperty(surface, 'offsetHeight', { configurable: true, value: 1280 })
+      Object.defineProperty(surface, 'offsetWidth', { configurable: true, value: 1024 })
+      for (const o of observers) {
+        o.cb([{ target: o.el, borderBoxSize: [{ inlineSize: 1024, blockSize: 1280 }] }])
+      }
+      fireEvent.scroll(surface, { target: { scrollTop: todayWeekIndex * 128 } })
+      return surface
+    }
+
+    return { revealTodayWeek }
+  }
+
+  it('opens the popover with the title and Google Calendar link when a bar is clicked', async () => {
+    const { revealTodayWeek } = mountWithEvents([
+      {
+        id: 'evt-1',
+        summary: 'Team Lunch',
+        htmlLink: 'https://www.google.com/calendar/event?eid=evt-1',
+        start: { date: '2026-06-19' },
+        end: { date: '2026-06-20' },
+      },
+    ])
+
+    await screen.findByText('Ada')
+    revealTodayWeek()
+    await screen.findByText('Team Lunch')
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /team lunch.*open details/i }),
+    )
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Team Lunch')
+    expect(dialog).toHaveTextContent('All day')
+    expect(
+      screen.getByRole('link', { name: /open in google calendar/i }),
+    ).toHaveAttribute('href', 'https://www.google.com/calendar/event?eid=evt-1')
+  })
+
+  it('closes the popover when Escape is pressed', async () => {
+    const { revealTodayWeek } = mountWithEvents([
+      {
+        id: 'evt-1',
+        summary: 'Team Lunch',
+        start: { date: '2026-06-19' },
+        end: { date: '2026-06-20' },
+      },
+    ])
+
+    await screen.findByText('Ada')
+    revealTodayWeek()
+    await screen.findByText('Team Lunch')
+    fireEvent.click(
+      screen.getByRole('button', { name: /team lunch.*open details/i }),
+    )
+    await screen.findByRole('dialog')
+
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    )
+  })
+
+  it('keeps at most one popover open, replacing the previous event', async () => {
+    const { revealTodayWeek } = mountWithEvents([
+      {
+        id: 'evt-1',
+        summary: 'Team Lunch',
+        start: { date: '2026-06-19' },
+        end: { date: '2026-06-20' },
+      },
+      {
+        id: 'evt-2',
+        summary: 'Sprint Demo',
+        start: { date: '2026-06-16' },
+        end: { date: '2026-06-17' },
+      },
+    ])
+
+    await screen.findByText('Ada')
+    revealTodayWeek()
+    await screen.findByText('Team Lunch')
+    fireEvent.click(
+      screen.getByRole('button', { name: /team lunch.*open details/i }),
+    )
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Team Lunch')
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /sprint demo.*open details/i }),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('dialog')).toHaveTextContent('Sprint Demo'),
+    )
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  })
+
+  it('does not render interactive event triggers when disconnected', async () => {
+    mountWithEvents(
+      [
+        {
+          id: 'evt-1',
+          summary: 'Team Lunch',
+          start: { date: '2026-06-19' },
+          end: { date: '2026-06-20' },
+        },
+      ],
+      { connect: false },
+    )
+
+    // While disconnected there are no interactive event triggers to summon a popover.
+    expect(
+      screen.queryByRole('button', { name: /open details/i }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
 

@@ -1,26 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import type { CalendarEvent } from '@/lib/google-calendar-events'
 import { mergeCalendarEvents } from '@/lib/merge-calendar-events'
+import { makeBar, makeRow } from './calendar-events.factory'
 
-const row = (id: string, title: string): CalendarEvent => ({
-  kind: 'row',
-  id,
-  title,
-  date: new Date(2026, 5, 19),
-  startTime: '09:00',
-  durationMinutes: 60,
-  color: '#2952a3',
-})
+const row = (id: string, title: string) =>
+  makeRow({ id, title, date: new Date(2026, 5, 19), startTime: '09:00' })
 
-const bar = (id: string, title: string): CalendarEvent => ({
-  kind: 'bar',
-  eventType: 'all-day',
-  id,
-  title,
-  date: new Date(2026, 5, 19),
-  endDate: new Date(2026, 5, 19),
-  color: '#2952a3',
-})
+const bar = (id: string, title: string) =>
+  makeBar({
+    id,
+    title,
+    date: new Date(2026, 5, 19),
+    endDate: new Date(2026, 5, 19),
+  })
 
 describe('mergeCalendarEvents', () => {
   it('keeps every event when there is no overlap', () => {

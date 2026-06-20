@@ -8,6 +8,10 @@ export type CalendarEventBar = {
   date: Date
   endDate: Date
   color: string
+  /** Detail shown in the Event Detail Popover; memory-only while connected. */
+  detail: EventDetail
+  /** Normalized display timing so the popover never branches on `kind`. */
+  timing: EventTiming
 }
 
 export type CalendarEventRow = {
@@ -18,6 +22,47 @@ export type CalendarEventRow = {
   startTime: string
   durationMinutes: number
   color: string
+  /** Detail shown in the Event Detail Popover; memory-only while connected. */
+  detail: EventDetail
+  /** Normalized display timing so the popover never branches on `kind`. */
+  timing: EventTiming
+}
+
+/**
+ * Detail surfaced in the Event Detail Popover. All fields are memory-only while
+ * the Google Account Connection is connected; none are persisted into Saved
+ * Busy Blocks (see ADR 0001/0002).
+ */
+export type EventDetail = {
+  /** Link to the event in Google Calendar. Null when Google omits it. */
+  htmlLink: string | null
+  /** Where the event takes place. Null when absent. */
+  location: string | null
+  /** Plain-text notes; HTML is stripped at normalization. Null when absent. */
+  description: string | null
+  /** Always an array; possibly empty when there are no invitees. */
+  attendees: Attendee[]
+}
+
+/**
+ * Uniform display timing computed once at normalization so the popover reads a
+ * single shape regardless of bar-vs-row.
+ */
+export type EventTiming = {
+  /** Full start instant (timed: with time; all-day: local midnight). */
+  start: Date
+  /** Full end instant (timed: with time; all-day: inclusive last day, midnight). */
+  end: Date
+  /** True when the event has no time component (all-day / multiday-all-day). */
+  isAllDay: boolean
+  /** True when the event spans more than one calendar date. */
+  isMultiday: boolean
+}
+
+export type Attendee = {
+  displayName: string | null
+  email: string
+  responseStatus: 'accepted' | 'declined' | 'tentative' | 'needsAction' | 'unknown'
 }
 
 const GOOGLE_CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3'
@@ -36,12 +81,13 @@ type GoogleCalendarColorsResponse = {
   event?: Record<string, { background?: string }>
 }
 
-type GoogleCalendarEventResource = {
+export type GoogleCalendarEventResource = {
   attendees?: Array<{
     responseStatus?: string
     self?: boolean
   }>
   colorId?: string
+  htmlLink?: string
   id?: string
   iCalUID?: string
   status?: string
@@ -90,6 +136,14 @@ export function normalizeGoogleCalendarEvents(
 
     const title = event.summary?.trim() || 'Busy'
     const color = getEventColor(event, primaryCalendarColor, eventColors)
+    // Slice 1 of PRD #003 carries htmlLink end-to-end; location/description/
+    // attendees are scaffolded null/empty here and populated in slice 2.
+    const detail: EventDetail = {
+      htmlLink: event.htmlLink ?? null,
+      location: null,
+      description: null,
+      attendees: [],
+    }
 
     if (event.start?.date && event.end?.date) {
       const startDate = parseGoogleDate(event.start.date)
@@ -108,6 +162,13 @@ export function normalizeGoogleCalendarEvents(
           date: startDate,
           endDate,
           color,
+          detail,
+          timing: {
+            start: startDate,
+            end: endDate,
+            isAllDay: true,
+            isMultiday: endDate.getTime() > startDate.getTime(),
+          },
         },
       ]
     }
@@ -130,6 +191,13 @@ export function normalizeGoogleCalendarEvents(
           date: eventDate,
           endDate: toLocalDate(endsAt),
           color,
+          detail,
+          timing: {
+            start: startsAt,
+            end: endsAt,
+            isAllDay: false,
+            isMultiday: true,
+          },
         },
       ]
     }
@@ -143,6 +211,13 @@ export function normalizeGoogleCalendarEvents(
         startTime: formatEventStartTime(startsAt),
         durationMinutes: getDurationMinutes(startsAt, endsAt),
         color,
+        detail,
+        timing: {
+          start: startsAt,
+          end: endsAt,
+          isAllDay: false,
+          isMultiday: false,
+        },
       },
     ]
   })
