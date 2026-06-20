@@ -13,14 +13,11 @@ import {
   toISODate,
   toLocalDate,
 } from '@/lib/calendar-dates'
-import {
-  fetchGoogleAccountProfile,
-  requestGoogleAccessToken,
-  revokeGoogleAccessToken,
-  type GoogleAccountProfile,
-} from '@/lib/google-account-connection'
+import { type GoogleAccountProfile } from '@/lib/google-account-connection'
 import { fetchPrimaryCalendarEvents, type CalendarEvent } from '@/lib/google-calendar-events'
-import { mergeCalendarEvents } from '@/lib/merge-calendar-events'
+import {
+  mergeCalendarEvents
+} from '@/lib/merge-calendar-events'
 import {
   computeScrollTrigger,
   createFetchedWindow,
@@ -29,6 +26,10 @@ import {
   type FetchedWindow,
   type FetchedWindowDirection,
 } from '@/lib/fetched-window'
+import {
+  useGoogleAccountConnection,
+  type HeaderStatus,
+} from '@/lib/use-google-account-connection'
 import { layoutWeekEvents } from '@/lib/event-layout'
 import { getContrastTextColor } from '@/lib/text-contrast'
 import { PRODUCT_VERSION } from '@/lib/product-version'
@@ -37,15 +38,6 @@ import { cn } from '@/lib/utils'
 const WEEK_ROW_HEIGHT = 128
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const WEEK_ROW_OVERSCAN = 20
-
-type GoogleAccountConnectionState =
-  | { status: 'connected'; accessToken: string; profile: GoogleAccountProfile }
-  | { status: 'disconnected' }
-
-type HeaderStatus = {
-  message: string
-  tone: 'info' | 'error'
-}
 
 /**
  * Describes one direction of Fetched Window growth as a small set of pure edge
@@ -96,9 +88,11 @@ export function CalendarSurface() {
   const today = useMemo(() => toLocalDate(new Date()), [])
   const range = useMemo(() => getCalendarRange(today), [today])
   const [topWeekIndex, setTopWeekIndex] = useState(range.todayWeekIndex)
-  const [googleAccountConnection, setGoogleAccountConnection] =
-    useState<GoogleAccountConnectionState>({ status: 'disconnected' })
-  const [headerStatus, setHeaderStatus] = useState<HeaderStatus | null>(null)
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? ''
+  const googleAccountConnection = useGoogleAccountConnection(googleClientId)
+  // Events-related status only (load failure). Connection statuses come from
+  // the hook; both merge into the Header Status area below.
+  const [eventsStatus, setEventsStatus] = useState<HeaderStatus | null>(null)
   const [events, setEvents] = useState<CalendarEvent[]>([])
   // The Fetched Window is the source of truth for scroll-trigger decisions. It is
   // stored in a ref rather than state because it is not rendered directly and the
@@ -106,14 +100,17 @@ export function CalendarSurface() {
   const fetchedWindowRef = useRef<FetchedWindow | null>(null)
   const [pendingScrollFetchCount, setPendingScrollFetchCount] = useState(0)
 
+  const connection = googleAccountConnection.connection
+
   useEffect(() => {
-    if (googleAccountConnection.status !== 'connected') {
+    if (connection.status !== 'connected') {
       setEvents([])
+      setEventsStatus(null)
       fetchedWindowRef.current = null
       return
     }
 
-    const accessToken = googleAccountConnection.accessToken
+    const accessToken = connection.accessToken
     const earliest = addMonths(today, -6)
     const latest = addMonths(today, 6)
     const fetchRange = {
@@ -126,13 +123,12 @@ export function CalendarSurface() {
     fetchPrimaryCalendarEvents(accessToken, fetchRange)
       .then(setEvents)
       .catch(() => {
-        setHeaderStatus({
+        setEventsStatus({
           message: 'Calendar events could not be loaded',
           tone: 'error',
         })
       })
-  }, [googleAccountConnection, today])
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? ''
+  }, [connection, today])
 
   // TanStack Virtual intentionally returns non-memoizable helpers; keep the virtualizer local to this component.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -149,14 +145,11 @@ export function CalendarSurface() {
     [range.start, topWeekIndex],
   )
   const visibleMonth = formatVisibleMonth(visibleWeekStart)
-  const googleAccountConnected = googleAccountConnection.status === 'connected'
+  const googleAccountConnected = connection.status === 'connected'
   const effectiveHeaderStatus =
     pendingScrollFetchCount > 0
       ? ({ message: 'Loading events…', tone: 'info' } as const)
-      : headerStatus ??
-        (googleClientId
-          ? null
-          : { message: 'Google client ID is not configured', tone: 'error' as const })
+      : eventsStatus ?? googleAccountConnection.status
 
   function updateTopWeekIndex() {
     const scrollParent = scrollParentRef.current
@@ -179,7 +172,7 @@ export function CalendarSurface() {
     )
 
     const fetchedWindow = fetchedWindowRef.current
-    if (fetchedWindow && googleAccountConnection.status === 'connected') {
+    if (fetchedWindow && connection.status === 'connected') {
       const bottomWeekIndex = clamp(
         Math.floor((scrollTop + scrollParent.clientHeight) / WEEK_ROW_HEIGHT),
         0,
@@ -194,9 +187,9 @@ export function CalendarSurface() {
         end: range.end,
       })
       if (trigger === 'fetch-future') {
-        fetchNextSlab(googleAccountConnection.accessToken, fetchedWindow, FUTURE_SLAB)
+        fetchNextSlab(connection.accessToken, fetchedWindow, FUTURE_SLAB)
       } else if (trigger === 'fetch-past') {
-        fetchNextSlab(googleAccountConnection.accessToken, fetchedWindow, PAST_SLAB)
+        fetchNextSlab(connection.accessToken, fetchedWindow, PAST_SLAB)
       }
     }
   }
@@ -256,74 +249,6 @@ export function CalendarSurface() {
     }
   }
 
-  function connectGoogleAccount() {
-    if (!googleClientId) {
-      return
-    }
-
-    setHeaderStatus({ message: 'Connecting Google account...', tone: 'info' })
-
-    try {
-      requestGoogleAccessToken(googleClientId, (response) => {
-        void handleGoogleTokenResponse(response)
-      })
-    } catch (error) {
-      setHeaderStatus({
-        message: getErrorMessage(error, 'Google connection is unavailable'),
-        tone: 'error',
-      })
-    }
-  }
-
-  async function handleGoogleTokenResponse(response: {
-    access_token?: string
-    error?: string
-    error_description?: string
-  }) {
-    if (response.error) {
-      setHeaderStatus({
-        message: response.error_description ?? 'Google connection was cancelled',
-        tone: 'error',
-      })
-      return
-    }
-
-    if (!response.access_token) {
-      setHeaderStatus({
-        message: 'Google connection did not return an access token',
-        tone: 'error',
-      })
-      return
-    }
-
-    try {
-      const profile = await fetchGoogleAccountProfile(response.access_token)
-
-      setGoogleAccountConnection({
-        status: 'connected',
-        accessToken: response.access_token,
-        profile,
-      })
-      setHeaderStatus({ message: 'Google account connected', tone: 'info' })
-    } catch (error) {
-      setHeaderStatus({
-        message: getErrorMessage(error, 'Google profile could not be loaded'),
-        tone: 'error',
-      })
-    }
-  }
-
-  function disconnectGoogleAccount() {
-    if (googleAccountConnection.status !== 'connected') {
-      return
-    }
-
-    revokeGoogleAccessToken(googleAccountConnection.accessToken, () => {
-      setGoogleAccountConnection({ status: 'disconnected' })
-      setHeaderStatus({ message: 'Google account disconnected', tone: 'info' })
-    })
-  }
-
   return (
     <main className="flex h-svh min-h-0 flex-col overflow-hidden bg-background text-foreground">
       <header className="shrink-0 border-b border-[#d8d1bd] bg-[#f5f1e6] text-[#252819] shadow-sm">
@@ -348,14 +273,14 @@ export function CalendarSurface() {
           <div className="relative z-10 col-start-3 row-start-1 self-center justify-self-end">
             <AccountControl
               connected={googleAccountConnected}
-              disabled={!googleClientId}
+              disabled={!googleAccountConnection.isConfigured}
               profile={
-                googleAccountConnection.status === 'connected'
-                  ? googleAccountConnection.profile
+                connection.status === 'connected'
+                  ? connection.profile
                   : null
               }
-              onConnect={connectGoogleAccount}
-              onDisconnect={disconnectGoogleAccount}
+              onConnect={googleAccountConnection.connect}
+              onDisconnect={googleAccountConnection.disconnect}
             />
           </div>
           <div
@@ -611,10 +536,6 @@ function CellItemRenderer({ item }: Omit<CellItemRendererProps, 'weekLayout'>) {
   }
 
   return null
-}
-
-function getErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback
 }
 
 function clamp(value: number, min: number, max: number) {
