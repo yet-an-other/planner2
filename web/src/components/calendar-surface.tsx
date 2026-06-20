@@ -27,6 +27,7 @@ import {
   extendFetchedWindow,
   FETCHED_WINDOW_SLAB_MONTHS,
   type FetchedWindow,
+  type FetchedWindowDirection,
 } from '@/lib/fetched-window'
 import { layoutWeekEvents } from '@/lib/event-layout'
 import { getContrastTextColor } from '@/lib/text-contrast'
@@ -44,6 +45,50 @@ type GoogleAccountConnectionState =
 type HeaderStatus = {
   message: string
   tone: 'info' | 'error'
+}
+
+/**
+ * Describes one direction of Fetched Window growth as a small set of pure edge
+ * operations. Captures everything that differs between past and future slab
+ * fetches so the fetch algorithm can be written once, branchlessly.
+ */
+type SlabDirection = {
+  direction: FetchedWindowDirection
+  /** The window edge this direction moves (latest for future, earliest for past). */
+  edge: (window: FetchedWindow) => Date
+  /** True when the extended window actually advanced past the original edge. */
+  advanced: (extended: FetchedWindow, original: FetchedWindow) => boolean
+  /** Fetch range spanning from the original edge to the extended edge. */
+  fetchRange: (
+    extended: FetchedWindow,
+    original: FetchedWindow,
+  ) => { start: Date; end: Date }
+  /** Restore this direction's edge after a failed fetch, leaving the other edge. */
+  rollback: (current: FetchedWindow, original: FetchedWindow) => FetchedWindow
+}
+
+const FUTURE_SLAB: SlabDirection = {
+  direction: 'future',
+  edge: (window) => window.latest,
+  advanced: (extended, original) =>
+    extended.latest.getTime() > original.latest.getTime(),
+  fetchRange: (extended, original) => ({
+    start: original.latest,
+    end: extended.latest,
+  }),
+  rollback: (current, original) => ({ ...current, latest: original.latest }),
+}
+
+const PAST_SLAB: SlabDirection = {
+  direction: 'past',
+  edge: (window) => window.earliest,
+  advanced: (extended, original) =>
+    extended.earliest.getTime() < original.earliest.getTime(),
+  fetchRange: (extended, original) => ({
+    start: extended.earliest,
+    end: original.earliest,
+  }),
+  rollback: (current, original) => ({ ...current, earliest: original.earliest }),
 }
 
 export function CalendarSurface() {
@@ -149,28 +194,32 @@ export function CalendarSurface() {
         end: range.end,
       })
       if (trigger === 'fetch-future') {
-        fetchNextFutureSlab(googleAccountConnection.accessToken, fetchedWindow)
+        fetchNextSlab(googleAccountConnection.accessToken, fetchedWindow, FUTURE_SLAB)
       } else if (trigger === 'fetch-past') {
-        fetchNextPastSlab(googleAccountConnection.accessToken, fetchedWindow)
+        fetchNextSlab(googleAccountConnection.accessToken, fetchedWindow, PAST_SLAB)
       }
     }
   }
 
-  function fetchNextFutureSlab(accessToken: string, fetchedWindow: FetchedWindow) {
+  function fetchNextSlab(
+    accessToken: string,
+    fetchedWindow: FetchedWindow,
+    slab: SlabDirection,
+  ) {
     const extended = extendFetchedWindow(
       fetchedWindow,
-      'future',
+      slab.direction,
       FETCHED_WINDOW_SLAB_MONTHS,
       { start: range.start, end: range.end },
     )
 
     // The module clamps the new edge to the Extended Calendar Range, so a no-op
-    // move means the window has already reached the far edge.
-    if (extended.latest.getTime() <= fetchedWindow.latest.getTime()) {
+    // move means the window has already reached that edge.
+    if (!slab.advanced(extended, fetchedWindow)) {
       return
     }
 
-    const slabRange = { start: fetchedWindow.latest, end: extended.latest }
+    const slabRange = slab.fetchRange(extended, fetchedWindow)
     // Optimistically extend the Fetched Window so repeated scroll events in the
     // same trigger zone do not fire the same slab twice. Rolled back on failure.
     fetchedWindowRef.current = extended
@@ -182,46 +231,11 @@ export function CalendarSurface() {
       })
       .catch(() => {
         const current = fetchedWindowRef.current
-        if (current && current.latest.getTime() === extended.latest.getTime()) {
-          fetchedWindowRef.current = { ...current, latest: fetchedWindow.latest }
-        }
-      })
-      .finally(() => {
-        setPendingScrollFetchCount((count) => count - 1)
-      })
-  }
-
-  function fetchNextPastSlab(accessToken: string, fetchedWindow: FetchedWindow) {
-    const extended = extendFetchedWindow(
-      fetchedWindow,
-      'past',
-      FETCHED_WINDOW_SLAB_MONTHS,
-      { start: range.start, end: range.end },
-    )
-
-    // The module clamps the new edge to the Extended Calendar Range, so a no-op
-    // move means the window has already reached the near edge.
-    if (extended.earliest.getTime() >= fetchedWindow.earliest.getTime()) {
-      return
-    }
-
-    const slabRange = { start: extended.earliest, end: fetchedWindow.earliest }
-    // Optimistically extend the Fetched Window so repeated scroll events in the
-    // same trigger zone do not fire the same slab twice. Rolled back on failure.
-    fetchedWindowRef.current = extended
-    setPendingScrollFetchCount((count) => count + 1)
-
-    fetchPrimaryCalendarEvents(accessToken, slabRange)
-      .then((slabEvents) => {
-        setEvents((previous) => mergeCalendarEvents(previous, slabEvents))
-      })
-      .catch(() => {
-        const current = fetchedWindowRef.current
-        if (current && current.earliest.getTime() === extended.earliest.getTime()) {
-          fetchedWindowRef.current = {
-            ...current,
-            earliest: fetchedWindow.earliest,
-          }
+        if (
+          current &&
+          slab.edge(current).getTime() === slab.edge(extended).getTime()
+        ) {
+          fetchedWindowRef.current = slab.rollback(current, fetchedWindow)
         }
       })
       .finally(() => {
