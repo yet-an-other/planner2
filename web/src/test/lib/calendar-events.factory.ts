@@ -27,6 +27,7 @@ type MakeBarInput = {
   endDate?: Date
   color?: string
   htmlLink?: string | null
+  detail?: Partial<EventDetail>
 }
 
 export function makeBar(input: MakeBarInput): CalendarEventBar {
@@ -41,7 +42,7 @@ export function makeBar(input: MakeBarInput): CalendarEventBar {
     date: input.date,
     endDate,
     color: input.color ?? '#2952a3',
-    detail: { ...emptyDetail(), htmlLink: input.htmlLink ?? null },
+    detail: { ...emptyDetail(), htmlLink: input.htmlLink ?? null, ...input.detail },
     timing: {
       start: input.date,
       end: endDate,
@@ -59,6 +60,7 @@ type MakeRowInput = {
   durationMinutes?: number
   color?: string
   htmlLink?: string | null
+  detail?: Partial<EventDetail>
 }
 
 export function makeRow(input: MakeRowInput): CalendarEventRow {
@@ -70,7 +72,7 @@ export function makeRow(input: MakeRowInput): CalendarEventRow {
     startTime: input.startTime ?? '09:00',
     durationMinutes: input.durationMinutes ?? 60,
     color: input.color ?? '#2952a3',
-    detail: { ...emptyDetail(), htmlLink: input.htmlLink ?? null },
+    detail: { ...emptyDetail(), htmlLink: input.htmlLink ?? null, ...input.detail },
     timing: {
       start: input.date,
       end: input.date,

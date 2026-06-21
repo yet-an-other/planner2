@@ -85,11 +85,15 @@ export type GoogleCalendarEventResource = {
   attendees?: Array<{
     responseStatus?: string
     self?: boolean
+    displayName?: string
+    email?: string
   }>
   colorId?: string
   htmlLink?: string
   id?: string
   iCalUID?: string
+  location?: string
+  description?: string
   status?: string
   summary?: string
   start?: {
@@ -136,13 +140,11 @@ export function normalizeGoogleCalendarEvents(
 
     const title = event.summary?.trim() || 'Busy'
     const color = getEventColor(event, primaryCalendarColor, eventColors)
-    // Slice 1 of PRD #003 carries htmlLink end-to-end; location/description/
-    // attendees are scaffolded null/empty here and populated in slice 2.
     const detail: EventDetail = {
       htmlLink: event.htmlLink ?? null,
-      location: null,
-      description: null,
-      attendees: [],
+      location: event.location?.trim() || null,
+      description: buildDescription(event.description),
+      attendees: mapAttendees(event.attendees),
     }
 
     if (event.start?.date && event.end?.date) {
@@ -304,6 +306,52 @@ function isDeclinedByViewer(event: GoogleCalendarEventResource) {
   return event.attendees?.some(
     (attendee) => attendee.self && attendee.responseStatus === 'declined',
   )
+}
+
+const KNOWN_RESPONSE_STATUSES = new Set<Attendee['responseStatus']>([
+  'accepted',
+  'declined',
+  'tentative',
+  'needsAction',
+])
+
+/** Maps Google attendees to the popover's closed-union Attendee shape. */
+function mapAttendees(
+  attendees: GoogleCalendarEventResource['attendees'],
+): Attendee[] {
+  if (!attendees) {
+    return []
+  }
+
+  return attendees
+    .map((attendee) => ({
+      displayName: attendee.displayName?.trim() || null,
+      email: attendee.email?.trim() ?? '',
+      responseStatus:
+        attendee.responseStatus &&
+        KNOWN_RESPONSE_STATUSES.has(
+          attendee.responseStatus as Attendee['responseStatus'],
+        )
+          ? (attendee.responseStatus as Attendee['responseStatus'])
+          : 'unknown',
+    }))
+    .filter((attendee) => attendee.displayName !== null || attendee.email !== '')
+}
+
+/**
+ * Renders the Google description into plain text by stripping HTML via the DOM.
+ * Plain text avoids XSS risk and any tracking beacons an organizer may embed.
+ * Safe because the app is a browser SPA (no SSR); works in jsdom tests too.
+ */
+function buildDescription(description: string | undefined): string | null {
+  if (!description) {
+    return null
+  }
+
+  const element = document.createElement('div')
+  element.innerHTML = description
+  const text = element.textContent ?? ''
+  return text.trim() || null
 }
 
 function getEventColor(

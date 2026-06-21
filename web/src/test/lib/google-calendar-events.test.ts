@@ -92,7 +92,7 @@ describe('normalizeGoogleCalendarEvents', () => {
     )
   })
 
-  it('scaffolds location, description, and attendees as null/empty for slice 1', () => {
+  it('treats missing location, description, and attendees as null/empty', () => {
     const [event] = normalizeGoogleCalendarEvents(
       [
         {
@@ -109,6 +109,90 @@ describe('normalizeGoogleCalendarEvents', () => {
     expect(event.detail.location).toBeNull()
     expect(event.detail.description).toBeNull()
     expect(event.detail.attendees).toEqual([])
+  })
+
+  it('carries location, description, and attendees through into the EventDetail', () => {
+    const [event] = normalizeGoogleCalendarEvents(
+      [
+        {
+          id: 'evt-rich',
+          summary: 'Offsite',
+          location: 'Conference Room A',
+          description: 'Quarterly planning',
+          attendees: [
+            {
+              email: 'ada@example.com',
+              displayName: 'Ada',
+              responseStatus: 'accepted',
+            },
+            { email: 'bob@example.com', responseStatus: 'declined' },
+          ],
+          start: { dateTime: '2026-06-17T14:00:00' },
+          end: { dateTime: '2026-06-17T15:00:00' },
+        },
+      ],
+      PRIMARY_COLOR,
+    )
+
+    if (event.kind !== 'row') return
+    expect(event.detail.location).toBe('Conference Room A')
+    expect(event.detail.description).toBe('Quarterly planning')
+    expect(event.detail.attendees).toEqual([
+      {
+        displayName: 'Ada',
+        email: 'ada@example.com',
+        responseStatus: 'accepted',
+      },
+      {
+        displayName: null,
+        email: 'bob@example.com',
+        responseStatus: 'declined',
+      },
+    ])
+  })
+
+  it('strips HTML from the description and keeps plain text', () => {
+    const [event] = normalizeGoogleCalendarEvents(
+      [
+        {
+          id: 'evt-html',
+          summary: 'Sync',
+          description: '<b>Bring</b> <a href="x">notes</a> &amp; laptop',
+          start: { dateTime: '2026-06-17T14:00:00' },
+          end: { dateTime: '2026-06-17T15:00:00' },
+        },
+      ],
+      PRIMARY_COLOR,
+    )
+
+    if (event.kind !== 'row') return
+    expect(event.detail.description).toBe('Bring notes & laptop')
+  })
+
+  it('collapses an unknown attendee responseStatus to unknown', () => {
+    const [event] = normalizeGoogleCalendarEvents(
+      [
+        {
+          id: 'evt-att',
+          summary: 'Sync',
+          attendees: [
+            { email: 'a@example.com', responseStatus: 'accepted' },
+            { email: 'b@example.com', responseStatus: 'weird-value' },
+            { email: 'c@example.com' },
+          ],
+          start: { dateTime: '2026-06-17T14:00:00' },
+          end: { dateTime: '2026-06-17T15:00:00' },
+        },
+      ],
+      PRIMARY_COLOR,
+    )
+
+    if (event.kind !== 'row') return
+    expect(event.detail.attendees.map((a) => a.responseStatus)).toEqual([
+      'accepted',
+      'unknown',
+      'unknown',
+    ])
   })
 
   it('falls back to a null htmlLink when Google omits it', () => {

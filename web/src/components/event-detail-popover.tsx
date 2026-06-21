@@ -1,9 +1,23 @@
 import { createPortal } from 'react-dom'
-import type { CalendarEvent } from '@/lib/google-calendar-events'
+import type { Attendee, CalendarEvent } from '@/lib/google-calendar-events'
 import { formatEventTiming } from '@/lib/event-timing'
 import { cn } from '@/lib/utils'
 
 const TITLE_ID = 'event-detail-popover-title'
+const MAX_ATTENDEES = 5
+
+const RESPONSE_STATUS_LABELS: Record<Attendee['responseStatus'], string> = {
+  accepted: 'accepted',
+  declined: 'declined',
+  tentative: 'tentative',
+  needsAction: 'invited',
+  unknown: 'unknown',
+}
+
+/** Name shown for an attendee: display name when present, email otherwise. */
+function attendeeLabel(attendee: Attendee): string {
+  return attendee.displayName ?? attendee.email
+}
 
 type EventDetailPopoverProps = {
   /** The Calendar Event to show detail for. When null, nothing is rendered. */
@@ -82,6 +96,37 @@ export function EventDetailPopover({
           </dt>
           <dd className="mt-0.5 text-sm">{formatEventTiming(event.timing)}</dd>
         </div>
+
+        {event.detail.location !== null && (
+          <div>
+            <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8b8f72]">
+              Where
+            </dt>
+            <dd className="mt-0.5 text-sm">{event.detail.location}</dd>
+          </div>
+        )}
+
+        {event.detail.description !== null && (
+          <div>
+            <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8b8f72]">
+              Notes
+            </dt>
+            <dd
+              className="mt-0.5 max-h-40 whitespace-pre-wrap text-sm"
+              data-testid="description"
+              style={{ overflowY: 'auto' }}
+            >
+              {event.detail.description}
+            </dd>
+          </div>
+        )}
+
+        <div>
+          <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8b8f72]">
+            Attendees
+          </dt>
+          <AttendeeList attendees={event.detail.attendees} />
+        </div>
       </dl>
 
       {event.detail.htmlLink !== null && (
@@ -98,5 +143,29 @@ export function EventDetailPopover({
       )}
     </div>,
     document.body,
+  )
+}
+
+/** Renders the attendee list with the empty-data rules from PRD #003. */
+function AttendeeList({ attendees }: { attendees: Attendee[] }) {
+  if (attendees.length === 0) {
+    return <dd className="mt-0.5 text-sm text-[#8b8f72]">No attendees</dd>
+  }
+
+  const visible = attendees.slice(0, MAX_ATTENDEES)
+  const overflow = attendees.length - visible.length
+
+  return (
+    <dd className="mt-0.5 space-y-0.5 text-sm">
+      {visible.map((attendee) => (
+        <div className="flex items-baseline justify-between gap-2" key={`${attendee.email}-${attendee.displayName ?? ''}`}>
+          <span className="truncate">{attendeeLabel(attendee)}</span>
+          <span className="shrink-0 text-xs text-[#8b8f72]">
+            {RESPONSE_STATUS_LABELS[attendee.responseStatus]}
+          </span>
+        </div>
+      ))}
+      {overflow > 0 && <div className="text-xs text-[#8b8f72]">+{overflow} more</div>}
+    </dd>
   )
 }
