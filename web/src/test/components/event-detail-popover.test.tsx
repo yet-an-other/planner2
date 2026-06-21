@@ -158,7 +158,7 @@ describe('EventDetailPopover content', () => {
     expect(dialog).not.toHaveTextContent('Description')
   })
 
-  it('renders a friendly "No attendees" line when the attendee list is empty', () => {
+  it('omits the attendees section entirely when the attendee list is empty', () => {
     const event = makeRow({
       id: 'evt-none',
       title: 'Focus block',
@@ -168,7 +168,9 @@ describe('EventDetailPopover content', () => {
 
     render(<EventDetailPopover event={event} anchorRect={anchoredRect} onClose={vi.fn()} />)
 
-    expect(screen.getByText(/no attendees/i)).toBeInTheDocument()
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).not.toHaveTextContent('Attendees')
+    expect(dialog).not.toHaveTextContent(/no attendees/i)
   })
 
   it('renders attendee names with their response status as text', () => {
@@ -249,5 +251,49 @@ describe('EventDetailPopover content', () => {
     const region = screen.getByRole('dialog').querySelector('[data-testid="description"]') as HTMLElement
     expect(region).not.toBeNull()
     expect(region.style.overflowY).toBe('auto')
+  })
+})
+
+describe('EventDetailPopover placement', () => {
+  it('clamps the popover horizontally so a right-edge trigger never overflows', () => {
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', {
+      writable: true,
+      configurable: true,
+      value: 400,
+    })
+
+    const rightEdgeAnchor = {
+      ...anchoredRect,
+      left: 380,
+      right: 400,
+      x: 380,
+    } as DOMRect
+    const event = makeRow({
+      id: 'evt-edge',
+      title: 'Edge Case',
+      date: new Date(2026, 5, 19, 14, 0),
+      startTime: '14:00',
+    })
+
+    try {
+      render(
+        <EventDetailPopover event={event} anchorRect={rightEdgeAnchor} onClose={vi.fn()} />,
+      )
+
+      const dialog = screen.getByRole('dialog')
+      const left = Number.parseInt(dialog.style.left, 10)
+      const width = Number.parseInt(dialog.style.width, 10)
+
+      // The popover moved left off the right-edge anchor and stays on screen.
+      expect(left).toBeLessThan(380)
+      expect(left + width).toBeLessThanOrEqual(window.innerWidth)
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        writable: true,
+        configurable: true,
+        value: originalWidth,
+      })
+    }
   })
 })

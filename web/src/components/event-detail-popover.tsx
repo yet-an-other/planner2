@@ -1,10 +1,26 @@
+import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Attendee, CalendarEvent } from '@/lib/google-calendar-events'
+import { computePopoverPlacement } from '@/lib/popover-placement'
 import { formatEventTiming } from '@/lib/event-timing'
 import { cn } from '@/lib/utils'
 
 const TITLE_ID = 'event-detail-popover-title'
 const MAX_ATTENDEES = 5
+const POPOVER_MAX_WIDTH = 360
+
+/** Fallback anchor when no rect was captured (defensive; the hook always sets one). */
+const ZERO_RECT = {
+  bottom: 0,
+  left: 0,
+  top: 0,
+  right: 0,
+  height: 0,
+  width: 0,
+  x: 0,
+  y: 0,
+  toJSON: () => ({}),
+} as DOMRect
 
 const RESPONSE_STATUS_LABELS: Record<Attendee['responseStatus'], string> = {
   accepted: 'accepted',
@@ -33,11 +49,14 @@ type EventDetailPopoverProps = {
 /**
  * Presentational, non-modal Event Detail Popover. Portaled to `document.body`
  * so it is never a child of a virtualized Week Row, and fixed-positioned from
- * the trigger rect captured at open time. The Calendar Surface owns open/close
- * lifecycle; this component renders detail and reports dismissal via `onClose`.
+ * the trigger rect captured at open time. Placement is computed by the pure
+ * `computePopoverPlacement` module, which clamps horizontally and flips above
+ * / clamps vertically so the popover is always fully on screen. The Calendar
+ * Surface owns open/close lifecycle; this component renders detail, measures
+ * its own size, and reports dismissal via `onClose`.
  *
- * Slice 1 of PRD #003 renders the title, normalized timing, and the Google
- * Calendar link. Location/description/attendees are rendered in slice 2.
+ * PRD #003 renders the title, normalized timing, location, description,
+ * attendees, and the Google Calendar link.
  */
 export function EventDetailPopover({
   event,
@@ -45,29 +64,67 @@ export function EventDetailPopover({
   onClose,
   popoverRef,
 }: EventDetailPopoverProps) {
+  const [popoverHeight, setPopoverHeight] = useState(0)
+  const innerRef = useRef<HTMLDivElement | null>(null)
+
+  // Measure the rendered popover so vertical placement can flip above / clamp
+  // when it would overflow. useLayoutEffect runs before paint, so the first
+  // painted frame already reflects the measured size (no flash).
+  useLayoutEffect(() => {
+    const el = innerRef.current
+    if (!el) {
+      return
+    }
+    const measure = () => setPopoverHeight(el.offsetHeight)
+    measure()
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [event])
+
   if (!event) {
     return null
   }
 
-  const top = anchorRect ? Math.round(anchorRect.bottom + 8) : 0
-  const left = anchorRect ? Math.round(anchorRect.left) : 0
+  const viewport = { width: window.innerWidth, height: window.innerHeight }
+  const placement = computePopoverPlacement({
+    anchorRect: anchorRect ?? ZERO_RECT,
+    viewport,
+    popover: {
+      width: Math.min(POPOVER_MAX_WIDTH, viewport.width * 0.9),
+      height: popoverHeight,
+    },
+  })
 
   return createPortal(
     <div
       aria-labelledby={TITLE_ID}
       aria-modal="false"
       className={cn(
-        'fixed z-50 w-[min(360px,90vw)] max-h-[80vh] overflow-y-auto',
+        'fixed z-50 max-h-[80vh] overflow-y-auto',
         'rounded-lg border border-[#d8d1bd] bg-[#f5f1e6] text-[#252819] shadow-lg',
       )}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
+      onKeyDown={(keyEvent) => {
+        if (keyEvent.key === 'Escape') {
           onClose()
         }
       }}
-      ref={popoverRef}
+      ref={(el) => {
+        innerRef.current = el
+        if (popoverRef) {
+          popoverRef.current = el
+        }
+      }}
       role="dialog"
-      style={{ position: 'fixed', top, left }}
+      style={{
+        position: 'fixed',
+        top: placement.top,
+        left: placement.left,
+        width: placement.width,
+      }}
       tabIndex={-1}
     >
       <div className="flex items-start gap-2 border-l-4 px-4 pb-3 pt-3" style={{ borderLeftColor: event.color }}>
@@ -126,12 +183,14 @@ export function EventDetailPopover({
           </div>
         )}
 
-        <div>
-          <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8b8f72]">
-            Attendees
-          </dt>
-          <AttendeeList attendees={event.detail.attendees} />
-        </div>
+        {event.detail.attendees.length > 0 && (
+          <div>
+            <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8b8f72]">
+              Attendees
+            </dt>
+            <AttendeeList attendees={event.detail.attendees} />
+          </div>
+        )}
       </dl>
 
       {event.detail.htmlLink !== null && (
@@ -151,12 +210,8 @@ export function EventDetailPopover({
   )
 }
 
-/** Renders the attendee list with the empty-data rules from PRD #003. */
+/** Renders the attendee list. The section is omitted entirely when empty. */
 function AttendeeList({ attendees }: { attendees: Attendee[] }) {
-  if (attendees.length === 0) {
-    return <dd className="mt-0.5 text-sm text-[#8b8f72]">No attendees</dd>
-  }
-
   const visible = attendees.slice(0, MAX_ATTENDEES)
   const overflow = attendees.length - visible.length
 
