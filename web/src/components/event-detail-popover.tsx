@@ -1,6 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { MapPin } from 'lucide-react'
 import type { Attendee, CalendarEvent } from '@/lib/google-calendar-events'
+import { buildLocationHref } from '@/lib/location-links'
 import { computePopoverPlacement } from '@/lib/popover-placement'
 import { formatEventTiming } from '@/lib/event-timing'
 import { splitTextIntoLinkSegments } from '@/lib/text-links'
@@ -165,7 +167,9 @@ export function EventDetailPopover({
             <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8b8f72]">
               Where
             </dt>
-            <dd className="mt-0.5 text-sm">{event.detail.location}</dd>
+            <dd className="mt-0.5 text-sm">
+              <LocationText location={event.detail.location} />
+            </dd>
           </div>
         )}
 
@@ -208,6 +212,44 @@ export function EventDetailPopover({
       )}
     </div>,
     document.body,
+  )
+}
+
+/**
+ * Renders the location as an actionable link. A place/address string becomes
+ * a pin-icon Maps link followed by the location as plain text; a location that
+ * is itself an http(s) URL is rendered as a direct text link. The location data
+ * model stays `string | null`; this is purely presentational.
+ */
+function LocationText({ location }: { location: string }) {
+  const href = buildLocationHref(location)
+
+  if (href.kind === 'url') {
+    return (
+      <a
+        className="text-[#2952a3] underline underline-offset-2 hover:text-[#777b60]"
+        href={href.url}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        {location}
+      </a>
+    )
+  }
+
+  return (
+    <span className="inline-flex items-start gap-1">
+      <a
+        aria-label="Open in Google Maps"
+        className="mt-0.5 shrink-0 text-[#2952a3] hover:text-[#777b60] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#777b60]"
+        href={href.url}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        <MapPin aria-hidden="true" className="h-3.5 w-3.5" />
+      </a>
+      <span>{location}</span>
+    </span>
   )
 }
 

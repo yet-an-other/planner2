@@ -87,3 +87,16 @@ The popover is connected-only: it cannot be summoned from Saved Busy Blocks, and
 - Timing normalization lives at the normalization source so the popover sees one uniform `EventTiming` shape regardless of bar-vs-row. This keeps the popover free of `kind`-branching and keeps the "interface is the test surface" property for both the normalization module and the popover component.
 - Attendee display is name-primary, email-fallback: show the display name when present; show the email only when there is no display name. Response status is always rendered as text (or icon + text), never color alone, for both accessibility and consent/privacy clarity.
 - References: ADR 0002 (the decision that permits this feature); ADR 0001 (the privacy principle this feature extends); PRD #001 (the surface this feature is summoned from); PRD #002 (the fetch model whose in-memory events the popover reads).
+
+## Amendments
+
+### 2026-06-19 — Location links
+
+The **Where** field is now actionable, superseding the implicit "location is plain text" treatment in the original Solution. A location string becomes a link:
+
+- **Place/address strings** (anything that is not a whole-string `http(s)` URL) link to a Google Maps search: `https://www.google.com/maps/search/?api=1&query=<encodeURIComponent(collapseWhitespace(location))>`, letting Maps geocode and interpret arbitrary free text. Rendered as a pin-icon link (`lucide-react` `MapPin`) before the location as plain text; the pin is the affordance, the text is not underlined.
+- **Whole-string `http(s)` URLs** (e.g. a pasted video-conference link) render as a direct external text link (the URL is both visible text and href).
+
+The classification and Maps-URL building live in a new pure, render-time module `src/lib/location-links.ts`, symmetric with the description seam (`text-links.ts`). `EventDetail.location` remains `string | null`; no field is added to the data model, and all `EventDetail` fields stay memory-only (ADR 0001/0002).
+
+This incidentally handles video/conference links that a user pasted into the location field (via the `url` branch), but full `conferenceData` / `hangoutLink` support — the dedicated conference link from structured event data — **remains deferred** (the Out-of-Scope line above still holds).

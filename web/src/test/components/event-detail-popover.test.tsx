@@ -143,6 +143,56 @@ describe('EventDetailPopover content', () => {
     expect(dialog).toHaveTextContent('Quarterly planning')
   })
 
+  it('renders a place location as a pin-icon Maps link before the plain-text location', () => {
+    const location =
+      'ESCP Business School - Turin Campus, Via Andrea Doria, 27, 10123 Torino TO, Italy'
+    const event = makeRow({
+      id: 'evt-loc',
+      title: 'Offsite',
+      date: new Date(2026, 5, 19, 14, 0),
+      startTime: '14:00',
+      detail: { location },
+    })
+
+    render(<EventDetailPopover event={event} anchorRect={anchoredRect} onClose={vi.fn()} />)
+
+    // The location text is present as plain text, not as the link's text content.
+    expect(screen.getByText(location)).toBeInTheDocument()
+
+    // The pin is a separate, icon-only link opening Google Maps search.
+    const pinLink = screen.getByRole('link', { name: /open in google maps/i })
+    expect(pinLink).toHaveAttribute(
+      'href',
+      'https://www.google.com/maps/search/?api=1&query=' +
+        encodeURIComponent(location),
+    )
+    expect(pinLink).toHaveAttribute('target', '_blank')
+    expect(pinLink).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('renders a whole-URL location as a direct external text link', () => {
+    const location = 'https://zoom.us/j/123456'
+    const event = makeRow({
+      id: 'evt-url',
+      title: 'Remote sync',
+      date: new Date(2026, 5, 19, 14, 0),
+      startTime: '14:00',
+      detail: { location },
+    })
+
+    render(<EventDetailPopover event={event} anchorRect={anchoredRect} onClose={vi.fn()} />)
+
+    const link = screen.getByRole('link', { name: location })
+    expect(link).toHaveAttribute('href', location)
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+
+    // No Maps pin link is rendered for a URL location.
+    expect(
+      screen.queryByRole('link', { name: /open in google maps/i }),
+    ).not.toBeInTheDocument()
+  })
+
   it('omits the location and description rows when they are null', () => {
     const event = makeRow({
       id: 'evt-sparse',
