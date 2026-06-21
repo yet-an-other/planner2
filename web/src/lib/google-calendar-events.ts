@@ -68,6 +68,15 @@ export type Attendee = {
 const GOOGLE_CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3'
 const DEFAULT_EVENT_COLOR = '#2952a3'
 
+/**
+ * Google auto-appends this boilerplate to events it creates automatically
+ * (flights, hotel reservations, etc.). It carries no user value, so it is
+ * stripped from the description at normalization. The g.co/calendar link may
+ * sit on the same line or wrap; `\s*` tolerates either.
+ */
+const GOOGLE_AUTO_EVENT_BOILERPLATE =
+  /To see detailed information for automatically created events like this one, use the official Google Calendar app\.\s*https:\/\/g\.co\/calendar/g
+
 type GoogleCalendarListEntry = {
   backgroundColor?: string
 }
@@ -342,6 +351,9 @@ function mapAttendees(
  * Renders the Google description into plain text by stripping HTML via the DOM.
  * Plain text avoids XSS risk and any tracking beacons an organizer may embed.
  * Safe because the app is a browser SPA (no SSR); works in jsdom tests too.
+ *
+ * Also strips Google's auto-injected "automatically created events" boilerplate
+ * (it carries no user value and only clutters the popover).
  */
 function buildDescription(description: string | undefined): string | null {
   if (!description) {
@@ -350,8 +362,10 @@ function buildDescription(description: string | undefined): string | null {
 
   const element = document.createElement('div')
   element.innerHTML = description
-  const text = element.textContent ?? ''
-  return text.trim() || null
+  const text = (element.textContent ?? '')
+    .replace(GOOGLE_AUTO_EVENT_BOILERPLATE, '')
+    .trim()
+  return text || null
 }
 
 function getEventColor(

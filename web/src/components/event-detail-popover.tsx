@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { Attendee, CalendarEvent } from '@/lib/google-calendar-events'
 import { computePopoverPlacement } from '@/lib/popover-placement'
 import { formatEventTiming } from '@/lib/event-timing'
+import { splitTextIntoLinkSegments } from '@/lib/text-links'
 import { cn } from '@/lib/utils'
 
 const TITLE_ID = 'event-detail-popover-title'
@@ -178,7 +179,7 @@ export function EventDetailPopover({
               data-testid="description"
               style={{ overflowY: 'auto' }}
             >
-              {event.detail.description}
+              <DescriptionText text={event.detail.description} />
             </dd>
           </div>
         )}
@@ -207,6 +208,35 @@ export function EventDetailPopover({
       )}
     </div>,
     document.body,
+  )
+}
+
+/**
+ * Renders the description plain text with any `http(s)` URLs turned into
+ * external links. The description is stored as plain text (HTML is stripped at
+ * normalization); linkification is purely presentational, so the data model and
+ * its "plain-text notes" invariant are unchanged.
+ */
+function DescriptionText({ text }: { text: string }) {
+  const segments = splitTextIntoLinkSegments(text)
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.kind === 'link' ? (
+          <a
+            className="text-[#2952a3] underline underline-offset-2 hover:text-[#777b60]"
+            href={segment.url}
+            key={`link-${index}`}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            {segment.value}
+          </a>
+        ) : (
+          <span key={`text-${index}`}>{segment.value}</span>
+        ),
+      )}
+    </>
   )
 }
 

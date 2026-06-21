@@ -252,6 +252,27 @@ describe('EventDetailPopover content', () => {
     expect(region).not.toBeNull()
     expect(region.style.overflowY).toBe('auto')
   })
+
+  it('renders URLs in the description as clickable external links', () => {
+    const event = makeRow({
+      id: 'evt-links',
+      title: 'Gmail event',
+      date: new Date(2026, 5, 19, 14, 0),
+      startTime: '14:00',
+      detail: {
+        description:
+          'This event was created from an email you received in Gmail. https://mail.google.com/mail?extsrc=cal&plid=ACUX6DMFTDX5QSW_x7zcvype_uzetpgxNqZ9HSs',
+      },
+    })
+
+    render(<EventDetailPopover event={event} anchorRect={anchoredRect} onClose={vi.fn()} />)
+
+    const link = screen.getByRole('link', {
+      name: /mail\.google\.com\/mail\?extsrc=cal/i,
+    })
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
 })
 
 describe('EventDetailPopover placement', () => {

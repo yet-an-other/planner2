@@ -169,6 +169,44 @@ describe('normalizeGoogleCalendarEvents', () => {
     expect(event.detail.description).toBe('Bring notes & laptop')
   })
 
+  it('strips the Google "automatically created events" boilerplate from the description', () => {
+    const [event] = normalizeGoogleCalendarEvents(
+      [
+        {
+          id: 'evt-boiler',
+          summary: 'Flight',
+          description:
+            'UA 123 SFO→JFK\n\nTo see detailed information for automatically created events like this one, use the official Google Calendar app. https://g.co/calendar',
+          start: { dateTime: '2026-06-17T14:00:00' },
+          end: { dateTime: '2026-06-17T15:00:00' },
+        },
+      ],
+      PRIMARY_COLOR,
+    )
+
+    if (event.kind !== 'row') return
+    expect(event.detail.description).toBe('UA 123 SFO→JFK')
+  })
+
+  it('returns a null description when only the boilerplate is present', () => {
+    const [event] = normalizeGoogleCalendarEvents(
+      [
+        {
+          id: 'evt-only-boiler',
+          summary: 'Flight',
+          description:
+            'To see detailed information for automatically created events like this one, use the official Google Calendar app. https://g.co/calendar',
+          start: { dateTime: '2026-06-17T14:00:00' },
+          end: { dateTime: '2026-06-17T15:00:00' },
+        },
+      ],
+      PRIMARY_COLOR,
+    )
+
+    if (event.kind !== 'row') return
+    expect(event.detail.description).toBeNull()
+  })
+
   it('collapses an unknown attendee responseStatus to unknown', () => {
     const [event] = normalizeGoogleCalendarEvents(
       [
