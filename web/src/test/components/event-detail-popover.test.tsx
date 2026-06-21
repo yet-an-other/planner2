@@ -253,7 +253,7 @@ describe('EventDetailPopover content', () => {
     expect(region.style.overflowY).toBe('auto')
   })
 
-  it('renders URLs in the description as clickable external links', () => {
+  it('renders the Gmail "created from an email" line with "Gmail" as the clickable link, not the raw URL', () => {
     const event = makeRow({
       id: 'evt-links',
       title: 'Gmail event',
@@ -267,11 +267,17 @@ describe('EventDetailPopover content', () => {
 
     render(<EventDetailPopover event={event} anchorRect={anchoredRect} onClose={vi.fn()} />)
 
-    const link = screen.getByRole('link', {
-      name: /mail\.google\.com\/mail\?extsrc=cal/i,
-    })
+    const link = screen.getByRole('link', { name: 'Gmail' })
+    expect(link).toHaveAttribute(
+      'href',
+      'https://mail.google.com/mail?extsrc=cal&plid=ACUX6DMFTDX5QSW_x7zcvype_uzetpgxNqZ9HSs',
+    )
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+
+    // The raw mail.google.com URL must not be shown as visible text.
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).not.toHaveTextContent('mail.google.com')
   })
 })
 
