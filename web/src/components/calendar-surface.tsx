@@ -32,6 +32,7 @@ export function CalendarSurface() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? ''
   const googleAccountConnection = useGoogleAccountConnection(googleClientId)
   const connection = googleAccountConnection.connection
+  const googleAccountConnected = connection.status === 'connected'
   // The Fetched Window, scroll-driven slab fetching, and loading/error status
   // live behind this seam; the render module only computes the visible range
   // from scroll position and hands it to maybeFetchMore.
@@ -40,7 +41,10 @@ export function CalendarSurface() {
     today,
     range,
   })
-  const eventDetailPopover = useEventDetailPopover()
+  const eventDetailPopover = useEventDetailPopover({
+    scrollContainerRef: scrollParentRef,
+    isConnected: googleAccountConnected,
+  })
 
   // TanStack Virtual intentionally returns non-memoizable helpers; keep the virtualizer local to this component.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -57,7 +61,6 @@ export function CalendarSurface() {
     [range.start, topWeekIndex],
   )
   const visibleMonth = formatVisibleMonth(visibleWeekStart)
-  const googleAccountConnected = connection.status === 'connected'
   // Loading (from the events module) takes precedence, then its load error, then
   // the connection status from the Google Account Connection module.
   const effectiveHeaderStatus = eventsStatus ?? googleAccountConnection.status
@@ -297,6 +300,7 @@ export function CalendarSurface() {
         anchorRect={eventDetailPopover.anchorRect}
         event={eventDetailPopover.selectedEvent}
         onClose={eventDetailPopover.close}
+        popoverRef={eventDetailPopover.popoverRef}
       />
     </main>
   )

@@ -26,6 +26,8 @@ type EventDetailPopoverProps = {
   anchorRect: DOMRect | null
   /** Called when the user dismisses the popover (close button or Escape). */
   onClose: () => void
+  /** Ref attached to the popover root so outside-click can tell it apart. */
+  popoverRef?: React.RefObject<HTMLDivElement | null>
 }
 
 /**
@@ -41,6 +43,7 @@ export function EventDetailPopover({
   event,
   anchorRect,
   onClose,
+  popoverRef,
 }: EventDetailPopoverProps) {
   if (!event) {
     return null
@@ -62,6 +65,7 @@ export function EventDetailPopover({
           onClose()
         }
       }}
+      ref={popoverRef}
       role="dialog"
       style={{ position: 'fixed', top, left }}
       tabIndex={-1}
@@ -72,6 +76,7 @@ export function EventDetailPopover({
         </h2>
         <button
           aria-label="Close"
+          autoFocus
           className="-mr-1 -mt-1 shrink-0 rounded p-1 text-[#777b60] hover:text-[#252819] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#777b60]"
           onClick={onClose}
           type="button"

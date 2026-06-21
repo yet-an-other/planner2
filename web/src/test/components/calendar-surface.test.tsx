@@ -357,7 +357,7 @@ describe('Event Detail Popover', () => {
       requestAccessToken.mockImplementation(() => callback({ access_token: 'access-token' }))
       return { requestAccessToken }
     })
-    vi.stubGlobal('google', { accounts: { oauth2: { initTokenClient, revoke: vi.fn() } } })
+    vi.stubGlobal('google', { accounts: { oauth2: { initTokenClient, revoke: vi.fn((_accessToken: string, done: () => void) => done()) } } })
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo | URL) => {
@@ -415,13 +415,15 @@ describe('Event Detail Popover', () => {
 
     await screen.findByText('Ada')
     revealTodayWeek()
-    await screen.findByText('Team Lunch')
+    const trigger = await screen.findByRole('button', {
+      name: /team lunch.*open details/i,
+    })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
 
-    fireEvent.click(
-      screen.getByRole('button', { name: /team lunch.*open details/i }),
-    )
+    fireEvent.click(trigger)
 
     const dialog = await screen.findByRole('dialog')
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
     expect(dialog).toHaveTextContent('Team Lunch')
     expect(dialog).toHaveTextContent('All day')
     expect(
@@ -505,6 +507,135 @@ describe('Event Detail Popover', () => {
     expect(
       screen.queryByRole('button', { name: /open details/i }),
     ).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('opens the popover when Enter is pressed on a focused trigger', async () => {
+    const { revealTodayWeek } = mountWithEvents([
+      {
+        id: 'evt-1',
+        summary: 'Team Lunch',
+        start: { date: '2026-06-19' },
+        end: { date: '2026-06-20' },
+      },
+    ])
+    const user = userEvent.setup()
+
+    await screen.findByText('Ada')
+    revealTodayWeek()
+    const trigger = await screen.findByRole('button', {
+      name: /team lunch.*open details/i,
+    })
+    trigger.focus()
+
+    await user.keyboard('{Enter}')
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('closes the popover when clicking outside of it', async () => {
+    const { revealTodayWeek } = mountWithEvents([
+      {
+        id: 'evt-1',
+        summary: 'Team Lunch',
+        start: { date: '2026-06-19' },
+        end: { date: '2026-06-20' },
+      },
+    ])
+
+    await screen.findByText('Ada')
+    revealTodayWeek()
+    fireEvent.click(
+      screen.getByRole('button', { name: /team lunch.*open details/i }),
+    )
+    await screen.findByRole('dialog')
+
+    fireEvent.mouseDown(document.body)
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    )
+  })
+
+  it('closes the popover when the Calendar Surface is scrolled', async () => {
+    const { revealTodayWeek } = mountWithEvents([
+      {
+        id: 'evt-1',
+        summary: 'Team Lunch',
+        start: { date: '2026-06-19' },
+        end: { date: '2026-06-20' },
+      },
+    ])
+
+    await screen.findByText('Ada')
+    const surface = revealTodayWeek()
+    fireEvent.click(
+      screen.getByRole('button', { name: /team lunch.*open details/i }),
+    )
+    await screen.findByRole('dialog')
+
+    fireEvent.scroll(surface, { target: { scrollTop: 9999 } })
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    )
+  })
+
+  it('closes the popover when the Google Account Connection is disconnected', async () => {
+    const { revealTodayWeek } = mountWithEvents([
+      {
+        id: 'evt-1',
+        summary: 'Team Lunch',
+        start: { date: '2026-06-19' },
+        end: { date: '2026-06-20' },
+      },
+    ])
+
+    await screen.findByText('Ada')
+    revealTodayWeek()
+    fireEvent.click(
+      screen.getByRole('button', { name: /team lunch.*open details/i }),
+    )
+    await screen.findByRole('dialog')
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /disconnect google account for ada/i,
+      }),
+    )
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    )
+  })
+
+  it('moves focus to the close button on open and back to the trigger on close', async () => {
+    const { revealTodayWeek } = mountWithEvents([
+      {
+        id: 'evt-1',
+        summary: 'Team Lunch',
+        start: { date: '2026-06-19' },
+        end: { date: '2026-06-20' },
+      },
+    ])
+
+    await screen.findByText('Ada')
+    revealTodayWeek()
+    const trigger = await screen.findByRole('button', {
+      name: /team lunch.*open details/i,
+    })
+    fireEvent.click(trigger)
+    const dialog = await screen.findByRole('dialog')
+
+    // Focus moves into the popover on open.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /close/i })).toHaveFocus(),
+    )
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+
+    // Focus returns to the trigger on close.
+    await waitFor(() => expect(trigger).toHaveFocus())
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

@@ -41,6 +41,13 @@ describe('EventDetailPopover', () => {
     expect(dialog).toHaveTextContent('Design Review')
     expect(dialog).toHaveTextContent('Fri, Jun 19, 2026')
 
+    // The dialog is labelled by its title so screen readers announce it.
+    const labelledBy = dialog.getAttribute('aria-labelledby')
+    expect(labelledBy).toBeTruthy()
+    const titleEl = document.getElementById(labelledBy!)
+    expect(titleEl).not.toBeNull()
+    expect(titleEl!.textContent).toBe('Design Review')
+
     const link = screen.getByRole('link', { name: /open in google calendar/i })
     expect(link).toHaveAttribute(
       'href',
