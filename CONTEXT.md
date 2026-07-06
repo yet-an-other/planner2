@@ -32,6 +32,14 @@ _Avoid_: Login, Google auth, OAuth token
 The Calendar Header control that displays the Google Account Connection state and lets the user connect or manage the connected account.
 _Avoid_: Login button, profile button, auth widget
 
+**Source Calendar Control**:
+The connected-only Calendar Header control that opens the Source Calendar Picker so the user can change the Selected Source Calendars.
+_Avoid_: Settings button, calendar filter, gear, preferences
+
+**Source Calendar Picker**:
+A modal dialog, opened from the Source Calendar Control, that lists the user's Source Calendars and lets the user change the Selected Source Calendars (minimum one) with explicit Save / Cancel.
+_Avoid_: Settings modal, calendar dialog, preferences screen
+
 **Header Status**:
 A Calendar Header area for short connection information, progress messages, or errors related to the Calendar Surface.
 _Avoid_: Toast, alert, notification bar
@@ -60,8 +68,16 @@ _Avoid_: Current day, system date, UTC date
 A Calendar Header action that returns the Calendar Surface to Today's Week Row.
 _Avoid_: Back to today, scroll home, month click
 
+**Source Calendar**:
+A Google Calendar in the user's account that The Planner is permitted to fetch Calendar Events from. Each has a stable Google id, a display summary (e.g. "Work", "Family"), and a background color.
+_Avoid_: calendar, Google calendar, calendar list, feed
+
+**Selected Source Calendars**:
+The subset of the user's Source Calendars that The Planner currently fetches Calendar Events from. Defaults to the primary calendar on first connect.
+_Avoid_: chosen calendars, enabled calendars, visible calendars
+
 **Calendar Event**:
-A Google Calendar event fetched from the primary calendar and rendered on the Calendar Surface while the Google Account Connection is active.
+A Google Calendar event fetched from one of the Selected Source Calendars and rendered on the Calendar Surface while the Google Account Connection is active.
 _Avoid_: Event item, schedule entry, appointment
 
 **Calendar Event Bar**:
@@ -94,6 +110,12 @@ _Avoid_: Infinite range, endless dates, all dates
 - A **Calendar Header** contains one **Header Status**.
 - An **Account Control** displays the **Google Account Connection** state.
 - A **Google Account Connection** is either connected or disconnected.
+- A **Source Calendar** belongs to a connected **Google Account Connection**.
+- **Selected Source Calendars** is the subset of **Source Calendars** the user has chosen; The Planner fetches **Calendar Events** only from these.
+- A **Calendar Event** belongs to exactly one **Source Calendar**.
+- A **Source Calendar Control** appears only while the **Google Account Connection** is connected.
+- A **Source Calendar Control** opens the **Source Calendar Picker**.
+- A **Source Calendar Picker** changes the **Selected Source Calendars**, which are persisted per device (ADR 0003).
 - A **Calendar Surface** presents the **Extended Calendar Range**.
 - A **Calendar Surface** contains **Week Rows** ordered by date.
 - A **Week Row** contains exactly seven **Date Cells**.
@@ -128,3 +150,4 @@ _Avoid_: Infinite range, endless dates, all dates
 - "infinite scroll" could mean literally unbounded dates; resolved: the Calendar Surface uses an **Extended Calendar Range**.
 - "event-free" was the original definition of the Calendar Surface; resolved: the Calendar Surface now displays **Calendar Events** while connected and **Saved Busy Blocks** while disconnected.
 - "all-day" vs "multiday" in Google Calendar: an all-day event spanning multiple days is visually treated the same as a multiday timed event and rendered as a single **Calendar Event Bar** spanning all affected **Date Cells**.
+- "calendar" used loosely to mean the pickable account-level entry; resolved: that concept is a **Source Calendar**, distinct from the **Calendar Surface**, **Calendar Header**, and **Calendar Event**.
