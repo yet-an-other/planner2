@@ -1,9 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  assembleCalendarEvents,
+  fetchSourceCalendarEvents,
   normalizeGoogleCalendarEvents,
 } from '@/lib/google-calendar-events'
+import { makeBar } from './calendar-events.factory'
 
 const PRIMARY_COLOR = '#2952a3'
+const JUNE_17 = new Date(2026, 5, 17)
+const RANGE = { start: new Date(2026, 5, 17), end: new Date(2026, 5, 18) }
 
 describe('normalizeGoogleCalendarEvents', () => {
   it('carries the htmlLink into the nested EventDetail of an all-day bar', () => {
@@ -278,5 +283,140 @@ describe('normalizeGoogleCalendarEvents', () => {
     )
 
     expect(events.map((e) => e.id)).toEqual(['kept'])
+  })
+})
+
+describe('assembleCalendarEvents', () => {
+  it('merges events from all successful calendars', () => {
+    const result = assembleCalendarEvents([
+      { calendarId: 'work', events: [makeBar({ id: 'w1', date: JUNE_17 })] },
+      { calendarId: 'family', events: [makeBar({ id: 'f1', date: JUNE_17 })] },
+    ])
+
+    expect(result.events.map((e) => e.id)).toEqual(['w1', 'f1'])
+    expect(result.failedCalendarCount).toBe(0)
+    expect(result.totalCalendarCount).toBe(2)
+  })
+
+  it('counts a failed calendar while keeping the successful calendars events', () => {
+    const result = assembleCalendarEvents([
+      { calendarId: 'work', events: [makeBar({ id: 'w1', date: JUNE_17 })] },
+      { calendarId: 'broken', failed: true },
+    ])
+
+    expect(result.events.map((e) => e.id)).toEqual(['w1'])
+    expect(result.failedCalendarCount).toBe(1)
+    expect(result.totalCalendarCount).toBe(2)
+  })
+
+  it('reports a total failure when every calendar failed', () => {
+    const result = assembleCalendarEvents([
+      { calendarId: 'a', failed: true },
+      { calendarId: 'b', failed: true },
+    ])
+
+    expect(result.events).toEqual([])
+    expect(result.failedCalendarCount).toBe(2)
+    expect(result.totalCalendarCount).toBe(2)
+  })
+
+  it('collapses an event appearing in two calendars to one, first calendar winning', () => {
+    const result = assembleCalendarEvents([
+      { calendarId: 'work', events: [makeBar({ id: 'shared', date: JUNE_17, color: '#work' })] },
+      { calendarId: 'family', events: [makeBar({ id: 'shared', date: JUNE_17, color: '#family' })] },
+    ])
+
+    expect(result.events).toHaveLength(1)
+    expect(result.events[0].color).toBe('#work')
+  })
+})
+
+describe('normalizeGoogleCalendarEvents color resolution', () => {
+  it('uses an explicit Google event color in preference to the calendar color', () => {
+    const [event] = normalizeGoogleCalendarEvents(
+      [
+        {
+          id: 'e1',
+          summary: 'Sync',
+          colorId: '11',
+          start: { dateTime: '2026-06-17T09:00:00' },
+          end: { dateTime: '2026-06-17T10:00:00' },
+        },
+      ],
+      '#calendar-color',
+      { '11': { background: '#event-color' } },
+    )
+
+    expect(event.color).toBe('#event-color')
+  })
+
+  it('falls back to the calendar color when no explicit event color is set', () => {
+    const [event] = normalizeGoogleCalendarEvents(
+      [
+        {
+          id: 'e1',
+          summary: 'Sync',
+          start: { dateTime: '2026-06-17T09:00:00' },
+          end: { dateTime: '2026-06-17T10:00:00' },
+        },
+      ],
+      '#calendar-color',
+      {},
+    )
+
+    expect(event.color).toBe('#calendar-color')
+  })
+})
+
+describe('fetchSourceCalendarEvents', () => {
+  it('fetches and merges events from every calendar, colored by its own calendar', async () => {
+    const work = { id: 'work@x', summary: 'Work', backgroundColor: '#ff0000', primary: false }
+    const family = { id: 'family@x', summary: 'Family', backgroundColor: '#00ff00', primary: true }
+    const fetchCalendarEvents = vi.fn(async (_token: string, calendarId: string) => {
+      if (calendarId === 'work@x') {
+        return [{ id: 'w1', summary: 'Standup', start: { dateTime: '2026-06-17T09:00:00' }, end: { dateTime: '2026-06-17T09:30:00' } }]
+      }
+      return [{ id: 'f1', summary: 'Dinner', start: { dateTime: '2026-06-17T18:00:00' }, end: { dateTime: '2026-06-17T19:00:00' } }]
+    })
+    const fetchColors = vi.fn(async () => ({ event: {} }))
+
+    const result = await fetchSourceCalendarEvents(
+      'token',
+      [work, family],
+      RANGE,
+      { fetchCalendarEvents, fetchColors },
+    )
+
+    expect(result.totalCalendarCount).toBe(2)
+    expect(result.failedCalendarCount).toBe(0)
+    expect(result.events.map((e) => e.id).sort()).toEqual(['f1', 'w1'])
+    expect(result.events.find((e) => e.id === 'w1')?.color).toBe('#ff0000')
+    expect(result.events.find((e) => e.id === 'f1')?.color).toBe('#00ff00')
+  })
+
+  it('counts a failed calendar without dropping the successful calendars events', async () => {
+    const ok = { id: 'ok', summary: 'OK', backgroundColor: '#000000', primary: true }
+    const bad = { id: 'bad', summary: 'Bad', backgroundColor: '#111111', primary: false }
+    const fetchCalendarEvents = vi.fn(async (_token: string, id: string) => {
+      if (id === 'bad') throw new Error('boom')
+      return [{ id: 'e1', summary: 'Kept', start: { dateTime: '2026-06-17T09:00:00' }, end: { dateTime: '2026-06-17T10:00:00' } }]
+    })
+
+    const result = await fetchSourceCalendarEvents('token', [ok, bad], RANGE, {
+      fetchCalendarEvents,
+      fetchColors: async () => ({ event: {} }),
+    })
+
+    expect(result.failedCalendarCount).toBe(1)
+    expect(result.totalCalendarCount).toBe(2)
+    expect(result.events.map((e) => e.id)).toEqual(['e1'])
+  })
+
+  it('returns an empty result for no calendars', async () => {
+    const result = await fetchSourceCalendarEvents('token', [], RANGE, {
+      fetchColors: async () => ({ event: {} }),
+    })
+
+    expect(result).toEqual({ events: [], failedCalendarCount: 0, totalCalendarCount: 0 })
   })
 })

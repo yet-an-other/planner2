@@ -364,8 +364,21 @@ describe('Event Detail Popover', () => {
         const url = typeof input === 'string' ? input : input.toString()
         if (url.includes('userinfo'))
           return Promise.resolve({ ok: true, json: async () => ({ name: 'Ada', picture: 'x' }) })
-        if (url.includes('calendarList/primary'))
-          return Promise.resolve({ ok: true, json: async () => ({ backgroundColor: '#2952a3' }) })
+        if (url.includes('calendarList'))
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              items: [
+                {
+                  id: 'primary',
+                  summary: 'Primary',
+                  backgroundColor: '#2952a3',
+                  primary: true,
+                  accessRole: 'owner',
+                },
+              ],
+            }),
+          })
         if (url.includes('colors'))
           return Promise.resolve({ ok: true, json: async () => ({ event: {} }) })
         if (url.includes('calendars/primary/events'))
@@ -736,11 +749,19 @@ function stubSuccessfulGoogleConnectionWithEvents() {
       })
     }
 
-    if (url.includes('calendarList/primary')) {
+    if (url.includes('calendarList')) {
       return Promise.resolve({
         ok: true,
         json: async () => ({
-          backgroundColor: '#2952a3',
+          items: [
+            {
+              id: 'primary',
+              summary: 'Primary',
+              backgroundColor: '#2952a3',
+              primary: true,
+              accessRole: 'owner',
+            },
+          ],
         }),
       })
     }
@@ -822,10 +843,20 @@ function stubSuccessfulGoogleConnectionWithDeferredEvents() {
       })
     }
 
-    if (url.includes('calendarList/primary')) {
+    if (url.includes('calendarList')) {
       return Promise.resolve({
         ok: true,
-        json: async () => ({ backgroundColor: '#2952a3' }),
+        json: async () => ({
+          items: [
+            {
+              id: 'primary',
+              summary: 'Primary',
+              backgroundColor: '#2952a3',
+              primary: true,
+              accessRole: 'owner',
+            },
+          ],
+        }),
       })
     }
 

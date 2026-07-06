@@ -1,3 +1,5 @@
+import { mergeCalendarEvents } from './merge-calendar-events'
+
 export type CalendarEvent = CalendarEventBar | CalendarEventRow
 
 export type CalendarEventBar = {
@@ -78,7 +80,17 @@ const GOOGLE_AUTO_EVENT_BOILERPLATE =
   /To see detailed information for automatically created events like this one, use the official Google Calendar app\.\s*https:\/\/g\.co\/calendar/g
 
 type GoogleCalendarListEntry = {
+  id?: string
+  summary?: string
   backgroundColor?: string
+  primary?: boolean
+  accessRole?: string
+  hidden?: boolean
+  deleted?: boolean
+}
+
+type GoogleCalendarListResponse = {
+  items?: GoogleCalendarListEntry[]
 }
 
 type GoogleCalendarEventsResponse = {
@@ -120,26 +132,161 @@ type CalendarEventFetchRange = {
   end: Date
 }
 
-export async function fetchPrimaryCalendarEvents(
-  accessToken: string,
-  range: CalendarEventFetchRange,
-): Promise<CalendarEvent[]> {
-  const [primaryCalendar, colorsResponse, eventsResponse] = await Promise.all([
-    fetchPrimaryCalendar(accessToken),
-    fetchGoogleCalendarColors(accessToken),
-    fetchPrimaryCalendarEventResources(accessToken, range),
-  ])
+/**
+ * A Google Calendar in the user's account that The Planner is permitted to fetch
+ * Calendar Events from. See CONTEXT.md.
+ */
+export type SourceCalendar = {
+  id: string
+  summary: string
+  backgroundColor: string
+  primary: boolean
+}
 
-  return normalizeGoogleCalendarEvents(
-    eventsResponse.items ?? [],
-    primaryCalendar.backgroundColor ?? DEFAULT_EVENT_COLOR,
-    colorsResponse.event ?? {},
+/** One Selected Source Calendar's fetch outcome: its events, or that it failed. */
+type CalendarFetchOutcome =
+  | { calendarId: string; events: CalendarEvent[] }
+  | { calendarId: string; failed: true }
+
+/**
+ * The result of fetching Calendar Events across the Selected Source Calendars.
+ * The counts let the caller distinguish total failure (hard error) from partial
+ * failure (non-fatal warning) without re-counting itself.
+ */
+export type FetchCalendarEventsResult = {
+  events: CalendarEvent[]
+  failedCalendarCount: number
+  totalCalendarCount: number
+}
+
+const READABLE_ACCESS_ROLES = new Set(['reader', 'writer', 'owner'])
+
+/**
+ * Fetches the user's Source Calendars — every readable, non-hidden calendar in
+ * the Google account. Replaces the old primary-only lookup; the primary
+ * calendar's color is read from this list.
+ */
+export async function fetchCalendarList(
+  accessToken: string,
+): Promise<SourceCalendar[]> {
+  const response = await fetch(
+    `${GOOGLE_CALENDAR_API_BASE}/users/me/calendarList`,
+    {
+      headers: getAuthHeaders(accessToken),
+    },
   )
+
+  if (!response.ok) {
+    throw new Error('Calendar list could not be loaded')
+  }
+
+  const body = (await response.json()) as GoogleCalendarListResponse
+
+  return (body.items ?? [])
+    .filter(
+      (entry) =>
+        !entry.deleted &&
+        !entry.hidden &&
+        READABLE_ACCESS_ROLES.has(entry.accessRole ?? ''),
+    )
+    .map((entry) => ({
+      id: entry.id ?? '',
+      summary: entry.summary?.trim() || entry.id || 'Untitled calendar',
+      backgroundColor: entry.backgroundColor ?? DEFAULT_EVENT_COLOR,
+      primary: entry.primary === true,
+    }))
+    .filter((calendar) => calendar.id !== '')
+}
+
+/**
+ * Pure assembly of per-calendar fetch outcomes into a single result: merges the
+ * successful calendars' events (id-based dedup, first-wins) and counts the
+ * failures so the caller can tell partial from total failure.
+ */
+export function assembleCalendarEvents(
+  outcomes: CalendarFetchOutcome[],
+): FetchCalendarEventsResult {
+  let failedCalendarCount = 0
+  let merged: CalendarEvent[] = []
+
+  for (const outcome of outcomes) {
+    if ('failed' in outcome) {
+      failedCalendarCount += 1
+      continue
+    }
+
+    merged = mergeCalendarEvents(merged, outcome.events)
+  }
+
+  return {
+    events: merged,
+    failedCalendarCount,
+    totalCalendarCount: outcomes.length,
+  }
+}
+
+/** Injectable network collaborators for `fetchSourceCalendarEvents`. */
+export type FetchSourceCalendarEventsDeps = {
+  fetchColors?: (accessToken: string) => Promise<GoogleCalendarColorsResponse>
+  fetchCalendarEvents?: (
+    accessToken: string,
+    calendarId: string,
+    range: CalendarEventFetchRange,
+  ) => Promise<GoogleCalendarEventResource[]>
+}
+
+/**
+ * Fetches Calendar Events from every Selected Source Calendar in parallel,
+ * coloring each event by its own calendar (an explicit Google event color still
+ * wins) and merging the results. A single calendar failing does not fail the
+ * whole fetch — it is counted as a failure so the caller can warn; only the
+ * global colors fetch (or a thrown bug) rejects the promise.
+ */
+export async function fetchSourceCalendarEvents(
+  accessToken: string,
+  calendars: SourceCalendar[],
+  range: CalendarEventFetchRange,
+  {
+    fetchColors = fetchGoogleCalendarColors,
+    fetchCalendarEvents = fetchCalendarEventResources,
+  }: FetchSourceCalendarEventsDeps = {},
+): Promise<FetchCalendarEventsResult> {
+  if (calendars.length === 0) {
+    return { events: [], failedCalendarCount: 0, totalCalendarCount: 0 }
+  }
+
+  const eventColors = (await fetchColors(accessToken)).event ?? {}
+
+  const outcomes = await Promise.all(
+    calendars.map(
+      async (calendar): Promise<CalendarFetchOutcome> => {
+        try {
+          const resources = await fetchCalendarEvents(
+            accessToken,
+            calendar.id,
+            range,
+          )
+          return {
+            calendarId: calendar.id,
+            events: normalizeGoogleCalendarEvents(
+              resources,
+              calendar.backgroundColor,
+              eventColors,
+            ),
+          }
+        } catch {
+          return { calendarId: calendar.id, failed: true }
+        }
+      },
+    ),
+  )
+
+  return assembleCalendarEvents(outcomes)
 }
 
 export function normalizeGoogleCalendarEvents(
   events: GoogleCalendarEventResource[],
-  primaryCalendarColor: string,
+  calendarColor: string,
   eventColors: Record<string, { background?: string }> = {},
 ): CalendarEvent[] {
   return events.flatMap<CalendarEvent>((event) => {
@@ -148,7 +295,7 @@ export function normalizeGoogleCalendarEvents(
     }
 
     const title = event.summary?.trim() || 'Busy'
-    const color = getEventColor(event, primaryCalendarColor, eventColors)
+    const color = getEventColor(event, calendarColor, eventColors)
     const detail: EventDetail = {
       htmlLink: event.htmlLink ?? null,
       location: event.location?.trim() || null,
@@ -234,21 +381,6 @@ export function normalizeGoogleCalendarEvents(
   })
 }
 
-async function fetchPrimaryCalendar(accessToken: string) {
-  const response = await fetch(
-    `${GOOGLE_CALENDAR_API_BASE}/users/me/calendarList/primary`,
-    {
-      headers: getAuthHeaders(accessToken),
-    },
-  )
-
-  if (!response.ok) {
-    throw new Error('Primary calendar could not be loaded')
-  }
-
-  return (await response.json()) as GoogleCalendarListEntry
-}
-
 async function fetchGoogleCalendarColors(accessToken: string) {
   const response = await fetch(`${GOOGLE_CALENDAR_API_BASE}/colors`, {
     headers: getAuthHeaders(accessToken),
@@ -261,23 +393,24 @@ async function fetchGoogleCalendarColors(accessToken: string) {
   return (await response.json()) as GoogleCalendarColorsResponse
 }
 
-async function fetchPrimaryCalendarEventResources(
+async function fetchCalendarEventResources(
   accessToken: string,
+  calendarId: string,
   range: CalendarEventFetchRange,
-) {
+): Promise<GoogleCalendarEventResource[]> {
   const items: GoogleCalendarEventResource[] = []
   let nextPageToken: string | undefined
 
   do {
     const response = await fetch(
-      getPrimaryCalendarEventsUrl(range, nextPageToken),
+      getCalendarEventsUrl(calendarId, range, nextPageToken),
       {
         headers: getAuthHeaders(accessToken),
       },
     )
 
     if (!response.ok) {
-      throw new Error('Primary calendar events could not be loaded')
+      throw new Error('Calendar events could not be loaded')
     }
 
     const page = (await response.json()) as GoogleCalendarEventsResponse
@@ -285,14 +418,17 @@ async function fetchPrimaryCalendarEventResources(
     nextPageToken = page.nextPageToken
   } while (nextPageToken)
 
-  return { items }
+  return items
 }
 
-function getPrimaryCalendarEventsUrl(
+function getCalendarEventsUrl(
+  calendarId: string,
   range: CalendarEventFetchRange,
   pageToken?: string,
 ) {
-  const url = new URL(`${GOOGLE_CALENDAR_API_BASE}/calendars/primary/events`)
+  const url = new URL(
+    `${GOOGLE_CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events`,
+  )
   url.searchParams.set('singleEvents', 'true')
   url.searchParams.set('orderBy', 'startTime')
   url.searchParams.set('timeMin', range.start.toISOString())
@@ -370,12 +506,12 @@ function buildDescription(description: string | undefined): string | null {
 
 function getEventColor(
   event: GoogleCalendarEventResource,
-  primaryCalendarColor: string,
+  calendarColor: string,
   eventColors: Record<string, { background?: string }>,
 ) {
   return event.colorId
-    ? (eventColors[event.colorId]?.background ?? primaryCalendarColor)
-    : primaryCalendarColor
+    ? (eventColors[event.colorId]?.background ?? calendarColor)
+    : calendarColor
 }
 
 function parseGoogleDate(date: string) {

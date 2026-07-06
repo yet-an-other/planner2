@@ -81,7 +81,11 @@ export function CalendarHeader({
           aria-live="polite"
           className={cn(
             'col-start-2 col-end-4 row-start-2 min-h-3 min-w-0 self-start truncate text-right text-[11px] font-medium leading-none',
-            status?.tone === 'error' ? 'text-red-700' : 'text-[#7c8066]',
+            status?.tone === 'error'
+              ? 'text-red-700'
+              : status?.tone === 'warning'
+                ? 'text-amber-700'
+                : 'text-[#7c8066]',
           )}
           role="status"
         >

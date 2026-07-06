@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { addMonths } from './calendar-dates'
-import { fetchPrimaryCalendarEvents, type CalendarEvent } from './google-calendar-events'
+import {
+  fetchCalendarList as fetchCalendarListFromGoogle,
+  fetchSourceCalendarEvents,
+  type CalendarEvent,
+  type FetchCalendarEventsResult,
+  type SourceCalendar,
+} from './google-calendar-events'
 import { mergeCalendarEvents } from './merge-calendar-events'
 import {
   computeScrollTrigger,
@@ -17,17 +23,21 @@ import type {
   HeaderStatus,
 } from './use-google-account-connection'
 
-/** Fetches Calendar Events for a date range using a connected access token. */
+/** Fetches the user's Source Calendars (the calendar list) using a connected token. */
+export type FetchCalendarList = (accessToken: string) => Promise<SourceCalendar[]>
+
+/** Fetches Calendar Events for a set of Source Calendars over a date range. */
 export type FetchCalendarEvents = (
   accessToken: string,
+  calendars: SourceCalendar[],
   range: { start: Date; end: Date },
-) => Promise<CalendarEvent[]>
+) => Promise<FetchCalendarEventsResult>
 
 /** The interface of the Calendar Events module. */
 export type CalendarEvents = {
   /** The merged Calendar Events currently available for rendering. */
   events: CalendarEvent[]
-  /** Status from the fetch lifecycle: 'Loading events…' while in flight, or a load error. */
+  /** Status from the fetch lifecycle: loading, a non-fatal warning, or a load error. */
   status: HeaderStatus | null
   /**
    * Ask the module to fetch another slab if the visible range has approached a
@@ -42,20 +52,27 @@ const LOAD_FAILED_STATUS: HeaderStatus = {
   message: 'Calendar events could not be loaded',
   tone: 'error',
 }
+const SOME_CALENDARS_FAILED_STATUS: HeaderStatus = {
+  message: 'Some calendars could not be loaded',
+  tone: 'warning',
+}
 
 type UseCalendarEventsParams = {
   connection: GoogleAccountConnectionState
   today: Date
   range: CalendarRangeBounds
+  /** Injected so tests can drive the calendar-list fetch without the network. */
+  fetchCalendarList?: FetchCalendarList
   /** Injected so tests can drive fetching without the network or jsdom. */
   fetchEvents?: FetchCalendarEvents
 }
 
 /**
  * Owns the Fetched Window and the scroll-driven fetch orchestration that fills
- * it: the initial ±6-month fetch on connect, the per-slab boundary trigger, the
+ * it: the initial ±6-month fetch on connect (after loading the Source Calendar
+ * list and resolving the primary calendar), the per-slab boundary trigger, the
  * optimistic window extension that is rolled back on failure, the by-id dedup
- * merge, and the loading/error status those produce.
+ * merge, and the loading/warning/error status those produce.
  *
  * The render module computes the visible date range from scroll position (which
  * needs the DOM/virtualizer) and hands it to `maybeFetchMore`. Everything else —
@@ -65,7 +82,8 @@ export function useCalendarEvents({
   connection,
   today,
   range,
-  fetchEvents = fetchPrimaryCalendarEvents,
+  fetchCalendarList = fetchCalendarListFromGoogle,
+  fetchEvents = fetchSourceCalendarEvents,
 }: UseCalendarEventsParams): CalendarEvents {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [eventsStatus, setEventsStatus] = useState<HeaderStatus | null>(null)
@@ -73,6 +91,9 @@ export function useCalendarEvents({
   // stored in a ref rather than state because it is not rendered directly and the
   // scroll handler must always read the most recent edges synchronously.
   const fetchedWindowRef = useRef<FetchedWindow | null>(null)
+  // The resolved Selected Source Calendars for the current connection. Kept in a
+  // ref so slab fetches read the most recent set without re-running the effect.
+  const selectedCalendarsRef = useRef<SourceCalendar[]>([])
   const [pendingFetchCount, setPendingFetchCount] = useState(0)
 
   // Reset fetched events when the connection transitions to disconnected. Done
@@ -90,6 +111,7 @@ export function useCalendarEvents({
   useEffect(() => {
     if (connection.status !== 'connected') {
       fetchedWindowRef.current = null
+      selectedCalendarsRef.current = []
       return
     }
 
@@ -100,10 +122,17 @@ export function useCalendarEvents({
 
     fetchedWindowRef.current = createFetchedWindow(earliest, latest)
 
-    fetchEvents(accessToken, fetchRange)
-      .then(setEvents)
+    fetchCalendarList(accessToken)
+      .then((calendars) => {
+        selectedCalendarsRef.current = selectDefaultCalendar(calendars)
+        return fetchEvents(accessToken, selectedCalendarsRef.current, fetchRange)
+      })
+      .then((result) => {
+        setEvents(result.events)
+        setEventsStatus(statusForResult(result))
+      })
       .catch(() => setEventsStatus(LOAD_FAILED_STATUS))
-  }, [connection, today, fetchEvents])
+  }, [connection, today, fetchCalendarList, fetchEvents])
 
   const fetchSlab = useCallback(
     (accessToken: string, fetchedWindow: FetchedWindow, slab: SlabDirection) => {
@@ -126,11 +155,32 @@ export function useCalendarEvents({
       fetchedWindowRef.current = extended
       setPendingFetchCount((count) => count + 1)
 
-      fetchEvents(accessToken, slabRange)
-        .then((slabEvents) => {
-          setEvents((previous) => mergeCalendarEvents(previous, slabEvents))
+      fetchEvents(accessToken, selectedCalendarsRef.current, slabRange)
+        .then((result) => {
+          if (isTotalFailure(result)) {
+            // Total slab failure: roll the window back so the next scroll retries.
+            const current = fetchedWindowRef.current
+            if (
+              current &&
+              slab.edge(current).getTime() === slab.edge(extended).getTime()
+            ) {
+              fetchedWindowRef.current = slab.rollback(current, fetchedWindow)
+            }
+            setEventsStatus(LOAD_FAILED_STATUS)
+            return
+          }
+
+          setEvents((previous) => mergeCalendarEvents(previous, result.events))
+          setEventsStatus(
+            result.failedCalendarCount > 0
+              ? SOME_CALENDARS_FAILED_STATUS
+              : null,
+          )
         })
         .catch(() => {
+          // Defensive: per-calendar failures are absorbed inside the fetch, so a
+          // rejection here means something unexpected (e.g. a thrown bug). Roll
+          // back like a total failure and clear so a later success can recover.
           const current = fetchedWindowRef.current
           if (
             current &&
@@ -173,6 +223,38 @@ export function useCalendarEvents({
   const status = pendingFetchCount > 0 ? LOADING_STATUS : eventsStatus
 
   return { events, status, maybeFetchMore }
+}
+
+/**
+ * The default Selected Source Calendars before the user has chosen anything: the
+ * primary calendar, or — if Google reports no primary — the first available
+ * calendar so the surface is never empty.
+ */
+function selectDefaultCalendar(calendars: SourceCalendar[]): SourceCalendar[] {
+  const primary = calendars.find((calendar) => calendar.primary)
+  if (primary) {
+    return [primary]
+  }
+  return calendars.length > 0 ? [calendars[0]] : []
+}
+
+/** A total failure is every requested calendar failing; it is a hard error. */
+function isTotalFailure(result: FetchCalendarEventsResult): boolean {
+  return (
+    result.totalCalendarCount > 0 &&
+    result.failedCalendarCount === result.totalCalendarCount
+  )
+}
+
+/** Maps a fetch result to the Header Status it should surface. */
+function statusForResult(result: FetchCalendarEventsResult): HeaderStatus | null {
+  if (isTotalFailure(result)) {
+    return LOAD_FAILED_STATUS
+  }
+  if (result.failedCalendarCount > 0) {
+    return SOME_CALENDARS_FAILED_STATUS
+  }
+  return null
 }
 
 /**

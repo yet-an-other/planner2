@@ -14,7 +14,7 @@ import {
  */
 export type HeaderStatus = {
   message: string
-  tone: 'info' | 'error'
+  tone: 'info' | 'warning' | 'error'
 }
 
 /**
