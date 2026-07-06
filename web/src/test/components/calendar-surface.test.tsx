@@ -57,12 +57,15 @@ describe('Google Account Connection', () => {
     await user.click(screen.getByRole('button', { name: /connect google/i }))
     await screen.findByText('Ada Lovelace')
 
-    // Verify calendar API was called
-    const calendarCalls = mockFetch.mock.calls.filter((call) => {
-      const url = String(call[0])
-      return url.includes('calendars/primary/events')
+    // Verify the calendar events API was called (it lands after the calendar
+    // list resolves and the selection flows into the events module).
+    await waitFor(() => {
+      const calendarCalls = mockFetch.mock.calls.filter((call) => {
+        const url = String(call[0])
+        return url.includes('calendars/primary/events')
+      })
+      expect(calendarCalls.length).toBeGreaterThan(0)
     })
-    expect(calendarCalls.length).toBeGreaterThan(0)
   })
 
   it('disconnects a Google Account by revoking the current access token', async () => {
@@ -458,7 +461,7 @@ describe('Event Detail Popover', () => {
     revealTodayWeek()
     await screen.findByText('Team Lunch')
     fireEvent.click(
-      screen.getByRole('button', { name: /team lunch.*open details/i }),
+      await screen.findByRole('button', { name: /team lunch.*open details/i }),
     )
     await screen.findByRole('dialog')
 
@@ -489,7 +492,7 @@ describe('Event Detail Popover', () => {
     revealTodayWeek()
     await screen.findByText('Team Lunch')
     fireEvent.click(
-      screen.getByRole('button', { name: /team lunch.*open details/i }),
+      await screen.findByRole('button', { name: /team lunch.*open details/i }),
     )
     expect(await screen.findByRole('dialog')).toHaveTextContent('Team Lunch')
 
@@ -559,7 +562,7 @@ describe('Event Detail Popover', () => {
     await screen.findByText('Ada')
     revealTodayWeek()
     fireEvent.click(
-      screen.getByRole('button', { name: /team lunch.*open details/i }),
+      await screen.findByRole('button', { name: /team lunch.*open details/i }),
     )
     await screen.findByRole('dialog')
 
@@ -583,7 +586,7 @@ describe('Event Detail Popover', () => {
     await screen.findByText('Ada')
     const surface = revealTodayWeek()
     fireEvent.click(
-      screen.getByRole('button', { name: /team lunch.*open details/i }),
+      await screen.findByRole('button', { name: /team lunch.*open details/i }),
     )
     await screen.findByRole('dialog')
 
@@ -607,7 +610,7 @@ describe('Event Detail Popover', () => {
     await screen.findByText('Ada')
     revealTodayWeek()
     fireEvent.click(
-      screen.getByRole('button', { name: /team lunch.*open details/i }),
+      await screen.findByRole('button', { name: /team lunch.*open details/i }),
     )
     await screen.findByRole('dialog')
 

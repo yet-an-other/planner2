@@ -10,7 +10,6 @@ import type { GoogleAccountConnectionState } from '@/lib/use-google-account-conn
 import {
   useCalendarEvents,
   type FetchCalendarEvents,
-  type FetchCalendarList,
 } from '@/lib/use-calendar-events'
 import { makeBar } from './calendar-events.factory'
 
@@ -25,42 +24,57 @@ const connected = (accessToken = 'access-token'): GoogleAccountConnectionState =
 
 const disconnected: GoogleAccountConnectionState = { status: 'disconnected' }
 
-const primaryCalendars = (): SourceCalendar[] => [
-  { id: 'primary', summary: 'Primary', backgroundColor: '#2952a3', primary: true },
-]
+const primary = (): SourceCalendar => ({
+  id: 'primary',
+  summary: 'Primary',
+  backgroundColor: '#2952a3',
+  primary: true,
+})
+
+const secondary = (): SourceCalendar => ({
+  id: 'family',
+  summary: 'Family',
+  backgroundColor: '#16a34a',
+  primary: false,
+})
 
 const bar = (id: string, title: string, date: Date) =>
   makeBar({ id, title, date, endDate: date })
 
-/** A fully-successful result carrying the given events for one calendar. */
+/** A fully-successful result carrying the given events for the requested calendars. */
 const ok = (events: CalendarEvent[]): FetchCalendarEventsResult => ({
   events,
   failedCalendarCount: 0,
   totalCalendarCount: 1,
 })
 
-const listFn = () => vi.fn<FetchCalendarList>(async () => primaryCalendars())
+const eventsFn = (
+  result: FetchCalendarEventsResult = ok([]),
+): ReturnType<typeof vi.fn<FetchCalendarEvents>> =>
+  vi.fn<FetchCalendarEvents>(async () => result)
 
 describe('useCalendarEvents', () => {
-  it('fetches the calendar list then the initial ±6-month window for the primary calendar', async () => {
-    const fetchEvents = vi.fn<FetchCalendarEvents>(
-      async () => ok([bar('evt-1', 'Team Lunch', today)]),
-    )
-    const fetchCalendarList = listFn()
+  it('fetches the initial ±6-month window for the Selected Source Calendars on connect', async () => {
+    const fetchEvents = eventsFn(ok([bar('evt-1', 'Team Lunch', today)]))
     const connection = connected()
 
     const { result } = renderHook(() =>
-      useCalendarEvents({ connection, today, range, fetchCalendarList, fetchEvents }),
+      useCalendarEvents({
+        connection,
+        today,
+        range,
+        selection: [primary()],
+        fetchEvents,
+      }),
     )
 
     await waitFor(() => expect(result.current.events).toHaveLength(1))
     expect(result.current.events[0].id).toBe('evt-1')
 
-    expect(fetchCalendarList).toHaveBeenCalledTimes(1)
     expect(fetchEvents).toHaveBeenCalledTimes(1)
-    const [accessToken, selected, fetchRange] = fetchEvents.mock.calls[0]
+    const [accessToken, calendars, fetchRange] = fetchEvents.mock.calls[0]
     expect(accessToken).toBe('access-token')
-    expect(selected.map((c: SourceCalendar) => c.id)).toEqual(['primary'])
+    expect(calendars.map((c: SourceCalendar) => c.id)).toEqual(['primary'])
     expect(fetchRange.start).toEqual(addMonths(today, -6))
     expect(fetchRange.end).toEqual(addMonths(today, 6))
   })
@@ -70,11 +84,16 @@ describe('useCalendarEvents', () => {
       .fn<FetchCalendarEvents>(async () => ok([]))
       .mockResolvedValueOnce(ok([bar('evt-1', 'Lunch', today)]))
       .mockResolvedValueOnce(ok([bar('evt-2', 'Trip', addMonths(today, 7))]))
-    const fetchCalendarList = listFn()
     const connection = connected()
 
     const { result } = renderHook(() =>
-      useCalendarEvents({ connection, today, range, fetchCalendarList, fetchEvents }),
+      useCalendarEvents({
+        connection,
+        today,
+        range,
+        selection: [primary()],
+        fetchEvents,
+      }),
     )
     await waitFor(() => expect(result.current.events).toHaveLength(1))
 
@@ -102,11 +121,16 @@ describe('useCalendarEvents', () => {
       .mockImplementationOnce(
         () => new Promise<FetchCalendarEventsResult>((r) => (resolveSlab = r)),
       )
-    const fetchCalendarList = listFn()
     const connection = connected()
 
     const { result } = renderHook(() =>
-      useCalendarEvents({ connection, today, range, fetchCalendarList, fetchEvents }),
+      useCalendarEvents({
+        connection,
+        today,
+        range,
+        selection: [primary()],
+        fetchEvents,
+      }),
     )
     await waitFor(() => expect(result.current.status).toBe(null))
 
@@ -141,11 +165,16 @@ describe('useCalendarEvents', () => {
         totalCalendarCount: 1,
       })
       .mockResolvedValueOnce(ok([bar('evt-2', 'Trip', addMonths(today, 7))])) // retry
-    const fetchCalendarList = listFn()
     const connection = connected()
 
     const { result } = renderHook(() =>
-      useCalendarEvents({ connection, today, range, fetchCalendarList, fetchEvents }),
+      useCalendarEvents({
+        connection,
+        today,
+        range,
+        selection: [primary()],
+        fetchEvents,
+      }),
     )
     await waitFor(() => expect(fetchEvents).toHaveBeenCalledTimes(1))
 
@@ -169,14 +198,17 @@ describe('useCalendarEvents', () => {
   })
 
   it('clears events and status when the connection becomes disconnected', async () => {
-    const fetchEvents = vi.fn<FetchCalendarEvents>(
-      async () => ok([bar('evt-1', 'Lunch', today)]),
-    )
-    const fetchCalendarList = listFn()
+    const fetchEvents = eventsFn(ok([bar('evt-1', 'Lunch', today)]))
     let connection: GoogleAccountConnectionState = connected()
 
     const { result, rerender } = renderHook(() =>
-      useCalendarEvents({ connection, today, range, fetchCalendarList, fetchEvents }),
+      useCalendarEvents({
+        connection,
+        today,
+        range,
+        selection: [primary()],
+        fetchEvents,
+      }),
     )
     await waitFor(() => expect(result.current.events).toHaveLength(1))
 
@@ -195,11 +227,16 @@ describe('useCalendarEvents', () => {
       failedCalendarCount: 1,
       totalCalendarCount: 2,
     }))
-    const fetchCalendarList = listFn()
     const connection = connected()
 
     const { result } = renderHook(() =>
-      useCalendarEvents({ connection, today, range, fetchCalendarList, fetchEvents }),
+      useCalendarEvents({
+        connection,
+        today,
+        range,
+        selection: [primary(), secondary()],
+        fetchEvents,
+      }),
     )
 
     await waitFor(() => expect(result.current.events).toHaveLength(1))
@@ -215,11 +252,16 @@ describe('useCalendarEvents', () => {
       failedCalendarCount: 1,
       totalCalendarCount: 1,
     }))
-    const fetchCalendarList = listFn()
     const connection = connected()
 
     const { result } = renderHook(() =>
-      useCalendarEvents({ connection, today, range, fetchCalendarList, fetchEvents }),
+      useCalendarEvents({
+        connection,
+        today,
+        range,
+        selection: [primary()],
+        fetchEvents,
+      }),
     )
 
     await waitFor(() =>
@@ -231,25 +273,24 @@ describe('useCalendarEvents', () => {
     expect(result.current.events).toHaveLength(0)
   })
 
-  it('shows a hard error when the calendar list itself fails on connect', async () => {
-    const fetchEvents = vi.fn<FetchCalendarEvents>(
-      async () => ok([bar('evt-1', 'Lunch', today)]),
-    )
-    const fetchCalendarList = vi.fn<FetchCalendarList>(async () => {
-      throw new Error('list unavailable')
-    })
+  it('resets and refetches when the selection changes', async () => {
+    const fetchEvents = eventsFn(ok([]))
+    let selection: SourceCalendar[] = [primary()]
     const connection = connected()
 
-    const { result } = renderHook(() =>
-      useCalendarEvents({ connection, today, range, fetchCalendarList, fetchEvents }),
+    const { rerender } = renderHook(() =>
+      useCalendarEvents({ connection, today, range, selection, fetchEvents }),
     )
+    await waitFor(() => expect(fetchEvents).toHaveBeenCalledTimes(1))
 
-    await waitFor(() =>
-      expect(result.current.status).toEqual({
-        message: 'Calendar events could not be loaded',
-        tone: 'error',
-      }),
-    )
-    expect(fetchEvents).not.toHaveBeenCalled()
+    selection = [primary(), secondary()]
+    rerender()
+    await waitFor(() => expect(fetchEvents).toHaveBeenCalledTimes(2))
+
+    const [, calendars] = fetchEvents.mock.calls[1]
+    expect(calendars.map((c: SourceCalendar) => c.id)).toEqual([
+      'primary',
+      'family',
+    ])
   })
 })

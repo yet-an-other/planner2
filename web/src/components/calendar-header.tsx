@@ -1,4 +1,4 @@
-import { LogIn, LogOut, UserRound } from 'lucide-react'
+import { CalendarCog, Loader2, LogIn, LogOut, UserRound } from 'lucide-react'
 import { formatFullDate } from '@/lib/calendar-dates'
 import { type GoogleAccountProfile } from '@/lib/google-account-connection'
 import type { HeaderStatus } from '@/lib/use-google-account-connection'
@@ -27,6 +27,10 @@ type CalendarHeaderProps = {
   onConnect: () => void
   /** Revoke the token and disconnect. */
   onDisconnect: () => void
+  /** Open the Source Calendar Picker. */
+  onOpenSourceCalendars: () => void
+  /** Whether the Source Calendar list is (re)loading; disables the control. */
+  sourceCalendarsLoading: boolean
 }
 
 /**
@@ -46,6 +50,8 @@ export function CalendarHeader({
   onJumpToToday,
   onConnect,
   onDisconnect,
+  onOpenSourceCalendars,
+  sourceCalendarsLoading,
 }: CalendarHeaderProps) {
   return (
     <header className="shrink-0 border-b border-[#d8d1bd] bg-[#f5f1e6] text-[#252819] shadow-sm">
@@ -67,7 +73,13 @@ export function CalendarHeader({
             {visibleMonth}
           </button>
         </h1>
-        <div className="relative z-10 col-start-3 row-start-1 self-center justify-self-end">
+        <div className="relative z-10 col-start-3 row-start-1 flex items-center justify-self-end gap-1.5">
+          {connected && (
+            <SourceCalendarControl
+              loading={sourceCalendarsLoading}
+              onClick={onOpenSourceCalendars}
+            />
+          )}
           <AccountControl
             connected={connected}
             disabled={!isConfigured}
@@ -160,6 +172,42 @@ function AccountControl({
         )}
         strokeWidth={2.4}
       />
+    </button>
+  )
+}
+
+type SourceCalendarControlProps = {
+  loading?: boolean
+  onClick: () => void
+}
+
+/** The connected-only header control that opens the Source Calendar Picker. */
+function SourceCalendarControl({
+  loading = false,
+  onClick,
+}: SourceCalendarControlProps) {
+  return (
+    <button
+      aria-label="Choose calendars"
+      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#d8d1bd] bg-white/80 text-[#384052] shadow-sm transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d855f] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f1e6] disabled:cursor-wait disabled:opacity-60 sm:h-8 sm:w-8"
+      disabled={loading}
+      onClick={onClick}
+      title="Choose calendars"
+      type="button"
+    >
+      {loading ? (
+        <Loader2
+          aria-hidden="true"
+          className="h-4 w-4 animate-spin"
+          strokeWidth={2.4}
+        />
+      ) : (
+        <CalendarCog
+          aria-hidden="true"
+          className="h-4 w-4"
+          strokeWidth={2.4}
+        />
+      )}
     </button>
   )
 }

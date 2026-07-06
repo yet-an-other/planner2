@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { addMonths } from './calendar-dates'
 import {
-  fetchCalendarList as fetchCalendarListFromGoogle,
   fetchSourceCalendarEvents,
   type CalendarEvent,
   type FetchCalendarEventsResult,
@@ -23,10 +22,7 @@ import type {
   HeaderStatus,
 } from './use-google-account-connection'
 
-/** Fetches the user's Source Calendars (the calendar list) using a connected token. */
-export type FetchCalendarList = (accessToken: string) => Promise<SourceCalendar[]>
-
-/** Fetches Calendar Events for a set of Source Calendars over a date range. */
+/** Fetches Calendar Events for the Selected Source Calendars over a date range. */
 export type FetchCalendarEvents = (
   accessToken: string,
   calendars: SourceCalendar[],
@@ -61,18 +57,18 @@ type UseCalendarEventsParams = {
   connection: GoogleAccountConnectionState
   today: Date
   range: CalendarRangeBounds
-  /** Injected so tests can drive the calendar-list fetch without the network. */
-  fetchCalendarList?: FetchCalendarList
+  /** The Selected Source Calendars to fetch Calendar Events from. */
+  selection: SourceCalendar[]
   /** Injected so tests can drive fetching without the network or jsdom. */
   fetchEvents?: FetchCalendarEvents
 }
 
 /**
  * Owns the Fetched Window and the scroll-driven fetch orchestration that fills
- * it: the initial ±6-month fetch on connect (after loading the Source Calendar
- * list and resolving the primary calendar), the per-slab boundary trigger, the
- * optimistic window extension that is rolled back on failure, the by-id dedup
- * merge, and the loading/warning/error status those produce.
+ * it for the current Selected Source Calendars: the initial ±6-month fetch on
+ * connect, the per-slab boundary trigger, the optimistic window extension that
+ * is rolled back on failure, the by-id dedup merge, and the loading/warning/
+ * error status those produce. A change to the selection resets and refetches.
  *
  * The render module computes the visible date range from scroll position (which
  * needs the DOM/virtualizer) and hands it to `maybeFetchMore`. Everything else —
@@ -82,7 +78,7 @@ export function useCalendarEvents({
   connection,
   today,
   range,
-  fetchCalendarList = fetchCalendarListFromGoogle,
+  selection,
   fetchEvents = fetchSourceCalendarEvents,
 }: UseCalendarEventsParams): CalendarEvents {
   const [events, setEvents] = useState<CalendarEvent[]>([])
@@ -91,10 +87,11 @@ export function useCalendarEvents({
   // stored in a ref rather than state because it is not rendered directly and the
   // scroll handler must always read the most recent edges synchronously.
   const fetchedWindowRef = useRef<FetchedWindow | null>(null)
-  // The resolved Selected Source Calendars for the current connection. Kept in a
-  // ref so slab fetches read the most recent set without re-running the effect.
-  const selectedCalendarsRef = useRef<SourceCalendar[]>([])
   const [pendingFetchCount, setPendingFetchCount] = useState(0)
+  // The effect and slab fetches key on the selection's content (ids) rather than
+  // the array reference, so a calendar-list refetch that yields the same set of
+  // calendars (e.g. reopening the picker) does not spuriously reload events.
+  const selectionKey = selection.map((c) => c.id).sort().join('\n')
 
   // Reset fetched events when the connection transitions to disconnected. Done
   // during render (the React "adjust state when a prop changes" pattern) rather
@@ -109,9 +106,11 @@ export function useCalendarEvents({
   }
 
   useEffect(() => {
-    if (connection.status !== 'connected') {
+    if (connection.status !== 'connected' || selection.length === 0) {
+      // Nothing to fetch. Events and status are cleared on disconnect by the
+      // render-time adjustment above; while connected with an empty selection
+      // (e.g. the list is still loading) there is simply nothing to show yet.
       fetchedWindowRef.current = null
-      selectedCalendarsRef.current = []
       return
     }
 
@@ -122,17 +121,14 @@ export function useCalendarEvents({
 
     fetchedWindowRef.current = createFetchedWindow(earliest, latest)
 
-    fetchCalendarList(accessToken)
-      .then((calendars) => {
-        selectedCalendarsRef.current = selectDefaultCalendar(calendars)
-        return fetchEvents(accessToken, selectedCalendarsRef.current, fetchRange)
-      })
+    fetchEvents(accessToken, selection, fetchRange)
       .then((result) => {
         setEvents(result.events)
         setEventsStatus(statusForResult(result))
       })
       .catch(() => setEventsStatus(LOAD_FAILED_STATUS))
-  }, [connection, today, fetchCalendarList, fetchEvents])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connection, today, selectionKey, fetchEvents])
 
   const fetchSlab = useCallback(
     (accessToken: string, fetchedWindow: FetchedWindow, slab: SlabDirection) => {
@@ -155,7 +151,7 @@ export function useCalendarEvents({
       fetchedWindowRef.current = extended
       setPendingFetchCount((count) => count + 1)
 
-      fetchEvents(accessToken, selectedCalendarsRef.current, slabRange)
+      fetchEvents(accessToken, selection, slabRange)
         .then((result) => {
           if (isTotalFailure(result)) {
             // Total slab failure: roll the window back so the next scroll retries.
@@ -180,7 +176,7 @@ export function useCalendarEvents({
         .catch(() => {
           // Defensive: per-calendar failures are absorbed inside the fetch, so a
           // rejection here means something unexpected (e.g. a thrown bug). Roll
-          // back like a total failure and clear so a later success can recover.
+          // back like a total failure so a later success can recover.
           const current = fetchedWindowRef.current
           if (
             current &&
@@ -193,7 +189,7 @@ export function useCalendarEvents({
           setPendingFetchCount((count) => count - 1)
         })
     },
-    [range.start, range.end, fetchEvents],
+    [range.start, range.end, selection, fetchEvents],
   )
 
   const maybeFetchMore = useCallback(
@@ -223,19 +219,6 @@ export function useCalendarEvents({
   const status = pendingFetchCount > 0 ? LOADING_STATUS : eventsStatus
 
   return { events, status, maybeFetchMore }
-}
-
-/**
- * The default Selected Source Calendars before the user has chosen anything: the
- * primary calendar, or — if Google reports no primary — the first available
- * calendar so the surface is never empty.
- */
-function selectDefaultCalendar(calendars: SourceCalendar[]): SourceCalendar[] {
-  const primary = calendars.find((calendar) => calendar.primary)
-  if (primary) {
-    return [primary]
-  }
-  return calendars.length > 0 ? [calendars[0]] : []
 }
 
 /** A total failure is every requested calendar failing; it is a hard error. */

@@ -13,9 +13,11 @@ import {
 } from '@/lib/calendar-dates'
 import { useGoogleAccountConnection } from '@/lib/use-google-account-connection'
 import { useCalendarEvents } from '@/lib/use-calendar-events'
+import { useSourceCalendars } from '@/lib/use-source-calendars'
 import { useEventDetailPopover } from '@/lib/use-event-detail-popover'
 import { CalendarHeader } from './calendar-header'
 import { EventDetailPopover } from './event-detail-popover'
+import { SourceCalendarPicker } from './source-calendar-picker'
 import { layoutWeekEvents } from '@/lib/event-layout'
 import { getContrastTextColor } from '@/lib/text-contrast'
 import { cn } from '@/lib/utils'
@@ -33,6 +35,7 @@ export function CalendarSurface() {
   const googleAccountConnection = useGoogleAccountConnection(googleClientId)
   const connection = googleAccountConnection.connection
   const googleAccountConnected = connection.status === 'connected'
+  const sourceCalendars = useSourceCalendars({ connection })
   // The Fetched Window, scroll-driven slab fetching, and loading/error status
   // live behind this seam; the render module only computes the visible range
   // from scroll position and hands it to maybeFetchMore.
@@ -40,6 +43,7 @@ export function CalendarSurface() {
     connection,
     today,
     range,
+    selection: sourceCalendars.selectionCalendars,
   })
   const eventDetailPopover = useEventDetailPopover({
     scrollContainerRef: scrollParentRef,
@@ -62,8 +66,9 @@ export function CalendarSurface() {
   )
   const visibleMonth = formatVisibleMonth(visibleWeekStart)
   // Loading (from the events module) takes precedence, then its load error, then
-  // the connection status from the Google Account Connection module.
-  const effectiveHeaderStatus = eventsStatus ?? googleAccountConnection.status
+  // the Source Calendar list status, then the connection status.
+  const effectiveHeaderStatus =
+    eventsStatus ?? sourceCalendars.status ?? googleAccountConnection.status
 
   function updateTopWeekIndex() {
     const scrollParent = scrollParentRef.current
@@ -127,6 +132,8 @@ export function CalendarSurface() {
         onJumpToToday={jumpToToday}
         onConnect={googleAccountConnection.connect}
         onDisconnect={googleAccountConnection.disconnect}
+        onOpenSourceCalendars={sourceCalendars.openPicker}
+        sourceCalendarsLoading={sourceCalendars.isLoadingList}
       />
 
       <div
@@ -302,6 +309,15 @@ export function CalendarSurface() {
         onClose={eventDetailPopover.close}
         popoverRef={eventDetailPopover.popoverRef}
       />
+
+      {sourceCalendars.pickerOpen && (
+        <SourceCalendarPicker
+          available={sourceCalendars.available}
+          selectedIds={sourceCalendars.selectionCalendars.map((c) => c.id)}
+          onSave={sourceCalendars.saveSelection}
+          onCancel={sourceCalendars.closePicker}
+        />
+      )}
     </main>
   )
 }
