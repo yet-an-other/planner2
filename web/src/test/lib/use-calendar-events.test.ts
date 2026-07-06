@@ -19,7 +19,7 @@ const range = { start: new Date(2016, 5, 19), end: new Date(2036, 5, 19) }
 const connected = (accessToken = 'access-token'): GoogleAccountConnectionState => ({
   status: 'connected',
   accessToken,
-  profile: { displayName: 'Ada', initials: 'A', pictureUrl: null },
+  profile: { email: 'ada@example.com', displayName: 'Ada', initials: 'A', pictureUrl: null },
 })
 
 const disconnected: GoogleAccountConnectionState = { status: 'disconnected' }

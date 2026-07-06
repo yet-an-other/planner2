@@ -7,6 +7,11 @@ import type {
   GoogleAccountConnectionState,
   HeaderStatus,
 } from './use-google-account-connection'
+import {
+  loadPersistedSelection,
+  persistSelection,
+  reconcileSelection,
+} from './source-calendar-selection'
 
 /** Stable identifier for a Source Calendar (Google's calendar id). */
 export type SourceCalendarId = string
@@ -89,6 +94,7 @@ export function useSourceCalendars({
     if (connection.status !== 'connected') {
       return
     }
+    const accountEmail = connection.profile.email
     let cancelled = false
     fetchCalendarList(connection.accessToken)
       .then((calendars) => {
@@ -97,7 +103,9 @@ export function useSourceCalendars({
         }
         setAvailable(calendars)
         setStatus(null)
-        setSelectedIds(defaultSelectionIds(calendars))
+        setSelectedIds(
+          reconcileSelection(loadPersistedSelection(accountEmail), calendars),
+        )
       })
       .catch(() => {
         if (cancelled) {
@@ -128,15 +136,21 @@ export function useSourceCalendars({
 
   const closePicker = useCallback(() => setPickerOpen(false), [])
 
-  const saveSelection = useCallback((ids: SourceCalendarId[]) => {
-    // Minimum-one: the picker disables Save at zero, so an empty draft never
-    // reaches here; guard defensively regardless.
-    if (ids.length === 0) {
-      return
-    }
-    setSelectedIds(ids)
-    setPickerOpen(false)
-  }, [])
+  const saveSelection = useCallback(
+    (ids: SourceCalendarId[]) => {
+      // Minimum-one: the picker disables Save at zero, so an empty draft never
+      // reaches here; guard defensively regardless.
+      if (ids.length === 0) {
+        return
+      }
+      if (connection.status === 'connected') {
+        persistSelection(connection.profile.email, ids)
+      }
+      setSelectedIds(ids)
+      setPickerOpen(false)
+    },
+    [connection],
+  )
 
   const selectionCalendars = useMemo(
     () => available.filter((calendar) => selectedIds.includes(calendar.id)),
@@ -153,17 +167,4 @@ export function useSourceCalendars({
     closePicker,
     saveSelection,
   }
-}
-
-/**
- * The default Selected Source Calendars before the user has chosen anything: the
- * primary calendar, or — if Google reports no primary — the first available
- * calendar so the surface is never empty.
- */
-function defaultSelectionIds(calendars: SourceCalendar[]): SourceCalendarId[] {
-  const primary = calendars.find((calendar) => calendar.primary)
-  if (primary) {
-    return [primary.id]
-  }
-  return calendars.length > 0 ? [calendars[0].id] : []
 }

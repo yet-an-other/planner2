@@ -6,6 +6,7 @@ export const GOOGLE_ACCOUNT_SCOPES = [
 ].join(' ')
 
 export type GoogleAccountProfile = {
+  email: string
   displayName: string
   initials: string
   pictureUrl: string | null
@@ -78,6 +79,7 @@ export async function fetchGoogleAccountProfile(
   const displayName = userInfo.name ?? userInfo.email ?? 'Google User'
 
   return {
+    email: userInfo.email ?? '',
     displayName,
     initials: getInitials(displayName),
     pictureUrl: userInfo.picture ?? null,
