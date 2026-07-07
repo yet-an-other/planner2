@@ -126,4 +126,22 @@ describe('SourceCalendarPicker', () => {
     expect(screen.getByRole('checkbox', { name: /work/i })).not.toBeChecked()
     expect(screen.getByRole('checkbox', { name: /family/i })).not.toBeChecked()
   })
+
+  it('closes (discards) on Escape', () => {
+    const onSave = vi.fn()
+    const onCancel = vi.fn()
+    render(
+      <SourceCalendarPicker
+        available={calendars}
+        selectedIds={['primary']}
+        onSave={onSave}
+        onCancel={onCancel}
+      />,
+    )
+
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
 })

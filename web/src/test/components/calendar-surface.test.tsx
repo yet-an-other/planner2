@@ -68,6 +68,24 @@ describe('Google Account Connection', () => {
     })
   })
 
+  it('opens the Source Calendar Picker from the header control while connected', async () => {
+    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    const user = userEvent.setup()
+    stubSuccessfulGoogleConnectionWithEvents()
+
+    render(<CalendarSurface />)
+
+    await user.click(screen.getByRole('button', { name: /connect google/i }))
+    await screen.findByText('Ada Lovelace')
+
+    await user.click(screen.getByRole('button', { name: /choose calendars/i }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Calendars')
+    // The primary calendar from the stubbed list is listed and selected by default.
+    expect(screen.getByRole('checkbox', { name: /primary/i })).toBeChecked()
+  })
+
   it('disconnects a Google Account by revoking the current access token', async () => {
     vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
     const user = userEvent.setup()
