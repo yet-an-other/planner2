@@ -263,3 +263,79 @@ describe('layoutWeekEvents', () => {
     expect(layout.bars[0].isEndTruncated).toBe(false)
   })
 })
+
+describe('layoutWeekEvents day-events (Day Events Popover source)', () => {
+  it('exposes the full uncapped day-events for a cell, ordered bars then rows by start time', () => {
+    const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
+    const bar = makeBar({
+      id: 'b1',
+      title: 'All-hands',
+      date: new Date(2026, 5, 15), // Mon
+      endDate: new Date(2026, 5, 15),
+    })
+    const rows = Array.from({ length: 6 }, (_, i) =>
+      makeRow({
+        id: `r${i}`,
+        title: `Meeting ${i + 1}`,
+        date: new Date(2026, 5, 15), // Mon
+        startTime: `${String(9 + i).padStart(2, '0')}:00`,
+      }),
+    )
+
+    const layout = layoutWeekEvents([bar, ...rows], weekStart)
+
+    // Mon cell holds 1 bar + 6 rows = 7 events; day-events is uncapped.
+    expect(layout.cells[0].dayEvents).toHaveLength(7)
+    // Bars first (lane order), then rows by start time ascending.
+    expect(layout.cells[0].dayEvents[0]).toMatchObject({
+      kind: 'bar',
+      title: 'All-hands',
+    })
+    expect(layout.cells[0].dayEvents[1]).toMatchObject({
+      kind: 'row',
+      title: 'Meeting 1',
+    })
+    expect(layout.cells[0].dayEvents[6]).toMatchObject({
+      kind: 'row',
+      title: 'Meeting 6',
+    })
+  })
+
+  it('includes a bar that spans into the cell from a prior day in that cell\'s day-events', () => {
+    const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
+    const bar = makeBar({
+      id: 'span',
+      title: 'Conference',
+      eventType: 'multiday',
+      date: new Date(2026, 5, 13), // Sat before the week
+      endDate: new Date(2026, 5, 17), // Wed
+    })
+
+    const layout = layoutWeekEvents([bar], weekStart)
+
+    // The spanning bar appears in every cell it covers (Mon–Wed) and nowhere else.
+    expect(layout.cells[0].dayEvents).toHaveLength(1)
+    expect(layout.cells[1].dayEvents).toHaveLength(1)
+    expect(layout.cells[2].dayEvents).toHaveLength(1)
+    expect(layout.cells[3].dayEvents).toEqual([])
+    expect(layout.cells[0].dayEvents[0]).toMatchObject({
+      kind: 'bar',
+      title: 'Conference',
+    })
+  })
+
+  it('gives an empty cell empty day-events and a sparse cell all of its events', () => {
+    const weekStart = mondayOf('2026-06-15') // Mon, Jun 15
+    const row = makeRow({
+      id: 'solo',
+      title: 'Solo sync',
+      date: new Date(2026, 5, 16), // Tue
+      startTime: '09:00',
+    })
+
+    const layout = layoutWeekEvents([row], weekStart)
+
+    expect(layout.cells[0].dayEvents).toEqual([]) // Mon empty
+    expect(layout.cells[1].dayEvents).toHaveLength(1) // Tue has the one row
+  })
+})

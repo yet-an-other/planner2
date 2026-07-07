@@ -15,8 +15,10 @@ import { useGoogleAccountConnection } from '@/lib/use-google-account-connection'
 import { useCalendarEvents } from '@/lib/use-calendar-events'
 import { useSourceCalendars } from '@/lib/use-source-calendars'
 import { useEventDetailPopover } from '@/lib/use-event-detail-popover'
+import { useDayEventsPopover } from '@/lib/use-day-events-popover'
 import { CalendarHeader } from './calendar-header'
 import { EventDetailPopover } from './event-detail-popover'
+import { DayEventsPopover } from './day-events-popover'
 import { SourceCalendarPicker } from './source-calendar-picker'
 import { layoutWeekEvents } from '@/lib/event-layout'
 import { getContrastTextColor } from '@/lib/text-contrast'
@@ -49,6 +51,30 @@ export function CalendarSurface() {
     scrollContainerRef: scrollParentRef,
     isConnected: googleAccountConnected,
   })
+  const dayEventsPopover = useDayEventsPopover({
+    scrollContainerRef: scrollParentRef,
+  })
+
+  // Mutual exclusivity (ADR 0004): at most one separate-layer overlay is open
+  // at a time. Each opener closes the other overlay first, at the wiring level —
+  // so it holds for both mouse and keyboard activation (a keyboard activate
+  // fires `click`, not the outside-click `mousedown` that would otherwise close
+  // the day list).
+  function openWeekEvents(
+    dayEvents: import('@/lib/google-calendar-events').CalendarEvent[],
+    date: Date,
+    trigger: HTMLElement,
+  ) {
+    eventDetailPopover.close()
+    dayEventsPopover.open(dayEvents, date, trigger)
+  }
+  function openEventDetail(
+    event: import('@/lib/google-calendar-events').CalendarEvent,
+    trigger: HTMLElement,
+  ) {
+    dayEventsPopover.close()
+    eventDetailPopover.open(event, trigger)
+  }
 
   // TanStack Virtual intentionally returns non-memoizable helpers; keep the virtualizer local to this component.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -196,7 +222,7 @@ export function CalendarSurface() {
                           )}
                           key={bar.event.id}
                           onClick={(event) =>
-                            eventDetailPopover.open(bar.event, event.currentTarget)
+                            openEventDetail(bar.event, event.currentTarget)
                           }
                           style={positionStyle}
                           title={bar.event.title}
@@ -287,7 +313,16 @@ export function CalendarSurface() {
                                 }
                                 onOpen={(trigger) =>
                                   item.kind === 'row' &&
-                                  eventDetailPopover.open(item.event, trigger)
+                                  openEventDetail(item.event, trigger)
+                                }
+                                dayEvents={cellLayout.dayEvents}
+                                cellDate={date}
+                                isDayPopoverOpen={
+                                  dayEventsPopover.date !== null &&
+                                  isSameCalendarDate(dayEventsPopover.date, date)
+                                }
+                                onOpenDayEvents={(dayEvents, day, trigger) =>
+                                  openWeekEvents(dayEvents, day, trigger)
                                 }
                               />
                             ))}
@@ -310,6 +345,17 @@ export function CalendarSurface() {
         popoverRef={eventDetailPopover.popoverRef}
       />
 
+      <DayEventsPopover
+        anchorRect={dayEventsPopover.anchorRect}
+        dayEvents={dayEventsPopover.dayEvents}
+        date={dayEventsPopover.date}
+        onClose={dayEventsPopover.close}
+        onSelectEvent={
+          googleAccountConnected ? openEventDetail : undefined
+        }
+        popoverRef={dayEventsPopover.popoverRef}
+      />
+
       {sourceCalendars.pickerOpen && (
         <SourceCalendarPicker
           available={sourceCalendars.available}
@@ -328,6 +374,18 @@ type CellItemRendererProps = {
   connected: boolean
   isOpen: boolean
   onOpen: (trigger: HTMLElement) => void
+  /** The full, uncapped day-events for this cell; shown in the Day Events Popover. */
+  dayEvents: import('@/lib/google-calendar-events').CalendarEvent[]
+  /** The Date Cell's date; passed to the Day Events Popover on open. */
+  cellDate: Date
+  /** Whether the Day Events Popover is currently open for this cell. */
+  isDayPopoverOpen: boolean
+  /** Summon the Day Events Popover for this cell from the overflow trigger. */
+  onOpenDayEvents: (
+    dayEvents: import('@/lib/google-calendar-events').CalendarEvent[],
+    date: Date,
+    trigger: HTMLElement,
+  ) => void
 }
 
 function CellItemRenderer({
@@ -335,6 +393,10 @@ function CellItemRenderer({
   connected,
   isOpen,
   onOpen,
+  dayEvents,
+  cellDate,
+  isDayPopoverOpen,
+  onOpenDayEvents,
 }: Omit<CellItemRendererProps, 'weekLayout'>) {
   if (item.kind === 'bar') {
     // Bars are rendered once at the week level; skip here to avoid duplication
@@ -368,9 +430,25 @@ function CellItemRenderer({
   }
 
   if (item.kind === 'overflow') {
+    // The Events Overflow (ADR 0004): a button while connected that summons the
+    // Day Events Popover with the cell's full day-events; an inert indicator
+    // while disconnected (where, until Saved Busy Blocks ship, cells are empty).
+    if (connected) {
+      return (
+        <button
+          aria-expanded={isDayPopoverOpen}
+          aria-label={`+${item.count} more — show all events for this day`}
+          className="text-[10px] leading-[18px] text-muted-foreground hover:text-foreground focus:text-foreground focus:outline-none focus-visible:underline"
+          onClick={(event) => onOpenDayEvents(dayEvents, cellDate, event.currentTarget)}
+          type="button"
+        >
+          +{item.count} more
+        </button>
+      )
+    }
     return (
       <div className="text-[10px] leading-[18px] text-muted-foreground">
-        +{item.count} events
+        +{item.count} more
       </div>
     )
   }

@@ -16,6 +16,12 @@ export type CellItem =
 
 export type CellLayout = {
   items: CellItem[]
+  /**
+   * The complete, ordered set of Calendar Events attributed to this cell —
+   * bars (lane order) then rows (start time) — uncapped. Source for the
+   * Day Events Popover; independent of the visible-cap `items`.
+   */
+  dayEvents: CalendarEvent[]
 }
 
 export type WeekLayout = {
@@ -80,8 +86,13 @@ export function layoutWeekEvents(events: CalendarEvent[], weekStart: Date): Week
     })
     .sort((a, b) => a.startTime.localeCompare(b.startTime))
 
-  // Build cells from bars and rows, then apply 4-item cap
-  const rawCells: CellItem[][] = Array.from({ length: 7 }, () => [])
+  // Build cells from bars and rows, then apply 4-item cap. The pre-cap items
+  // are only ever bars or rows (the overflow sentinel is added during capping),
+  // so this narrower type lets day-events resolve events without branching.
+  type UncappedCellItem =
+    | { kind: 'bar'; barIndex: number }
+    | { kind: 'row'; event: CalendarEventRow }
+  const rawCells: UncappedCellItem[][] = Array.from({ length: 7 }, () => [])
   for (let barIndex = 0; barIndex < placedBars.length; barIndex++) {
     const pb = placedBars[barIndex]
     for (let d = pb.startDayIndex; d <= pb.endDayIndex; d++) {
@@ -97,13 +108,18 @@ export function layoutWeekEvents(events: CalendarEvent[], weekStart: Date): Week
   }
 
   const cells: CellLayout[] = rawCells.map((items) => {
+    // The Day Events Popover consumes the full, uncapped, ordered set of
+    // events for the cell (bars resolved to their events, then rows).
+    const dayEvents: CalendarEvent[] = items.map((item) =>
+      item.kind === 'bar' ? placedBars[item.barIndex].event : item.event,
+    )
     if (items.length <= 4) {
-      return { items }
+      return { items, dayEvents }
     }
-    const visible = items.slice(0, 3)
+    const visible: CellItem[] = items.slice(0, 3)
     const overflow = items.length - 3
     visible.push({ kind: 'overflow', count: overflow })
-    return { items: visible }
+    return { items: visible, dayEvents }
   })
 
   return { bars: placedBars, cells }
