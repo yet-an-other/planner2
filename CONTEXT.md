@@ -96,6 +96,14 @@ _Avoid_: Cached event, local event, offline event
 A transient, read-only overlay that presents the details of a single Calendar Event, including a link to that event in Google Calendar. It is summoned from the Calendar Surface but is a separate layer from it; it never allows creating, editing, or deleting events.
 _Avoid_: Event modal, event popup, detail card, edit dialog
 
+**Events Overflow**:
+The "+N more" affordance shown in a Date Cell when its Calendar Events exceed the visible cap; it summons the Day Events Popover.
+_Avoid_: More link, +x item, extra events, expand button, overflow menu
+
+**Day Events Popover**:
+A transient, read-only overlay that lists the Calendar Events for a single Date Cell. It is summoned from the Calendar Surface but is a separate layer from it; it never allows creating, editing, or deleting events.
+_Avoid_: Day list, event popup, agenda, more-events modal, overflow menu
+
 **Extended Calendar Range**:
 The complete Monday-through-Sunday Week Rows from the week containing ten years before Today through the week containing ten years after Today.
 _Avoid_: Infinite range, endless dates, all dates
@@ -135,6 +143,12 @@ _Avoid_: Infinite range, endless dates, all dates
 - An **Event Detail Popover** presents exactly one **Calendar Event**.
 - An **Event Detail Popover** is summoned from the **Calendar Surface** but is not part of it.
 - An **Event Detail Popover** appears only while the **Google Account Connection** is connected.
+- An **Events Overflow** appears in a **Date Cell** when its **Calendar Events** exceed the visible cap.
+- An **Events Overflow** summons the **Day Events Popover**.
+- A **Day Events Popover** presents the same **Calendar Events** or **Saved Busy Blocks** the **Calendar Surface** presents for that **Date Cell**.
+- A **Day Events Popover** is summoned from the **Calendar Surface** but is not part of it.
+- A **Day Events Popover** is a layout-overflow reveal, not a detail reveal: it carries no privacy boundary of its own.
+- Selecting a **Calendar Event** in a **Day Events Popover** summons an **Event Detail Popover** for that event; this drill-through is available only while the **Google Account Connection** is connected.
 
 ## Example dialogue
 
