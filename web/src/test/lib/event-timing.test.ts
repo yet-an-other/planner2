@@ -35,7 +35,7 @@ describe('formatEventTiming', () => {
         isAllDay: false,
         isMultiday: false,
       }),
-    ).toBe('Fri, Jun 19, 2026 · 2:00 PM – 3:00 PM')
+    ).toBe('Fri, Jun 19, 2026 · 14:00 – 15:00')
   })
 
   it('formats a timed multiday event with dates and times on both ends', () => {
@@ -46,6 +46,17 @@ describe('formatEventTiming', () => {
         isAllDay: false,
         isMultiday: true,
       }),
-    ).toBe('Jun 19, 2026, 11:00 PM – Jun 20, 2026, 1:00 AM')
+    ).toBe('Jun 19, 2026, 23:00 – Jun 20, 2026, 01:00')
+  })
+
+  it('renders times in zero-padded 24h with no meridiem', () => {
+    const out = formatEventTiming({
+      start: new Date(2026, 5, 19, 9, 5),
+      end: new Date(2026, 5, 19, 9, 30),
+      isAllDay: false,
+      isMultiday: false,
+    })
+    expect(out).toContain('09:05 – 09:30')
+    expect(out).not.toMatch(/\b(AM|PM)\b/)
   })
 })

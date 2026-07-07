@@ -14,8 +14,9 @@ const monthDayYearFormatter = new Intl.DateTimeFormat('en-US', {
 })
 
 const timeFormatter = new Intl.DateTimeFormat('en-US', {
-  hour: 'numeric',
+  hour: '2-digit',
   minute: '2-digit',
+  hour12: false,
 })
 
 /**
