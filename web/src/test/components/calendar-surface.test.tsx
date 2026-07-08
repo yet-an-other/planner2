@@ -616,34 +616,48 @@ function mountScrollSurface(today: Date) {
 }
 
 function stubSuccessfulGoogleConnection() {
-  const requestAccessToken = vi.fn()
+  const requestCode = vi.fn()
   const revoke = vi.fn((_accessToken: string, done: () => void) => {
     done()
   })
-  const initTokenClient = vi.fn(({ callback }) => {
-    requestAccessToken.mockImplementation(() => {
-      callback({ access_token: 'access-token' })
+  const initCodeClient = vi.fn(({ callback }) => {
+    requestCode.mockImplementation(() => {
+      callback({ code: 'the-code' })
     })
 
-    return { requestAccessToken }
+    return { requestCode }
   })
 
   vi.stubGlobal('google', {
     accounts: {
       oauth2: {
-        initTokenClient,
+        initCodeClient,
         revoke,
       },
     },
   })
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        name: 'Ada Lovelace',
-        picture: 'https://example.com/ada.png',
-      }),
+    vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url === '/api/auth/callback')
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            profile: {
+              email: 'ada@example.com',
+              displayName: 'Ada Lovelace',
+              initials: 'AL',
+              pictureUrl: 'https://example.com/ada.png',
+            },
+          }),
+        })
+      if (url === '/api/token')
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ accessToken: 'access-token' }),
+        })
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) })
     }),
   )
 
@@ -651,22 +665,22 @@ function stubSuccessfulGoogleConnection() {
 }
 
 function stubSuccessfulGoogleConnectionWithEvents() {
-  const requestAccessToken = vi.fn()
+  const requestCode = vi.fn()
   const revoke = vi.fn((_accessToken: string, done: () => void) => {
     done()
   })
-  const initTokenClient = vi.fn(({ callback }) => {
-    requestAccessToken.mockImplementation(() => {
-      callback({ access_token: 'access-token' })
+  const initCodeClient = vi.fn(({ callback }) => {
+    requestCode.mockImplementation(() => {
+      callback({ code: 'the-code' })
     })
 
-    return { requestAccessToken }
+    return { requestCode }
   })
 
   vi.stubGlobal('google', {
     accounts: {
       oauth2: {
-        initTokenClient,
+        initCodeClient,
         revoke,
       },
     },
@@ -675,13 +689,24 @@ function stubSuccessfulGoogleConnectionWithEvents() {
   const mockFetch = vi.fn((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString()
 
-    if (url.includes('oauth2/v3/userinfo')) {
+    if (url === '/api/auth/callback') {
       return Promise.resolve({
         ok: true,
         json: async () => ({
-          name: 'Ada Lovelace',
-          picture: 'https://example.com/ada.png',
+          profile: {
+            email: 'ada@example.com',
+            displayName: 'Ada Lovelace',
+            initials: 'AL',
+            pictureUrl: 'https://example.com/ada.png',
+          },
         }),
+      })
+    }
+
+    if (url === '/api/token') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ accessToken: 'access-token' }),
       })
     }
 
@@ -740,22 +765,22 @@ function stubSuccessfulGoogleConnectionWithEvents() {
 }
 
 function stubSuccessfulGoogleConnectionWithDeferredEvents() {
-  const requestAccessToken = vi.fn()
+  const requestCode = vi.fn()
   const revoke = vi.fn((_accessToken: string, done: () => void) => {
     done()
   })
-  const initTokenClient = vi.fn(({ callback }) => {
-    requestAccessToken.mockImplementation(() => {
-      callback({ access_token: 'access-token' })
+  const initCodeClient = vi.fn(({ callback }) => {
+    requestCode.mockImplementation(() => {
+      callback({ code: 'the-code' })
     })
 
-    return { requestAccessToken }
+    return { requestCode }
   })
 
   vi.stubGlobal('google', {
     accounts: {
       oauth2: {
-        initTokenClient,
+        initCodeClient,
         revoke,
       },
     },
@@ -769,13 +794,24 @@ function stubSuccessfulGoogleConnectionWithDeferredEvents() {
   const mockFetch = vi.fn((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString()
 
-    if (url.includes('oauth2/v3/userinfo')) {
+    if (url === '/api/auth/callback') {
       return Promise.resolve({
         ok: true,
         json: async () => ({
-          name: 'Ada Lovelace',
-          picture: 'https://example.com/ada.png',
+          profile: {
+            email: 'ada@example.com',
+            displayName: 'Ada Lovelace',
+            initials: 'AL',
+            pictureUrl: 'https://example.com/ada.png',
+          },
         }),
+      })
+    }
+
+    if (url === '/api/token') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ accessToken: 'access-token' }),
       })
     }
 

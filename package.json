@@ -1,0 +1,9 @@
+{
+  "name": "@planner/root",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck"
+  }
+}

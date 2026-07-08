@@ -1,3 +1,13 @@
+import type {
+  AuthCallbackResponse,
+  GoogleAccountProfile,
+  TokenResponse,
+} from '@planner/shared'
+
+// The canonical GoogleAccountProfile type lives in @planner/shared so the
+// backend (which decodes it from the id_token) and the SPA share one contract.
+export type { GoogleAccountProfile }
+
 export const GOOGLE_ACCOUNT_SCOPES = [
   'openid',
   'email',
@@ -5,31 +15,26 @@ export const GOOGLE_ACCOUNT_SCOPES = [
   'https://www.googleapis.com/auth/calendar.readonly',
 ].join(' ')
 
-export type GoogleAccountProfile = {
-  email: string
-  displayName: string
-  initials: string
-  pictureUrl: string | null
-}
-
-type GoogleTokenResponse = {
-  access_token?: string
+type GoogleCodeResponse = {
+  code?: string
   error?: string
   error_description?: string
 }
 
-type GoogleTokenClient = {
-  requestAccessToken: (overrideConfig?: { prompt?: string }) => void
+type GoogleCodeClient = {
+  requestCode: (overrideConfig?: { prompt?: string }) => void
 }
 
 type GoogleIdentityServices = {
   accounts: {
     oauth2: {
-      initTokenClient: (config: {
+      initCodeClient: (config: {
         client_id: string
         scope: string
-        callback: (response: GoogleTokenResponse) => void
-      }) => GoogleTokenClient
+        access_type: 'offline'
+        prompt: string
+        callback: (response: GoogleCodeResponse) => void
+      }) => GoogleCodeClient
       revoke: (accessToken: string, done: () => void) => void
     }
   }
@@ -39,53 +44,63 @@ declare global {
   var google: GoogleIdentityServices | undefined
 }
 
-type GoogleUserInfo = {
-  email?: string
-  name?: string
-  picture?: string
-}
-
-export function requestGoogleAccessToken(
+/**
+ * Opens the Google consent popup to obtain a one-time authorization code.
+ * `access_type: 'offline'` + `prompt: 'consent'` are what make Google issue a
+ * refresh token, which the backend later exchanges (and holds in the cookie).
+ * The code is then POSTed to `/api/auth/callback`.
+ */
+export function requestGoogleAuthorizationCode(
   clientId: string,
-  onTokenResponse: (response: GoogleTokenResponse) => void,
+  onCodeResponse: (response: GoogleCodeResponse) => void,
 ) {
   if (!globalThis.google?.accounts.oauth2) {
     throw new Error('Google Identity Services is not loaded')
   }
 
-  const tokenClient = globalThis.google.accounts.oauth2.initTokenClient({
+  const codeClient = globalThis.google.accounts.oauth2.initCodeClient({
     client_id: clientId,
     scope: GOOGLE_ACCOUNT_SCOPES,
-    callback: onTokenResponse,
+    access_type: 'offline',
+    prompt: 'consent',
+    callback: onCodeResponse,
   })
 
-  tokenClient.requestAccessToken({ prompt: 'consent' })
+  codeClient.requestCode()
 }
 
-export async function fetchGoogleAccountProfile(
-  accessToken: string,
+/** POSTs the authorization code to the backend; returns the decoded profile. */
+export async function postAuthCallback(
+  code: string,
 ): Promise<GoogleAccountProfile> {
-  const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await fetch('/api/auth/callback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
   })
 
   if (!response.ok) {
-    throw new Error('Google profile could not be loaded')
+    throw new Error('Google connection could not be completed')
   }
 
-  const userInfo = (await response.json()) as GoogleUserInfo
-  const displayName = userInfo.name ?? userInfo.email ?? 'Google User'
-
-  return {
-    email: userInfo.email ?? '',
-    displayName,
-    initials: getInitials(displayName),
-    pictureUrl: userInfo.picture ?? null,
-  }
+  return ((await response.json()) as AuthCallbackResponse).profile
 }
 
+/** Reads a fresh access token from the backend (same-origin, cookie-authed). */
+export async function fetchAccessToken(): Promise<string> {
+  const response = await fetch('/api/token')
+
+  if (!response.ok) {
+    throw new Error('Google access token could not be loaded')
+  }
+
+  return ((await response.json()) as TokenResponse).accessToken
+}
+
+/**
+ * Revokes the access token at Google. Used by disconnect in this slice; a later
+ * slice replaces disconnect with a full `/api/logout` (revoke + clear cookie).
+ */
 export function revokeGoogleAccessToken(accessToken: string, done: () => void) {
   if (!globalThis.google?.accounts.oauth2) {
     done()
@@ -93,16 +108,4 @@ export function revokeGoogleAccessToken(accessToken: string, done: () => void) {
   }
 
   globalThis.google.accounts.oauth2.revoke(accessToken, done)
-}
-
-function getInitials(displayName: string) {
-  const initials = displayName
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase()
-
-  return initials || 'G'
 }

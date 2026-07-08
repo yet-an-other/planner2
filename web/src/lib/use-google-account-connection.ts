@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react'
 import {
-  fetchGoogleAccountProfile,
-  requestGoogleAccessToken,
+  fetchAccessToken,
+  postAuthCallback,
+  requestGoogleAuthorizationCode,
   revokeGoogleAccessToken,
   type GoogleAccountProfile,
 } from './google-account-connection'
@@ -41,8 +42,8 @@ export type GoogleAccountConnection = {
   disconnect: () => void
 }
 
-type GoogleTokenResponse = {
-  access_token?: string
+type GoogleCodeResponse = {
+  code?: string
   error?: string
   error_description?: string
 }
@@ -53,10 +54,14 @@ const NOT_CONFIGURED_STATUS: HeaderStatus = {
 }
 
 /**
- * Owns the Google Account Connection lifecycle — token acquisition, profile
- * loading, disconnect, and the status messages those produce — behind a single
- * seam. The render module reads `connection`, `status`, and the actions without
- * knowing about Google Identity Services, token clients, or revocation.
+ * Owns the Google Account Connection lifecycle behind a single seam. The render
+ * module reads `connection`, `status`, and the actions without knowing about
+ * Google Identity Services, the code client, or the backend's session cookie.
+ *
+ * `connect` obtains a one-time authorization code from Google, POSTs it to the
+ * backend (which exchanges it and sets the encrypted session cookie), then reads
+ * the access token back. The profile comes from the `id_token` via the backend,
+ * so there is no separate `userinfo` call.
  */
 export function useGoogleAccountConnection(
   clientId: string,
@@ -68,36 +73,33 @@ export function useGoogleAccountConnection(
   })
   const [status, setStatus] = useState<HeaderStatus | null>(null)
 
-  const handleTokenResponse = useCallback(
-    async (response: GoogleTokenResponse) => {
+  const handleCodeResponse = useCallback(
+    async (response: GoogleCodeResponse) => {
       if (response.error) {
         setStatus({
-          message: response.error_description ?? 'Google connection was cancelled',
+          message:
+            response.error_description ?? 'Google connection was cancelled',
           tone: 'error',
         })
         return
       }
 
-      if (!response.access_token) {
+      if (!response.code) {
         setStatus({
-          message: 'Google connection did not return an access token',
+          message: 'Google connection did not return an authorization code',
           tone: 'error',
         })
         return
       }
 
       try {
-        const profile = await fetchGoogleAccountProfile(response.access_token)
-
-        setConnection({
-          status: 'connected',
-          accessToken: response.access_token,
-          profile,
-        })
+        const profile = await postAuthCallback(response.code)
+        const accessToken = await fetchAccessToken()
+        setConnection({ status: 'connected', accessToken, profile })
         setStatus({ message: 'Google account connected', tone: 'info' })
       } catch (error) {
         setStatus({
-          message: getErrorMessage(error, 'Google profile could not be loaded'),
+          message: getErrorMessage(error, 'Google connection failed'),
           tone: 'error',
         })
       }
@@ -113,8 +115,8 @@ export function useGoogleAccountConnection(
     setStatus({ message: 'Connecting Google account...', tone: 'info' })
 
     try {
-      requestGoogleAccessToken(trimmedClientId, (response: GoogleTokenResponse) => {
-        void handleTokenResponse(response)
+      requestGoogleAuthorizationCode(trimmedClientId, (response) => {
+        void handleCodeResponse(response)
       })
     } catch (error) {
       setStatus({
@@ -122,7 +124,7 @@ export function useGoogleAccountConnection(
         tone: 'error',
       })
     }
-  }, [isConfigured, trimmedClientId, handleTokenResponse])
+  }, [isConfigured, trimmedClientId, handleCodeResponse])
 
   const disconnect = useCallback(() => {
     if (connection.status !== 'connected') {

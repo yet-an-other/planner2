@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { GoogleAccountProfile } from '@planner/shared'
 import { useGoogleAccountConnection } from '@/lib/use-google-account-connection'
 
 describe('useGoogleAccountConnection', () => {
@@ -19,9 +20,17 @@ describe('useGoogleAccountConnection', () => {
     expect(result.current.connection.status).toBe('disconnected')
   })
 
-  it('connects and exposes the access token, profile, and connected status', async () => {
-    stubGoogleIdentity({ accessToken: 'access-token' })
-    stubProfileFetch({ name: 'Ada Lovelace', picture: 'https://example.com/ada.png' })
+  it('connects via the backend: code → POST /api/auth/callback → GET /api/token', async () => {
+    const { requestCode, getCodeClientConfig } = stubCodeIdentity({ code: 'the-code' })
+    const fetchMock = stubBackend({
+      profile: {
+        email: 'ada@example.com',
+        displayName: 'Ada Lovelace',
+        initials: 'AL',
+        pictureUrl: 'https://example.com/ada.png',
+      },
+      accessToken: 'access-token',
+    })
     const { result } = renderHook(() => useGoogleAccountConnection('test-client-id'))
 
     await act(async () => {
@@ -30,6 +39,23 @@ describe('useGoogleAccountConnection', () => {
     await waitFor(() => {
       expect(result.current.connection.status).toBe('connected')
     })
+
+    // The code client must request offline access + consent so Google issues a refresh token.
+    expect(getCodeClientConfig()).toMatchObject({
+      access_type: 'offline',
+      prompt: 'consent',
+    })
+    expect(requestCode).toHaveBeenCalled()
+
+    // The SPA posts the code to the backend and reads the token back, same-origin.
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/callback',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ code: 'the-code' }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenCalledWith('/api/token')
 
     expect(result.current.connection).toMatchObject({
       accessToken: 'access-token',
@@ -44,8 +70,8 @@ describe('useGoogleAccountConnection', () => {
     })
   })
 
-  it('reports a cancelled status and stays disconnected when the token response errors', async () => {
-    stubGoogleIdentity({
+  it('reports a cancelled status and stays disconnected when the code response errors', async () => {
+    stubCodeIdentity({
       error: 'access_denied',
       error_description: 'User denied the request',
     })
@@ -62,9 +88,17 @@ describe('useGoogleAccountConnection', () => {
     expect(result.current.connection.status).toBe('disconnected')
   })
 
-  it('disconnects by revoking the token and reports the disconnected status', async () => {
-    const revoke = stubGoogleIdentity({ accessToken: 'access-token' })
-    stubProfileFetch({ name: 'Ada Lovelace' })
+  it('disconnects and reports the disconnected status', async () => {
+    const { revoke } = stubCodeIdentity({ code: 'the-code' })
+    stubBackend({
+      profile: {
+        email: 'ada@example.com',
+        displayName: 'Ada Lovelace',
+        initials: 'AL',
+        pictureUrl: null,
+      },
+      accessToken: 'access-token',
+    })
     const { result } = renderHook(() => useGoogleAccountConnection('test-client-id'))
 
     await act(async () => {
@@ -85,52 +119,48 @@ describe('useGoogleAccountConnection', () => {
   })
 })
 
-function stubGoogleIdentity(tokenResponse: {
-  accessToken?: string
+type CodeResponse = {
+  code?: string
   error?: string
   error_description?: string
-}) {
+}
+
+function stubCodeIdentity(codeResponse: CodeResponse) {
   const revoke = vi.fn((_token: string, done: () => void) => {
     done()
   })
-  const requestAccessToken = vi.fn()
-  const initTokenClient = vi.fn(({
-    callback,
-  }: {
-    callback: (response: {
-      access_token?: string
-      error?: string
-      error_description?: string
-    }) => void
-  }) => {
-    requestAccessToken.mockImplementation(() => {
-      const response: {
-        access_token?: string
-        error?: string
-        error_description?: string
-      } = {}
-      if (tokenResponse.accessToken) response.access_token = tokenResponse.accessToken
-      if (tokenResponse.error) response.error = tokenResponse.error
-      if (tokenResponse.error_description)
-        response.error_description = tokenResponse.error_description
-      callback(response)
-    })
-    return { requestAccessToken }
+  let codeClientConfig: Record<string, unknown> = {}
+  const requestCode = vi.fn()
+  const initCodeClient = vi.fn((config: Record<string, unknown>) => {
+    codeClientConfig = config
+    const callback = config.callback as (response: CodeResponse) => void
+    requestCode.mockImplementation(() => callback(codeResponse))
+    return { requestCode }
   })
 
   vi.stubGlobal('google', {
-    accounts: { oauth2: { initTokenClient, revoke } },
+    accounts: { oauth2: { initCodeClient, revoke } },
   })
 
-  return revoke
+  return { revoke, requestCode, getCodeClientConfig: () => codeClientConfig }
 }
 
-function stubProfileFetch(profile: { name: string; picture?: string }) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ name: profile.name, picture: profile.picture }),
-    }),
-  )
+function stubBackend({
+  profile,
+  accessToken,
+}: {
+  profile: GoogleAccountProfile
+  accessToken: string
+}) {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url === '/api/auth/callback') {
+      return { ok: true, json: async () => ({ profile }) }
+    }
+    if (url === '/api/token') {
+      return { ok: true, json: async () => ({ accessToken }) }
+    }
+    return { ok: false, json: async () => ({}) }
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }

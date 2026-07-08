@@ -37,18 +37,20 @@ export function mountWithEvents(
   }
   vi.stubGlobal('ResizeObserver', TestResizeObserver)
 
-  const requestAccessToken = vi.fn()
-  const initTokenClient = vi.fn(({ callback }) => {
-    requestAccessToken.mockImplementation(() => callback({ access_token: 'access-token' }))
-    return { requestAccessToken }
+  const requestCode = vi.fn()
+  const initCodeClient = vi.fn(({ callback }) => {
+    requestCode.mockImplementation(() => callback({ code: 'the-code' }))
+    return { requestCode }
   })
-  vi.stubGlobal('google', { accounts: { oauth2: { initTokenClient, revoke: vi.fn((_accessToken: string, done: () => void) => done()) } } })
+  vi.stubGlobal('google', { accounts: { oauth2: { initCodeClient, revoke: vi.fn((_accessToken: string, done: () => void) => done()) } } })
   vi.stubGlobal(
     'fetch',
     vi.fn((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString()
-      if (url.includes('userinfo'))
-        return Promise.resolve({ ok: true, json: async () => ({ name: 'Ada', picture: 'x' }) })
+      if (url === '/api/auth/callback')
+        return Promise.resolve({ ok: true, json: async () => ({ profile: { email: 'ada@example.com', displayName: 'Ada', initials: 'A', pictureUrl: 'x' } }) })
+      if (url === '/api/token')
+        return Promise.resolve({ ok: true, json: async () => ({ accessToken: 'access-token' }) })
       if (url.includes('calendarList'))
         return Promise.resolve({
           ok: true,
