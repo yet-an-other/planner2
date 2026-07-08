@@ -118,6 +118,7 @@ _Avoid_: Infinite range, endless dates, all dates
 - A **Calendar Header** contains one **Header Status**.
 - An **Account Control** displays the **Google Account Connection** state.
 - A **Google Account Connection** is either connected or disconnected.
+- A **Google Account Connection** persists across browser sessions until explicit disconnect or ~30 days of inactivity (ADR 0005).
 - A **Source Calendar** belongs to a connected **Google Account Connection**.
 - **Selected Source Calendars** is the subset of **Source Calendars** the user has chosen; The Planner fetches **Calendar Events** only from these.
 - A **Calendar Event** belongs to exactly one **Source Calendar**.
