@@ -11,6 +11,8 @@ export type DayEventsPopoverController = {
   anchorRect: DOMRect | null
   /** Ref attached to the popover root so outside-click can tell it apart. */
   popoverRef: React.RefObject<HTMLDivElement | null>
+  /** The "+N more" trigger element captured at open time (used to anchor drill-through). */
+  triggerRef: React.RefObject<HTMLElement | null>
   /** Summon the popover for a day, anchored to the element that triggered it. */
   open: (dayEvents: CalendarEvent[], date: Date, trigger: HTMLElement) => void
   /** Dismiss the popover. A no-op (no focus theft) when nothing is open. */
@@ -121,5 +123,5 @@ export function useDayEventsPopover({
     return () => document.removeEventListener('mousedown', handleMouseDown)
   }, [dayEvents, close])
 
-  return { dayEvents, date, anchorRect, popoverRef, open, close }
+  return { dayEvents, date, anchorRect, popoverRef, triggerRef, open, close }
 }

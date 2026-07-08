@@ -351,7 +351,17 @@ export function CalendarSurface() {
         date={dayEventsPopover.date}
         onClose={dayEventsPopover.close}
         onSelectEvent={
-          googleAccountConnected ? openEventDetail : undefined
+          googleAccountConnected
+            ? (event) => {
+                // Anchor the drill-through to the "+N more" trigger (the cell),
+                // which stays mounted — not the list item, which unmounts with
+                // the day list and would leave the detail popover floating.
+                const trigger = dayEventsPopover.triggerRef.current
+                if (trigger) {
+                  openEventDetail(event, trigger)
+                }
+              }
+            : undefined
         }
         popoverRef={dayEventsPopover.popoverRef}
       />
@@ -438,7 +448,7 @@ function CellItemRenderer({
         <button
           aria-expanded={isDayPopoverOpen}
           aria-label={`+${item.count} more — show all events for this day`}
-          className="text-[10px] leading-[18px] text-muted-foreground hover:text-foreground focus:text-foreground focus:outline-none focus-visible:underline"
+          className="flex w-full items-center text-[10px] leading-[18px] text-muted-foreground hover:text-foreground focus:text-foreground focus:outline-none focus-visible:underline"
           onClick={(event) => onOpenDayEvents(dayEvents, cellDate, event.currentTarget)}
           type="button"
         >
@@ -447,7 +457,7 @@ function CellItemRenderer({
       )
     }
     return (
-      <div className="text-[10px] leading-[18px] text-muted-foreground">
+      <div className="flex w-full items-center text-[10px] leading-[18px] text-muted-foreground">
         +{item.count} more
       </div>
     )

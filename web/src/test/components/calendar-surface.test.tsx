@@ -1058,4 +1058,52 @@ describe('Day Events Popover', () => {
     )
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
   })
+
+  it('anchors the drill-through Event Detail Popover to the "+N more" trigger, not the list item', async () => {
+    // jsdom has no layout, so getBoundingClientRect is all zeros by default.
+    // Stub the "+N more" trigger's rect to a distinctive position; the detail
+    // popover must inherit THAT rect (the cell), not the list item's zero rect.
+    const events = Array.from({ length: 6 }, (_, i) => ({
+      id: `evt-${i}`,
+      summary: `Meeting ${i + 1}`,
+      htmlLink: `https://www.google.com/calendar/event?eid=evt-${i}`,
+      start: { dateTime: `2026-06-19T${String(9 + i).padStart(2, '0')}:00:00` },
+      end: { dateTime: `2026-06-19T${String(9 + i).padStart(2, '0')}:30:00` },
+    }))
+    const { revealTodayWeek } = mountWithEvents(events)
+    await screen.findByText('Ada')
+    revealTodayWeek()
+
+    const moreButton = await screen.findByRole('button', { name: /\+3 more/i })
+    Object.defineProperty(moreButton, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        top: 200,
+        bottom: 220,
+        left: 50,
+        right: 70,
+        height: 20,
+        width: 20,
+        x: 50,
+        y: 200,
+        toJSON: () => ({}),
+      }),
+    })
+    fireEvent.click(moreButton)
+    await screen.findByRole('dialog') // day list open
+
+    // Drill into Meeting 4 (hidden in the cell, present only in the day list).
+    fireEvent.click(
+      screen.getByRole('button', { name: /meeting 4.*open details/i }),
+    )
+
+    // The Event Detail Popover opened (its Google link is unique to detail) and
+    // is anchored to the "+N more" trigger: bottom 220 + gap 8 = top 228.
+    const detail = await screen.findByRole('dialog')
+    expect(detail).toHaveTextContent('Meeting 4')
+    expect(
+      screen.getByRole('link', { name: /open in google calendar/i }),
+    ).toBeInTheDocument()
+    expect(Number.parseInt(detail.style.top, 10)).toBe(228)
+  })
 })
