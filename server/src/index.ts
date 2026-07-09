@@ -3,7 +3,7 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createApp } from './app'
-import type { GoogleTokensResponse } from './token-exchange'
+import { GoogleTokenError, type GoogleTokensResponse } from './token-exchange'
 
 const clientId = requireEnv('GOOGLE_CLIENT_ID')
 const clientSecret = requireEnv('GOOGLE_CLIENT_SECRET')
@@ -28,7 +28,14 @@ const app = createApp(
         body: body.toString(),
       })
       if (!response.ok) {
-        throw new Error('Google token exchange failed')
+        const errorBody = (await response.json().catch(() => ({}))) as {
+          error?: string
+          error_description?: string
+        }
+        throw new GoogleTokenError(
+          errorBody.error ?? 'unknown',
+          errorBody.error_description,
+        )
       }
       return (await response.json()) as GoogleTokensResponse
     },

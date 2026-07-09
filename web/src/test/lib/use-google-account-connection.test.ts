@@ -181,6 +181,33 @@ describe('useGoogleAccountConnection', () => {
     expect(token).toBe('fresh-token')
     expect(after).toBe(before + 1)
   })
+
+  it('disconnects gracefully when refreshAccessToken finds the session revoked (401)', async () => {
+    stubCodeIdentity({ code: 'the-code' })
+    stubBackend({
+      profile: PROFILE,
+      accessToken: 'access-token',
+      hasSession: false,
+    })
+    const { result } = renderHook(
+      () => useGoogleAccountConnection('test-client-id'),
+    )
+
+    await act(async () => {
+      result.current.connect()
+    })
+    await waitFor(() =>
+      expect(result.current.connection.status).toBe('connected'),
+    )
+
+    // /api/token is 401 (hasSession: false) -> the grant is gone; refreshAccessToken
+    // must disconnect rather than leave a stale connected state.
+    await act(async () => {
+      await expect(result.current.refreshAccessToken()).rejects.toBeDefined()
+    })
+
+    expect(result.current.connection.status).toBe('disconnected')
+  })
 })
 
 type CodeResponse = {

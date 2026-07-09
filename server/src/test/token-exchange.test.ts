@@ -4,6 +4,7 @@ import {
   decodeIdToken,
   refreshIfNeeded,
   revokeRefreshToken,
+  GoogleTokenError,
   type GoogleTokensResponse,
   type TokenExchangeConfig,
 } from '../token-exchange'
@@ -88,8 +89,7 @@ describe('refreshIfNeeded', () => {
     // expiry 100000, skew 60000 -> fresh until now < 40000.
     const result = await refreshIfNeeded(sessionAt(100_000), config, { postToGoogle }, 5_000)
 
-    expect(result.refreshed).toBe(false)
-    expect(result.session).toEqual(sessionAt(100_000))
+    expect(result).toEqual({ status: 'fresh', session: sessionAt(100_000) })
     expect(postToGoogle).not.toHaveBeenCalled()
   })
 
@@ -104,7 +104,10 @@ describe('refreshIfNeeded', () => {
     // expiry 100000, now 50000 -> 50000 >= 40000 -> stale.
     const result = await refreshIfNeeded(sessionAt(100_000), config, { postToGoogle }, 50_000)
 
-    expect(result.refreshed).toBe(true)
+    expect(result.status).toBe('refreshed')
+    if (result.status !== 'refreshed') {
+      throw new Error('expected refreshed')
+    }
     expect(result.session.accessToken).toBe('new-access')
     expect(result.session.refreshToken).toBe('refresh')
     expect(result.session.profile.email).toBe('u@example.com')
@@ -121,8 +124,8 @@ describe('refreshIfNeeded', () => {
     const fresh = await refreshIfNeeded(sessionAt(100_000), config, { postToGoogle }, 39_999)
     const stale = await refreshIfNeeded(sessionAt(100_000), config, { postToGoogle }, 40_000)
 
-    expect(fresh.refreshed).toBe(false)
-    expect(stale.refreshed).toBe(true)
+    expect(fresh.status).toBe('fresh')
+    expect(stale.status).toBe('refreshed')
   })
 })
 
@@ -148,5 +151,52 @@ describe('revokeRefreshToken', () => {
     const body = postToRevoke.mock.calls[0]![0] as URLSearchParams
     expect(body.get('token')).toBe('the-refresh')
     expect(body.get('token_type_hint')).toBe('refresh_token')
+  })
+})
+
+describe('refreshIfNeeded revoked-grant handling', () => {
+  const config: TokenExchangeConfig = {
+    clientId: 'cid',
+    clientSecret: 'secret',
+    redirectUri: 'postmessage',
+  }
+  const sessionAt = (expiresAt: number): Session => ({
+    accessToken: 'old-access',
+    accessTokenExpiresAt: expiresAt,
+    refreshToken: 'refresh',
+    profile: {
+      email: 'u@example.com',
+      displayName: 'U',
+      initials: 'U',
+      pictureUrl: null,
+    },
+  })
+
+  it('returns a revoked result when Google reports invalid_grant', async () => {
+    const postToGoogle = vi.fn(async (): Promise<GoogleTokensResponse> => {
+      throw new GoogleTokenError(
+        'invalid_grant',
+        'Token has been expired or revoked.',
+      )
+    })
+
+    const result = await refreshIfNeeded(
+      sessionAt(100_000),
+      config,
+      { postToGoogle },
+      50_000,
+    )
+
+    expect(result).toEqual({ status: 'revoked' })
+  })
+
+  it('re-throws non-invalid_grant errors (e.g. server failure)', async () => {
+    const postToGoogle = vi.fn(async (): Promise<GoogleTokensResponse> => {
+      throw new GoogleTokenError('internal_failure')
+    })
+
+    await expect(
+      refreshIfNeeded(sessionAt(100_000), config, { postToGoogle }, 50_000),
+    ).rejects.toBeInstanceOf(GoogleTokenError)
   })
 })

@@ -44,6 +44,12 @@ export function createApp(config: AppConfig, deps: AppDeps): Hono {
       return c.json({ error: 'no session' }, 401)
     }
     const result = await refreshIfNeeded(session, config, deps)
+    if (result.status === 'revoked') {
+      // The grant was revoked at Google: drop the session gracefully so the SPA
+      // falls back to the disconnected state (Saved Busy Blocks), not an error.
+      c.header('Set-Cookie', clearedSessionCookieHeader())
+      return c.json({ error: 'session revoked' }, 401)
+    }
     // Re-issue the cookie on every call so the 30-day window slides with use
     // (a fresh IV makes the value differ even when the session did not change).
     c.header(

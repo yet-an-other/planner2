@@ -55,14 +55,32 @@ export async function exchangeAuthCode(
 export const REFRESH_SKEW_MS = 60_000
 
 export type RefreshResult =
-  | { refreshed: false; session: Session }
-  | { refreshed: true; session: Session }
+  | { status: 'fresh'; session: Session }
+  | { status: 'refreshed'; session: Session }
+  | { status: 'revoked' }
+
+/**
+ * Thrown by the Google token call on a non-OK response, carrying the Google
+ * `error` code (e.g. `invalid_grant`) so callers can distinguish a revoked
+ * grant from other failures.
+ */
+export class GoogleTokenError extends Error {
+  readonly code: string
+  readonly description: string | undefined
+  constructor(code: string, description?: string) {
+    super(`Google token error: ${code}`)
+    this.name = 'GoogleTokenError'
+    this.code = code
+    this.description = description
+  }
+}
 
 /**
  * Returns the session unchanged while its access token is still valid (with a
  * small skew), otherwise refreshes it via the `refresh_token` grant. The
- * profile is carried over unchanged (it does not change on refresh). Detection
- * of a revoked grant (`invalid_grant`) is a separate slice.
+ * profile is carried over unchanged (it does not change on refresh). A revoked
+ * grant (`invalid_grant`) yields a `{ status: 'revoked' }` result so the caller
+ * can drop the session gracefully; any other Google error propagates.
  */
 export async function refreshIfNeeded(
   session: Session,
@@ -71,7 +89,7 @@ export async function refreshIfNeeded(
   now: number = Date.now(),
 ): Promise<RefreshResult> {
   if (now < session.accessTokenExpiresAt - REFRESH_SKEW_MS) {
-    return { refreshed: false, session }
+    return { status: 'fresh', session }
   }
 
   const body = new URLSearchParams({
@@ -81,16 +99,23 @@ export async function refreshIfNeeded(
     refresh_token: session.refreshToken,
   })
 
-  const tokens = await deps.postToGoogle(body)
+  try {
+    const tokens = await deps.postToGoogle(body)
 
-  return {
-    refreshed: true,
-    session: {
-      accessToken: tokens.access_token,
-      accessTokenExpiresAt: now + tokens.expires_in * 1000,
-      refreshToken: tokens.refresh_token ?? session.refreshToken,
-      profile: session.profile,
-    },
+    return {
+      status: 'refreshed',
+      session: {
+        accessToken: tokens.access_token,
+        accessTokenExpiresAt: now + tokens.expires_in * 1000,
+        refreshToken: tokens.refresh_token ?? session.refreshToken,
+        profile: session.profile,
+      },
+    }
+  } catch (error) {
+    if (error instanceof GoogleTokenError && error.code === 'invalid_grant') {
+      return { status: 'revoked' }
+    }
+    throw error
   }
 }
 

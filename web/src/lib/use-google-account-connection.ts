@@ -161,9 +161,16 @@ export function useGoogleAccountConnection(
   }, [isConfigured, trimmedClientId, handleCodeResponse])
 
   const refreshAccessToken = useCallback(async (): Promise<string> => {
-    const { accessToken, profile } = await fetchAccessToken()
-    setConnection({ status: 'connected', accessToken, profile })
-    return accessToken
+    try {
+      const { accessToken, profile } = await fetchAccessToken()
+      setConnection({ status: 'connected', accessToken, profile })
+      return accessToken
+    } catch {
+      // Session gone (revoked grant or expired cookie): disconnect gracefully
+      // so the surface falls back to Saved Busy Blocks rather than erroring.
+      setConnection({ status: 'disconnected' })
+      throw new Error('Google access token could not be loaded')
+    }
   }, [])
 
   const disconnect = useCallback(async () => {

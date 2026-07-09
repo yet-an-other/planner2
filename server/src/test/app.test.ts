@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createApp, type AppConfig } from '../app'
 import { serializeSession, SESSION_COOKIE_NAME } from '../session-cookie'
-import type { GoogleTokensResponse } from '../token-exchange'
+import { GoogleTokenError, type GoogleTokensResponse } from '../token-exchange'
 import type { Session } from '@planner/shared'
 
 const KEY = '00'.repeat(32)
@@ -101,6 +101,20 @@ describe('GET /api/token', () => {
     expect(body.accessToken).toBe('new-access')
     expect(postToGoogle).toHaveBeenCalledWith(expect.any(URLSearchParams))
     expect(res.headers.get('set-cookie')).toContain('Max-Age=2592000')
+  })
+
+  it('returns 401 and clears the cookie when the grant has been revoked', async () => {
+    const postToGoogle = vi.fn(async (): Promise<GoogleTokensResponse> => {
+      throw new GoogleTokenError('invalid_grant')
+    })
+    const staleSession = { ...session, accessTokenExpiresAt: 0 }
+    const cookie = `${SESSION_COOKIE_NAME}=${serializeSession(staleSession, KEY)}`
+    const app = createApp(config, { postToGoogle, postToRevoke: vi.fn() })
+
+    const res = await app.request('/api/token', { headers: { Cookie: cookie } })
+
+    expect(res.status).toBe(401)
+    expect(res.headers.get('set-cookie')).toContain('Max-Age=0')
   })
 
   it('returns 401 when there is no session cookie', async () => {
