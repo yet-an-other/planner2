@@ -2,6 +2,7 @@
   "name": "@planner/root",
   "version": "0.0.0",
   "private": true,
+  "packageManager": "pnpm@11.6.0",
   "scripts": {
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck"

@@ -1,0 +1,21 @@
+# Build artifacts
+**/dist
+**/.vite
+**/.tsbuildinfo
+
+# Dependencies
+**/node_modules
+
+# Git / editor / OS cruft
+.git
+.gitignore
+.pi-subagents
+**/.DS_Store
+
+# Local env (never ship secrets)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Test artifacts
+**/coverage
