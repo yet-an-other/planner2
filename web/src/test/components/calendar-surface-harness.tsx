@@ -48,9 +48,9 @@ export function mountWithEvents(
     vi.fn((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString()
       if (url === '/api/auth/callback')
-        return Promise.resolve({ ok: true, json: async () => ({ profile: { email: 'ada@example.com', displayName: 'Ada', initials: 'A', pictureUrl: 'x' } }) })
+        return Promise.resolve({ ok: true, json: async () => ({ accessToken: 'access-token', profile: { email: 'ada@example.com', displayName: 'Ada', initials: 'A', pictureUrl: 'x' } }) })
       if (url === '/api/token')
-        return Promise.resolve({ ok: true, json: async () => ({ accessToken: 'access-token' }) })
+        return Promise.resolve({ ok: false, status: 401, json: async () => ({}) })
       if (url.includes('calendarList'))
         return Promise.resolve({
           ok: true,

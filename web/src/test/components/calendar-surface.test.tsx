@@ -644,6 +644,7 @@ function stubSuccessfulGoogleConnection() {
         return Promise.resolve({
           ok: true,
           json: async () => ({
+            accessToken: 'access-token',
             profile: {
               email: 'ada@example.com',
               displayName: 'Ada Lovelace',
@@ -653,10 +654,7 @@ function stubSuccessfulGoogleConnection() {
           }),
         })
       if (url === '/api/token')
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ accessToken: 'access-token' }),
-        })
+        return Promise.resolve({ ok: false, status: 401, json: async () => ({}) })
       return Promise.resolve({ ok: true, json: async () => ({ items: [] }) })
     }),
   )
@@ -693,6 +691,7 @@ function stubSuccessfulGoogleConnectionWithEvents() {
       return Promise.resolve({
         ok: true,
         json: async () => ({
+          accessToken: 'access-token',
           profile: {
             email: 'ada@example.com',
             displayName: 'Ada Lovelace',
@@ -704,10 +703,7 @@ function stubSuccessfulGoogleConnectionWithEvents() {
     }
 
     if (url === '/api/token') {
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ accessToken: 'access-token' }),
-      })
+      return Promise.resolve({ ok: false, status: 401, json: async () => ({}) })
     }
 
     if (url.includes('calendarList')) {
@@ -798,6 +794,7 @@ function stubSuccessfulGoogleConnectionWithDeferredEvents() {
       return Promise.resolve({
         ok: true,
         json: async () => ({
+          accessToken: 'access-token',
           profile: {
             email: 'ada@example.com',
             displayName: 'Ada Lovelace',
@@ -809,10 +806,7 @@ function stubSuccessfulGoogleConnectionWithDeferredEvents() {
     }
 
     if (url === '/api/token') {
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ accessToken: 'access-token' }),
-      })
+      return Promise.resolve({ ok: false, status: 401, json: async () => ({}) })
     }
 
     if (url.includes('calendarList')) {

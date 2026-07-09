@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   assembleCalendarEvents,
+  fetchCalendarList,
   fetchSourceCalendarEvents,
   normalizeGoogleCalendarEvents,
+  UnauthorizedError,
 } from '@/lib/google-calendar-events'
 import { makeBar } from './calendar-events.factory'
 
@@ -368,6 +370,27 @@ describe('normalizeGoogleCalendarEvents color resolution', () => {
   })
 })
 
+describe('fetchCalendarList', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('throws UnauthorizedError on a 401 response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({}),
+      }),
+    )
+
+    await expect(fetchCalendarList('token')).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    )
+  })
+})
+
 describe('fetchSourceCalendarEvents', () => {
   it('fetches and merges events from every calendar, colored by its own calendar', async () => {
     const work = { id: 'work@x', summary: 'Work', backgroundColor: '#ff0000', primary: false }
@@ -418,5 +441,21 @@ describe('fetchSourceCalendarEvents', () => {
     })
 
     expect(result).toEqual({ events: [], failedCalendarCount: 0, totalCalendarCount: 0 })
+  })
+
+  it('re-throws an UnauthorizedError (401) from a calendar fetch so it can be retried', async () => {
+    const ok = { id: 'ok', summary: 'OK', backgroundColor: '#000000', primary: true }
+    const bad = { id: 'bad', summary: 'Bad', backgroundColor: '#111111', primary: false }
+    const fetchCalendarEvents = vi.fn(async (_token: string, id: string) => {
+      if (id === 'bad') throw new UnauthorizedError()
+      return []
+    })
+
+    await expect(
+      fetchSourceCalendarEvents('token', [ok, bad], RANGE, {
+        fetchCalendarEvents,
+        fetchColors: async () => ({ event: {} }),
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedError)
   })
 })

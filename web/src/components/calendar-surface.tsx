@@ -14,6 +14,12 @@ import {
 import { useGoogleAccountConnection } from '@/lib/use-google-account-connection'
 import { useCalendarEvents } from '@/lib/use-calendar-events'
 import { useSourceCalendars } from '@/lib/use-source-calendars'
+import {
+  fetchCalendarList as fetchCalendarListFromGoogle,
+  fetchSourceCalendarEvents,
+  type SourceCalendar,
+} from '@/lib/google-calendar-events'
+import { withTokenRefresh } from '@/lib/with-token-refresh'
 import { useEventDetailPopover } from '@/lib/use-event-detail-popover'
 import { useDayEventsPopover } from '@/lib/use-day-events-popover'
 import { CalendarHeader } from './calendar-header'
@@ -37,7 +43,34 @@ export function CalendarSurface() {
   const googleAccountConnection = useGoogleAccountConnection(googleClientId)
   const connection = googleAccountConnection.connection
   const googleAccountConnected = connection.status === 'connected'
-  const sourceCalendars = useSourceCalendars({ connection })
+  // Wrap the Google fetches so a mid-session 401 (expired access token) refreshes
+  // once and retries, rather than forcing a reconnect. Composed here so the
+  // hooks stay unaware of token refresh.
+  const { refreshAccessToken } = googleAccountConnection
+  const fetchCalendarList = useMemo(
+    () => (accessToken: string) =>
+      withTokenRefresh(
+        fetchCalendarListFromGoogle,
+        accessToken,
+        refreshAccessToken,
+      ),
+    [refreshAccessToken],
+  )
+  const fetchEvents = useMemo(
+    () =>
+      (
+        accessToken: string,
+        calendars: SourceCalendar[],
+        range: { start: Date; end: Date },
+      ) =>
+        withTokenRefresh(
+          (token) => fetchSourceCalendarEvents(token, calendars, range),
+          accessToken,
+          refreshAccessToken,
+        ),
+    [refreshAccessToken],
+  )
+  const sourceCalendars = useSourceCalendars({ connection, fetchCalendarList })
   // The Fetched Window, scroll-driven slab fetching, and loading/error status
   // live behind this seam; the render module only computes the visible range
   // from scroll position and hands it to maybeFetchMore.
@@ -46,6 +79,7 @@ export function CalendarSurface() {
     today,
     range,
     selection: sourceCalendars.selectionCalendars,
+    fetchEvents,
   })
   const eventDetailPopover = useEventDetailPopover({
     scrollContainerRef: scrollParentRef,

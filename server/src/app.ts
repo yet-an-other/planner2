@@ -9,6 +9,7 @@ import {
 } from './session-cookie'
 import {
   exchangeAuthCode,
+  refreshIfNeeded,
   type TokenExchangeConfig,
   type TokenExchangeDeps,
 } from './token-exchange'
@@ -28,16 +29,25 @@ export function createApp(config: AppConfig, deps: TokenExchangeDeps): Hono {
     const { code } = await c.req.json<AuthCallbackRequest>()
     const session = await exchangeAuthCode(code, config, deps)
     c.header('Set-Cookie', sessionCookieHeader(serializeSession(session, config.cookieKey)))
-    return c.json({ profile: session.profile })
+    return c.json({ accessToken: session.accessToken, profile: session.profile })
   })
 
-  app.get('/api/token', (c) => {
+  app.get('/api/token', async (c) => {
     const session = parseSession(getCookie(c, SESSION_COOKIE_NAME), config.cookieKey)
     if (!session) {
       return c.json({ error: 'no session' }, 401)
     }
-    // No refresh yet (ADR 0005 slice 1): the token was just exchanged.
-    return c.json({ accessToken: session.accessToken })
+    const result = await refreshIfNeeded(session, config, deps)
+    // Re-issue the cookie on every call so the 30-day window slides with use
+    // (a fresh IV makes the value differ even when the session did not change).
+    c.header(
+      'Set-Cookie',
+      sessionCookieHeader(serializeSession(result.session, config.cookieKey)),
+    )
+    return c.json({
+      accessToken: result.session.accessToken,
+      profile: result.session.profile,
+    })
   })
 
   return app

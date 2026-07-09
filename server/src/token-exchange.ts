@@ -51,6 +51,49 @@ export async function exchangeAuthCode(
   }
 }
 
+/** Refresh a little before the access token actually expires, to avoid races. */
+export const REFRESH_SKEW_MS = 60_000
+
+export type RefreshResult =
+  | { refreshed: false; session: Session }
+  | { refreshed: true; session: Session }
+
+/**
+ * Returns the session unchanged while its access token is still valid (with a
+ * small skew), otherwise refreshes it via the `refresh_token` grant. The
+ * profile is carried over unchanged (it does not change on refresh). Detection
+ * of a revoked grant (`invalid_grant`) is a separate slice.
+ */
+export async function refreshIfNeeded(
+  session: Session,
+  config: TokenExchangeConfig,
+  deps: TokenExchangeDeps,
+  now: number = Date.now(),
+): Promise<RefreshResult> {
+  if (now < session.accessTokenExpiresAt - REFRESH_SKEW_MS) {
+    return { refreshed: false, session }
+  }
+
+  const body = new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    grant_type: 'refresh_token',
+    refresh_token: session.refreshToken,
+  })
+
+  const tokens = await deps.postToGoogle(body)
+
+  return {
+    refreshed: true,
+    session: {
+      accessToken: tokens.access_token,
+      accessTokenExpiresAt: now + tokens.expires_in * 1000,
+      refreshToken: tokens.refresh_token ?? session.refreshToken,
+      profile: session.profile,
+    },
+  }
+}
+
 /**
  * Decodes the profile from a Google `id_token` (a JWT) without verifying its
  * signature — the token arrives server-to-server over TLS from Google's own

@@ -46,7 +46,11 @@ describe('POST /api/auth/callback', () => {
     })
 
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { profile: { email: string } }
+    const body = (await res.json()) as {
+      accessToken: string
+      profile: { email: string }
+    }
+    expect(body.accessToken).toBe('access')
     expect(body.profile.email).toBe('user@example.com')
 
     const setCookie = res.headers.get('set-cookie') ?? ''
@@ -61,17 +65,42 @@ describe('POST /api/auth/callback', () => {
 })
 
 describe('GET /api/token', () => {
-  it('returns the cached access token from a valid session cookie', async () => {
+  it('returns the cached access token and profile (no Google call) and rolls the cookie', async () => {
     const postToGoogle = vi.fn()
-    const cookie = `${SESSION_COOKIE_NAME}=${serializeSession(session, KEY)}`
+    const freshSession = { ...session, accessTokenExpiresAt: Date.now() + 3_600_000 }
+    const cookie = `${SESSION_COOKIE_NAME}=${serializeSession(freshSession, KEY)}`
     const app = createApp(config, { postToGoogle })
 
     const res = await app.request('/api/token', { headers: { Cookie: cookie } })
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ accessToken: 'access' })
+    expect(await res.json()).toEqual({
+      accessToken: 'access',
+      profile: session.profile,
+    })
     // Serving a cached token must not hit Google.
     expect(postToGoogle).not.toHaveBeenCalled()
+    // The cookie is re-issued (sliding window) even without a refresh.
+    expect(res.headers.get('set-cookie')).toContain('Max-Age=2592000')
+  })
+
+  it('refreshes a stale token via Google and re-sets the cookie', async () => {
+    const postToGoogle = vi.fn(async (): Promise<GoogleTokensResponse> => ({
+      access_token: 'new-access',
+      expires_in: 3600,
+      id_token: 'ignored',
+    }))
+    const staleSession = { ...session, accessTokenExpiresAt: 0 }
+    const cookie = `${SESSION_COOKIE_NAME}=${serializeSession(staleSession, KEY)}`
+    const app = createApp(config, { postToGoogle })
+
+    const res = await app.request('/api/token', { headers: { Cookie: cookie } })
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { accessToken: string }
+    expect(body.accessToken).toBe('new-access')
+    expect(postToGoogle).toHaveBeenCalledWith(expect.any(URLSearchParams))
+    expect(res.headers.get('set-cookie')).toContain('Max-Age=2592000')
   })
 
   it('returns 401 when there is no session cookie', async () => {

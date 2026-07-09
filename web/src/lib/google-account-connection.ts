@@ -69,10 +69,11 @@ export function requestGoogleAuthorizationCode(
   codeClient.requestCode()
 }
 
-/** POSTs the authorization code to the backend; returns the decoded profile. */
+/** POSTs the authorization code to the backend; returns the access token and
+ * decoded profile (the backend exchanges the code and sets the session cookie). */
 export async function postAuthCallback(
   code: string,
-): Promise<GoogleAccountProfile> {
+): Promise<AuthCallbackResponse> {
   const response = await fetch('/api/auth/callback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -83,18 +84,20 @@ export async function postAuthCallback(
     throw new Error('Google connection could not be completed')
   }
 
-  return ((await response.json()) as AuthCallbackResponse).profile
+  return (await response.json()) as AuthCallbackResponse
 }
 
-/** Reads a fresh access token from the backend (same-origin, cookie-authed). */
-export async function fetchAccessToken(): Promise<string> {
+/** Reads a fresh access token (and profile) from the backend — same-origin,
+ * cookie-authed. Used on load to restore the connection and to refresh an
+ * expired access token (the backend refreshes server-side as needed). */
+export async function fetchAccessToken(): Promise<TokenResponse> {
   const response = await fetch('/api/token')
 
   if (!response.ok) {
     throw new Error('Google access token could not be loaded')
   }
 
-  return ((await response.json()) as TokenResponse).accessToken
+  return (await response.json()) as TokenResponse
 }
 
 /**

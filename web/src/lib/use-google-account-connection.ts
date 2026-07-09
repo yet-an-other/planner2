@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchAccessToken,
   postAuthCallback,
@@ -40,6 +40,12 @@ export type GoogleAccountConnection = {
   connect: () => void
   /** Revoke the token and disconnect. No-op when already disconnected. */
   disconnect: () => void
+  /**
+   * Refreshes the access token from the backend (which refreshes server-side if
+   * the cached token is stale) and returns it. Used by the 401-retry path so a
+   * mid-session token expiry does not force a reconnect.
+   */
+  refreshAccessToken: () => Promise<string>
 }
 
 type GoogleCodeResponse = {
@@ -54,14 +60,16 @@ const NOT_CONFIGURED_STATUS: HeaderStatus = {
 }
 
 /**
- * Owns the Google Account Connection lifecycle behind a single seam. The render
- * module reads `connection`, `status`, and the actions without knowing about
- * Google Identity Services, the code client, or the backend's session cookie.
+ * Owns the Google Account Connection lifecycle behind a single seam.
  *
- * `connect` obtains a one-time authorization code from Google, POSTs it to the
- * backend (which exchanges it and sets the encrypted session cookie), then reads
- * the access token back. The profile comes from the `id_token` via the backend,
- * so there is no separate `userinfo` call.
+ * On mount it attempts a silent restore from the backend's session cookie via
+ * `/api/token` — so a returning user stays connected across reloads with no
+ * popup or consent screen. `connect` runs the GIS code-client flow: obtain a
+ * one-time code, POST it to `/api/auth/callback` (which exchanges it and sets
+ * the encrypted session cookie), then read the access token back.
+ * `refreshAccessToken` backs the 401-retry path for mid-session token expiry.
+ * The profile comes from the `id_token` via the backend, so there is no
+ * separate `userinfo` call.
  */
 export function useGoogleAccountConnection(
   clientId: string,
@@ -72,6 +80,32 @@ export function useGoogleAccountConnection(
     status: 'disconnected',
   })
   const [status, setStatus] = useState<HeaderStatus | null>(null)
+
+  // Silent restore on mount: rehydrate the connection from the session cookie.
+  // Runs at most once (the ref survives StrictMode's double-invoke of effects).
+  const restoreRef = useRef(false)
+  useEffect(() => {
+    if (!isConfigured || restoreRef.current) {
+      return
+    }
+    restoreRef.current = true
+    let cancelled = false
+    void (async () => {
+      try {
+        const { accessToken, profile } = await fetchAccessToken()
+        if (!cancelled) {
+          setConnection({ status: 'connected', accessToken, profile })
+        }
+      } catch {
+        // No session (401) or a transient network error: leave the default
+        // disconnected state. Restore is silent so it never clobbers a status
+        // set by an explicit connect/disconnect.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isConfigured])
 
   const handleCodeResponse = useCallback(
     async (response: GoogleCodeResponse) => {
@@ -93,8 +127,7 @@ export function useGoogleAccountConnection(
       }
 
       try {
-        const profile = await postAuthCallback(response.code)
-        const accessToken = await fetchAccessToken()
+        const { accessToken, profile } = await postAuthCallback(response.code)
         setConnection({ status: 'connected', accessToken, profile })
         setStatus({ message: 'Google account connected', tone: 'info' })
       } catch (error) {
@@ -126,6 +159,12 @@ export function useGoogleAccountConnection(
     }
   }, [isConfigured, trimmedClientId, handleCodeResponse])
 
+  const refreshAccessToken = useCallback(async (): Promise<string> => {
+    const { accessToken, profile } = await fetchAccessToken()
+    setConnection({ status: 'connected', accessToken, profile })
+    return accessToken
+  }, [])
+
   const disconnect = useCallback(() => {
     if (connection.status !== 'connected') {
       return
@@ -145,6 +184,7 @@ export function useGoogleAccountConnection(
     status: statusWithFallback,
     connect,
     disconnect,
+    refreshAccessToken,
   }
 }
 

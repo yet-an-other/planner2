@@ -162,6 +162,28 @@ export type FetchCalendarEventsResult = {
 const READABLE_ACCESS_ROLES = new Set(['reader', 'writer', 'owner'])
 
 /**
+ * Thrown by the Google fetch helpers on a 401 so the SPA can refresh the access
+ * token and retry the call exactly once (see `withTokenRefresh`). Distinct from
+ * other errors, which are not retryable.
+ */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super('Google access token is not authorized')
+    this.name = 'UnauthorizedError'
+  }
+}
+
+/** Throws `UnauthorizedError` on 401 (retryable) or a generic error otherwise. */
+function assertOk(response: Response, fallbackMessage: string) {
+  if (response.status === 401) {
+    throw new UnauthorizedError()
+  }
+  if (!response.ok) {
+    throw new Error(fallbackMessage)
+  }
+}
+
+/**
  * Fetches the user's Source Calendars — every readable, non-hidden calendar in
  * the Google account. Replaces the old primary-only lookup; the primary
  * calendar's color is read from this list.
@@ -176,9 +198,7 @@ export async function fetchCalendarList(
     },
   )
 
-  if (!response.ok) {
-    throw new Error('Calendar list could not be loaded')
-  }
+  assertOk(response, 'Calendar list could not be loaded')
 
   const body = (await response.json()) as GoogleCalendarListResponse
 
@@ -274,7 +294,10 @@ export async function fetchSourceCalendarEvents(
               eventColors,
             ),
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof UnauthorizedError) {
+            throw error
+          }
           return { calendarId: calendar.id, failed: true }
         }
       },
@@ -386,9 +409,7 @@ async function fetchGoogleCalendarColors(accessToken: string) {
     headers: getAuthHeaders(accessToken),
   })
 
-  if (!response.ok) {
-    throw new Error('Google Calendar colors could not be loaded')
-  }
+  assertOk(response, 'Google Calendar colors could not be loaded')
 
   return (await response.json()) as GoogleCalendarColorsResponse
 }
@@ -409,9 +430,7 @@ async function fetchCalendarEventResources(
       },
     )
 
-    if (!response.ok) {
-      throw new Error('Calendar events could not be loaded')
-    }
+    assertOk(response, 'Calendar events could not be loaded')
 
     const page = (await response.json()) as GoogleCalendarEventsResponse
     items.push(...(page.items ?? []))
