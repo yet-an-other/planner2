@@ -87,10 +87,10 @@ describe('Google Account Connection', () => {
     expect(screen.getByRole('checkbox', { name: /primary/i })).toBeChecked()
   })
 
-  it('disconnects a Google Account by revoking the current access token', async () => {
+  it('disconnects a Google Account and returns to the connect state', async () => {
     vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
     const user = userEvent.setup()
-    const { revoke } = stubSuccessfulGoogleConnection()
+    stubSuccessfulGoogleConnection()
 
     render(<CalendarSurface />)
 
@@ -102,7 +102,6 @@ describe('Google Account Connection', () => {
       }),
     )
 
-    expect(revoke).toHaveBeenCalledWith('access-token', expect.any(Function))
     expect(
       screen.getByRole('button', { name: /connect google account/i }),
     ).toBeInTheDocument()

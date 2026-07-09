@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchAccessToken,
   postAuthCallback,
+  postLogout,
   requestGoogleAuthorizationCode,
-  revokeGoogleAccessToken,
   type GoogleAccountProfile,
 } from './google-account-connection'
 
@@ -38,8 +38,9 @@ export type GoogleAccountConnection = {
   status: HeaderStatus | null
   /** Begin the Google OAuth connect flow. No-op when not configured. */
   connect: () => void
-  /** Revoke the token and disconnect. No-op when already disconnected. */
-  disconnect: () => void
+  /** Disconnect via the backend — `/api/logout` revokes the refresh token at
+   * Google and clears the session cookie. No-op when already disconnected. */
+  disconnect: () => Promise<void>
   /**
    * Refreshes the access token from the backend (which refreshes server-side if
    * the cached token is stale) and returns it. Used by the 401-retry path so a
@@ -165,15 +166,19 @@ export function useGoogleAccountConnection(
     return accessToken
   }, [])
 
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback(async () => {
     if (connection.status !== 'connected') {
       return
     }
 
-    revokeGoogleAccessToken(connection.accessToken, () => {
-      setConnection({ status: 'disconnected' })
-      setStatus({ message: 'Google account disconnected', tone: 'info' })
-    })
+    setStatus({ message: 'Disconnecting…', tone: 'info' })
+    try {
+      await postLogout()
+    } catch {
+      // Best-effort: clear the local connection even if the server revoke failed.
+    }
+    setConnection({ status: 'disconnected' })
+    setStatus({ message: 'Google account disconnected', tone: 'info' })
   }, [connection])
 
   const statusWithFallback = status ?? (isConfigured ? null : NOT_CONFIGURED_STATUS)

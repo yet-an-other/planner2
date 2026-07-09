@@ -89,9 +89,13 @@ describe('useGoogleAccountConnection', () => {
     expect(result.current.connection.status).toBe('disconnected')
   })
 
-  it('disconnects and reports the disconnected status', async () => {
-    const { revoke } = stubCodeIdentity({ code: 'the-code' })
-    stubBackend({ profile: PROFILE, accessToken: 'access-token', hasSession: false })
+  it('disconnects via POST /api/logout and reports the disconnected status', async () => {
+    stubCodeIdentity({ code: 'the-code' })
+    const fetchMock = stubBackend({
+      profile: PROFILE,
+      accessToken: 'access-token',
+      hasSession: false,
+    })
     const { result } = renderHook(() => useGoogleAccountConnection('test-client-id'))
 
     await act(async () => {
@@ -104,7 +108,10 @@ describe('useGoogleAccountConnection', () => {
     })
     await waitFor(() => expect(result.current.connection.status).toBe('disconnected'))
 
-    expect(revoke).toHaveBeenCalledWith('access-token', expect.any(Function))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/logout',
+      expect.objectContaining({ method: 'POST' }),
+    )
     expect(result.current.status).toEqual({
       message: 'Google account disconnected',
       tone: 'info',
@@ -214,6 +221,9 @@ function stubBackend({
   const fetchMock = vi.fn(async (url: string) => {
     if (url === '/api/auth/callback') {
       return { ok: true, json: async () => ({ accessToken, profile }) }
+    }
+    if (url === '/api/logout') {
+      return { ok: true, json: async () => ({ ok: true }) }
     }
     if (url === '/api/token') {
       return hasSession

@@ -5,11 +5,14 @@ import {
   serializeSession,
   parseSession,
   sessionCookieHeader,
+  clearedSessionCookieHeader,
   SESSION_COOKIE_NAME,
 } from './session-cookie'
 import {
   exchangeAuthCode,
   refreshIfNeeded,
+  revokeRefreshToken,
+  type RevokeDeps,
   type TokenExchangeConfig,
   type TokenExchangeDeps,
 } from './token-exchange'
@@ -17,12 +20,15 @@ import {
 /** Server-side OAuth credentials plus the cookie-encryption key. */
 export type AppConfig = TokenExchangeConfig & { cookieKey: string }
 
+/** Injectable Google HTTP collaborators: token endpoint + revocation endpoint. */
+export type AppDeps = TokenExchangeDeps & RevokeDeps
+
 /**
  * Builds the API Hono app. Config and the Google HTTP dependency are injected
  * so the endpoints are unit-testable without a network. The SPA static-serving
  * fallback is wired separately at runtime (see `index.ts`).
  */
-export function createApp(config: AppConfig, deps: TokenExchangeDeps): Hono {
+export function createApp(config: AppConfig, deps: AppDeps): Hono {
   const app = new Hono()
 
   app.post('/api/auth/callback', async (c) => {
@@ -48,6 +54,20 @@ export function createApp(config: AppConfig, deps: TokenExchangeDeps): Hono {
       accessToken: result.session.accessToken,
       profile: result.session.profile,
     })
+  })
+
+  app.post('/api/logout', async (c) => {
+    const session = parseSession(getCookie(c, SESSION_COOKIE_NAME), config.cookieKey)
+    if (session) {
+      try {
+        await revokeRefreshToken(session, deps)
+      } catch {
+        // Best-effort: clear the local session even if Google revocation failed
+        // (e.g. a transient network error) so the user is still logged out here.
+      }
+    }
+    c.header('Set-Cookie', clearedSessionCookieHeader())
+    return c.json({ ok: true })
   })
 
   return app

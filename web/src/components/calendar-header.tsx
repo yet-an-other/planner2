@@ -25,7 +25,7 @@ type CalendarHeaderProps = {
   onJumpToToday: () => void
   /** Begin the Google OAuth connect flow. */
   onConnect: () => void
-  /** Revoke the token and disconnect. */
+  /** Disconnect via the backend (revoke refresh token + clear cookie). */
   onDisconnect: () => void
   /** Open the Source Calendar Picker. */
   onOpenSourceCalendars: () => void

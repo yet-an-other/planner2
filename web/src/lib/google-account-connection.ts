@@ -100,15 +100,13 @@ export async function fetchAccessToken(): Promise<TokenResponse> {
   return (await response.json()) as TokenResponse
 }
 
-/**
- * Revokes the access token at Google. Used by disconnect in this slice; a later
- * slice replaces disconnect with a full `/api/logout` (revoke + clear cookie).
- */
-export function revokeGoogleAccessToken(accessToken: string, done: () => void) {
-  if (!globalThis.google?.accounts.oauth2) {
-    done()
-    return
-  }
+/** POSTs to the backend to revoke the Google grant and clear the session
+ * cookie. Best-effort on the client: the caller clears the local connection
+ * regardless, so a transient server failure still logs the user out here. */
+export async function postLogout(): Promise<void> {
+  const response = await fetch('/api/logout', { method: 'POST' })
 
-  globalThis.google.accounts.oauth2.revoke(accessToken, done)
+  if (!response.ok) {
+    throw new Error('Google disconnect failed')
+  }
 }
