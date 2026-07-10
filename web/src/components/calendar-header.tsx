@@ -56,16 +56,18 @@ export function CalendarHeader({
   return (
     <header className="shrink-0 border-b border-[#d8d1bd] bg-[#f5f1e6] text-[#252819] shadow-sm">
       <div className="grid h-20 grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[minmax(0,1fr)_auto] items-center gap-x-2 px-1 pb-2 pt-1 sm:gap-x-4 sm:px-6">
-        <div className="relative z-10 col-start-1 row-start-1 self-start justify-self-start whitespace-nowrap text-[clamp(18px,6vw,40px)] font-extrabold leading-none tracking-[-0.08em] text-[#777b60]">
-          Planner
+        <div className="relative z-10 col-start-1 row-start-1 flex h-[clamp(37px,calc(6vw+16px),55px)] flex-col justify-center self-center justify-self-start whitespace-nowrap">
+          <div className="mt-3 text-[clamp(18px,6vw,30px)] font-extrabold leading-none tracking-[-0.08em] text-[#777b60]">
+            Planner
+          </div>
+          <div className="self-end -mr-1 text-[10px] font-medium leading-none tracking-[0.12em] text-[#8b8f72]">
+            v{PRODUCT_VERSION}
+          </div>
         </div>
-        <div className="relative z-10 col-start-1 row-start-2 self-start justify-self-end text-[10px] font-medium leading-none tracking-[0.28em] text-[#8b8f72]">
-          v{PRODUCT_VERSION}
-        </div>
-        <h1 className="relative z-0 col-start-1 col-end-4 row-start-1 min-w-0 whitespace-nowrap text-center text-[clamp(14px,4vw,26px)] font-extrabold tracking-tight">
+        <h1 className="relative z-0 col-start-1 col-end-4 row-start-1 h-[clamp(37px,calc(6vw+16px),55px)] min-w-0 self-center whitespace-nowrap text-center text-[clamp(14px,4vw,26px)] font-extrabold tracking-tight">
           <button
             aria-label={`Return to Today, ${formatFullDate(today)}`}
-            className="mx-auto block max-w-full truncate rounded-full px-2 py-2 transition-colors hover:bg-[#ebe4d2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d855f] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f1e6] sm:px-4"
+            className="mx-auto block h-full max-w-full truncate rounded-full px-2 transition-colors hover:bg-[#ebe4d2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7d855f] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f1e6] sm:px-4"
             onClick={onJumpToToday}
             title="Return to Today"
             type="button"

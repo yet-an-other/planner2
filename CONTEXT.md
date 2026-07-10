@@ -17,7 +17,7 @@ The non-scrolling area that displays the Product Name, Visible Month, and Monday
 _Avoid_: Top bar, sticky header, current month header
 
 **Product Name**:
-The public name of the product: The Planner.
+The public name of the product: Planner.
 _Avoid_: App name, site title, brand label
 
 **Product Version**:
@@ -25,7 +25,7 @@ The public version identifier displayed with the Product Name.
 _Avoid_: Build number, package version, release tag
 
 **Google Account Connection**:
-The user's authorization for The Planner to identify them with Google and read their Google Calendar.
+The user's authorization for Planner to identify them with Google and read their Google Calendar.
 _Avoid_: Login, Google auth, OAuth token
 
 **Account Control**:
@@ -69,11 +69,11 @@ A Calendar Header action that returns the Calendar Surface to Today's Week Row.
 _Avoid_: Back to today, scroll home, month click
 
 **Source Calendar**:
-A Google Calendar in the user's account that The Planner is permitted to fetch Calendar Events from. Each has a stable Google id, a display summary (e.g. "Work", "Family"), and a background color.
+A Google Calendar in the user's account that Planner is permitted to fetch Calendar Events from. Each has a stable Google id, a display summary (e.g. "Work", "Family"), and a background color.
 _Avoid_: calendar, Google calendar, calendar list, feed
 
 **Selected Source Calendars**:
-The subset of the user's Source Calendars that The Planner currently fetches Calendar Events from. Defaults to the primary calendar on first connect.
+The subset of the user's Source Calendars that Planner currently fetches Calendar Events from. Defaults to the primary calendar on first connect.
 _Avoid_: chosen calendars, enabled calendars, visible calendars
 
 **Calendar Event**:
@@ -120,7 +120,7 @@ _Avoid_: Infinite range, endless dates, all dates
 - A **Google Account Connection** is either connected or disconnected.
 - A **Google Account Connection** persists across browser sessions until explicit disconnect or ~30 days of inactivity (ADR 0005).
 - A **Source Calendar** belongs to a connected **Google Account Connection**.
-- **Selected Source Calendars** is the subset of **Source Calendars** the user has chosen; The Planner fetches **Calendar Events** only from these.
+- **Selected Source Calendars** is the subset of **Source Calendars** the user has chosen; Planner fetches **Calendar Events** only from these.
 - A **Calendar Event** belongs to exactly one **Source Calendar**.
 - A **Source Calendar Control** appears only while the **Google Account Connection** is connected.
 - A **Source Calendar Control** opens the **Source Calendar Picker**.
