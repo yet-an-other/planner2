@@ -1,0 +1,42 @@
+name: Roll back production
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: planner-production-image-state
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore previous production image
+        run: |
+          set -euo pipefail
+          git config user.name planner-release-bot
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B main origin/main
+            image_tag=$(node deploy/scripts/release-state.mjs rollback)
+            git add deploy/charts/planner/values-hetzner.yaml
+            git commit -m "chore(deploy): roll production back to $image_tag [skip ci]"
+            if git push origin HEAD:main; then
+              echo "Restored production desired state to $image_tag."
+              exit 0
+            fi
+            printf 'Production rollback raced on attempt %s; retrying.\n' "$attempt" >&2
+            sleep "$attempt"
+          done
+
+          echo 'Unable to roll back production after three attempts.' >&2
+          exit 1

@@ -2,6 +2,7 @@ packages:
   - 'web'
   - 'server'
   - 'shared'
+  - 'deploy'
 
 allowBuilds:
   esbuild: true

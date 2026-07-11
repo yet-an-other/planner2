@@ -1,0 +1,190 @@
+name: Publish image and advance staging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - package.json
+      - pnpm-workspace.yaml
+      - pnpm-lock.yaml
+      - web/**
+      - server/**
+      - shared/**
+
+permissions: {}
+
+env:
+  IMAGE: ghcr.io/yet-an-other/planner2
+
+jobs:
+  quality:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  publish-candidate:
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build one multi-platform candidate with attestations
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}:build-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  scan-candidate:
+    needs: publish-candidate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    permissions:
+      contents: read
+      packages: read
+    env:
+      TRIVY_USERNAME: ${{ github.actor }}
+      TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+      TRIVY_PLATFORM: ${{ matrix.platform }}
+      RELEASE_DIGEST: ${{ needs.publish-candidate.outputs.digest }}
+    steps:
+      - name: Report high and critical vulnerabilities in the release digest
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE }}@${{ env.RELEASE_DIGEST }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: 0
+      - name: Block fixable critical vulnerabilities in the release digest
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE }}@${{ env.RELEASE_DIGEST }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+
+  publish-immutable:
+    needs: [publish-candidate, scan-candidate]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tag }}
+    env:
+      RELEASE_DIGEST: ${{ needs.publish-candidate.outputs.digest }}
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - name: Compute immutable image tag
+        id: meta
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag the exact scanned digest as the immutable release
+        run: |
+          docker buildx imagetools create \
+            --tag "$IMAGE:${{ steps.meta.outputs.tag }}" \
+            "$IMAGE@$RELEASE_DIGEST"
+
+  advance-staging:
+    needs: publish-immutable
+    runs-on: ubuntu-latest
+    concurrency:
+      group: planner-staging-advance
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: write
+    env:
+      IMAGE_TAG: ${{ needs.publish-immutable.outputs.image-tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update newest staging release
+        id: stage
+        run: |
+          set -euo pipefail
+          git config user.name planner-release-bot
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          advanced=false
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B main origin/main
+            result=$(node deploy/scripts/release-state.mjs stage "$GITHUB_SHA" "$IMAGE_TAG")
+            if [[ "$result" == superseded ]]; then
+              echo "Candidate is superseded; immutable SHA remains published."
+              echo "advanced=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if git diff --quiet -- deploy/charts/planner/values-proxmox.yaml; then
+              advanced=true
+              break
+            fi
+
+            git add deploy/charts/planner/values-proxmox.yaml
+            git commit -m "chore(deploy): stage $IMAGE_TAG [skip ci]"
+            if git push origin HEAD:main; then
+              advanced=true
+              break
+            fi
+            printf 'Staging update raced on attempt %s; retrying.\n' "$attempt" >&2
+            sleep "$attempt"
+          done
+
+          [[ "$advanced" == true ]] || {
+            echo 'Unable to update staging after three attempts.' >&2
+            exit 1
+          }
+          echo "advanced=true" >> "$GITHUB_OUTPUT"
+      - name: Move latest only while candidate remains newest
+        if: steps.stage.outputs.advanced == 'true'
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          newest=$(git rev-list -1 origin/main -- Dockerfile package.json pnpm-workspace.yaml pnpm-lock.yaml web server shared)
+          if [[ "$newest" != "$GITHUB_SHA" ]]; then
+            echo 'A newer container commit exists; leaving latest unchanged.'
+            exit 0
+          fi
+          docker buildx imagetools create \
+            --tag "$IMAGE:latest" \
+            "$IMAGE:$IMAGE_TAG"

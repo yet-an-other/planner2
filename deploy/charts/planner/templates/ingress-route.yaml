@@ -1,0 +1,23 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "planner.fullname" . }}
+  labels:
+    {{- include "planner.labels" . | nindent 4 }}
+spec:
+  entryPoints:
+    - {{ .Values.ingress.entryPoint }}
+  routes:
+    - kind: Rule
+      match: Host(`{{ required "ingress.hostname is required" .Values.ingress.hostname }}`)
+      services:
+        - name: {{ include "planner.fullname" . }}
+          port: {{ .Values.service.port }}
+          sticky:
+            cookie:
+              name: {{ .Values.ingress.affinityCookieName }}
+              httpOnly: true
+              secure: true
+              sameSite: lax
+  tls:
+    secretName: {{ .Values.certificate.secretName }}

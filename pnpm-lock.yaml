@@ -8,6 +8,8 @@ importers:
 
   .: {}
 
+  deploy: {}
+
   server:
     dependencies:
       '@hono/node-server':

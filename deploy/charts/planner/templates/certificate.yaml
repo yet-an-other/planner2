@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "planner.fullname" . }}
+  labels:
+    {{- include "planner.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.certificate.secretName }}
+  dnsNames:
+    - {{ required "ingress.hostname is required" .Values.ingress.hostname }}
+  issuerRef:
+    name: {{ required "certificate.issuerName is required" .Values.certificate.issuerName }}
+    kind: ClusterIssuer

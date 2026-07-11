@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ .Values.projectName }}
+  namespace: {{ .Values.argoNamespace }}
+spec:
+  sourceRepos:
+    - {{ .Values.repository }}
+  destinations:
+    - server: {{ .Values.destination.server }}
+      namespace: {{ .Values.destination.namespace }}
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: policy
+      kind: PodDisruptionBudget
+    - group: cert-manager.io
+      kind: Certificate
+    - group: traefik.io
+      kind: IngressRoute

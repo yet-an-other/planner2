@@ -2,7 +2,7 @@
 
 A personal planning product whose first slice is a calendar-only surface.
 pnpm monorepo: `web` (React + Vite SPA), `server` (Hono Node API + SPA host),
-`shared` (types shared across both).
+`shared` (types shared across both), and `deploy` (GitOps charts and release tooling).
 
 ## Run locally
 
@@ -47,34 +47,29 @@ be shared or committed (ADR 0005).
      `redirect_uri_mismatch` error at connect time.
 5. Copy the **Client ID** and **Client Secret**.
 
-### 3. Configure environment files
+### 3. Configure runtime environment
 
-Both files are gitignored (`.gitignore` keeps `.env.example` only). Copy the
-examples and fill in your values.
+The local file is gitignored (`.gitignore` keeps `.env.example` only). Copy the
+server example and fill in your values.
 
 ```bash
-cp web/.env.example     web/.env.local
-cp server/.env.example  server/.env.local
+cp server/.env.example server/.env.local
 ```
 
-**`web/.env.local`** — one var:
+**`server/.env.local`**:
 
 ```
 VITE_GOOGLE_CLIENT_ID=<your-client-id>.apps.googleusercontent.com
-```
-
-**`server/.env.local`** — three vars:
-
-```
 GOOGLE_CLIENT_ID=<your-client-id>.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=<your-client-secret>
 SESSION_COOKIE_KEY=<64 hex chars>
+APP_VERSION=dev
 ```
 
 Notes:
-- `VITE_GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_ID` are the **same value** — the one
-  OAuth client id. The `VITE_` prefix only controls whether Vite inlines it into
-  the browser bundle; both reference the single client.
+- `VITE_GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_ID` must be the **same value**. The
+  server validates them at startup and serves the public id to the browser from
+  `/runtime-config.js`; Vite does not embed environment-specific OAuth values.
 - Generate `SESSION_COOKIE_KEY` **once** and reuse it across restarts:
   ```bash
   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -119,6 +114,11 @@ request returns 401 with no visible error). Use `http://localhost:3000`.
 The server also prints the URL at boot: `planner server listening on
 http://localhost:3000`.
 
+## Deployment
+
+GitOps bootstrap, secret rotation, image publication, staging advancement,
+production promotion, and rollback are documented in [`deploy/README.md`](deploy/README.md).
+
 ## Other scripts
 
 From the repo root:
@@ -134,10 +134,11 @@ From the repo root:
 - **`redirect_uri_mismatch` at connect.** You added a redirect URI in the Cloud
   Console. Remove it — the app uses `postmessage`, which needs no registered
   redirect URI. See step 2.
-- **`Missing required environment variable: GOOGLE_CLIENT_ID` (or
-  `GOOGLE_CLIENT_SECRET` / `SESSION_COOKIE_KEY`).** The server's `dev` script
-  loads `server/.env.local` via `tsx --env-file`; create it from
-  `server/.env.example` (step 3).
+- **`Missing required environment variable` at server startup.** The server's
+  `dev` script loads `server/.env.local` via `tsx --env-file`; create it from
+  `server/.env.example` and provide every required value (step 3).
+- **`VITE_GOOGLE_CLIENT_ID must match GOOGLE_CLIENT_ID`.** Use the same Google
+  OAuth Web client id for the browser and server entries in `server/.env.local`.
 - **`SESSION_COOKIE_KEY must be 32 bytes (64 hex chars)`.** Regenerate it with
   the `node -e "..."` command in step 3.
 - **Connection resets on every server restart.** You're regenerating

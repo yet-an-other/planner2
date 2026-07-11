@@ -1,0 +1,48 @@
+name: Promote production
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: planner-production-image-state
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Promote current staging image
+        run: |
+          set -euo pipefail
+          git config user.name planner-release-bot
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B main origin/main
+            image_tag=$(node deploy/scripts/release-state.mjs promote)
+
+            if git diff --quiet -- deploy/charts/planner/values-hetzner.yaml; then
+              echo "Production already selects $image_tag."
+              exit 0
+            fi
+
+            git add deploy/charts/planner/values-hetzner.yaml
+            git commit -m "chore(deploy): promote $image_tag to production [skip ci]"
+            if git push origin HEAD:main; then
+              echo "Promoted $image_tag to production desired state."
+              exit 0
+            fi
+            printf 'Production promotion raced on attempt %s; retrying.\n' "$attempt" >&2
+            sleep "$attempt"
+          done
+
+          echo 'Unable to promote production after three attempts.' >&2
+          exit 1

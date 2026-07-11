@@ -8,6 +8,9 @@ import {
   clearedSessionCookieHeader,
   SESSION_COOKIE_NAME,
 } from './session-cookie'
+import type { OperationalState } from './operations'
+import { accessLog } from './access-log'
+import { httpPolicy } from './http-policy'
 import {
   exchangeAuthCode,
   refreshIfNeeded,
@@ -17,11 +20,20 @@ import {
   type TokenExchangeDeps,
 } from './token-exchange'
 
-/** Server-side OAuth credentials plus the cookie-encryption key. */
-export type AppConfig = TokenExchangeConfig & { cookieKey: string }
+/** Server-side OAuth credentials plus startup-computed public configuration. */
+export type AppConfig = TokenExchangeConfig & {
+  cookieKey: string
+  runtimeConfigScript: string
+  productVersion: string
+  operations: OperationalState
+}
 
-/** Injectable Google HTTP collaborators: token endpoint + revocation endpoint. */
-export type AppDeps = TokenExchangeDeps & RevokeDeps
+/** Injectable Google HTTP collaborators plus operational logging seams. */
+export type AppDeps = TokenExchangeDeps &
+  RevokeDeps & {
+    writeAccessLog?: (line: string) => void
+    now?: () => number
+  }
 
 /**
  * Builds the API Hono app. Config and the Google HTTP dependency are injected
@@ -30,6 +42,35 @@ export type AppDeps = TokenExchangeDeps & RevokeDeps
  */
 export function createApp(config: AppConfig, deps: AppDeps): Hono {
   const app = new Hono()
+
+  app.use('*', httpPolicy())
+  if (deps.writeAccessLog !== undefined) {
+    app.use(
+      '*',
+      accessLog({
+        productVersion: config.productVersion,
+        write: deps.writeAccessLog,
+        now: deps.now,
+      }),
+    )
+  }
+
+  app.get('/healthz', (c) => {
+    const operationalStatus = config.operations.status()
+    return c.json(
+      {
+        status: operationalStatus === 'ready' ? 'ok' : operationalStatus,
+        productVersion: config.productVersion,
+      },
+      operationalStatus === 'ready' ? 200 : 503,
+    )
+  })
+
+  app.get('/runtime-config.js', (c) =>
+    c.body(config.runtimeConfigScript, 200, {
+      'Content-Type': 'text/javascript; charset=UTF-8',
+    }),
+  )
 
   app.post('/api/auth/callback', async (c) => {
     const { code } = await c.req.json<AuthCallbackRequest>()

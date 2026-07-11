@@ -3,13 +3,20 @@ import { createApp, type AppConfig } from '../app'
 import { serializeSession, SESSION_COOKIE_NAME } from '../session-cookie'
 import { GoogleTokenError, type GoogleTokensResponse } from '../token-exchange'
 import type { Session } from '@planner/shared'
+import { createOperationalState } from '../operations'
 
 const KEY = '00'.repeat(32)
+const readyOperations = createOperationalState()
+readyOperations.markReady()
 const config: AppConfig = {
   clientId: 'cid',
   clientSecret: 'secret',
   redirectUri: 'postmessage',
   cookieKey: KEY,
+  runtimeConfigScript:
+    'globalThis.__PLANNER_RUNTIME_CONFIG__={"googleClientId":"cid","productVersion":"sha-abcdef0"};',
+  productVersion: 'sha-abcdef0',
+  operations: readyOperations,
 }
 
 function makeIdToken(claims: Record<string, unknown>): string {
@@ -28,6 +35,68 @@ const session: Session = {
     pictureUrl: null,
   },
 }
+
+describe('GET /healthz', () => {
+  it('does not report ready before server startup completes', async () => {
+    const operations = createOperationalState()
+    const app = createApp(
+      { ...config, operations },
+      { postToGoogle: vi.fn(), postToRevoke: vi.fn() },
+    )
+
+    const response = await app.request('/healthz')
+
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({
+      status: 'starting',
+      productVersion: 'sha-abcdef0',
+    })
+  })
+
+  it('reports process health and Product Version without calling Google', async () => {
+    const postToGoogle = vi.fn()
+    const app = createApp(config, { postToGoogle, postToRevoke: vi.fn() })
+
+    const response = await app.request('/healthz')
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      status: 'ok',
+      productVersion: 'sha-abcdef0',
+    })
+    expect(postToGoogle).not.toHaveBeenCalled()
+  })
+
+  it('stops reporting ready when shutdown begins', async () => {
+    const operations = createOperationalState()
+    const app = createApp(
+      { ...config, operations },
+      { postToGoogle: vi.fn(), postToRevoke: vi.fn() },
+    )
+    operations.markReady()
+    operations.beginShutdown()
+
+    const response = await app.request('/healthz')
+
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({
+      status: 'shutting-down',
+      productVersion: 'sha-abcdef0',
+    })
+  })
+})
+
+describe('GET /runtime-config.js', () => {
+  it('serves the precomputed public runtime configuration from memory', async () => {
+    const app = createApp(config, { postToGoogle: vi.fn(), postToRevoke: vi.fn() })
+
+    const response = await app.request('/runtime-config.js')
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/javascript')
+    expect(await response.text()).toBe(config.runtimeConfigScript)
+  })
+})
 
 describe('POST /api/auth/callback', () => {
   it('exchanges the code, sets the session cookie, and returns the profile', async () => {

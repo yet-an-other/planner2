@@ -33,6 +33,7 @@ import { getContrastTextColor } from '@/lib/text-contrast'
 import { cn } from '@/lib/utils'
 import { calendarEventKey } from '@/lib/merge-calendar-events'
 import { clearSavedBusyBlocks } from '@/lib/saved-busy-blocks'
+import { getRuntimeConfig } from '@/lib/runtime-config'
 
 const WEEK_ROW_HEIGHT = 128
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -47,7 +48,7 @@ export function CalendarSurface() {
     const start = addDays(range.start, range.todayWeekIndex * 7)
     return { start, end: addDays(start, 6) }
   })
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? ''
+  const googleClientId = getRuntimeConfig().googleClientId.trim()
   const googleAccountConnection = useGoogleAccountConnection(googleClientId)
   const connection = googleAccountConnection.connection
   const googleAccountConnected = connection.status === 'connected'

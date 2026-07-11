@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.6.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.2
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test
+        run: pnpm test
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Validate Helm charts
+        run: |
+          set -euo pipefail
+          for environment in proxmox hetzner; do
+            helm lint deploy/charts/planner -f "deploy/charts/planner/values-${environment}.yaml"
+            helm template planner deploy/charts/planner -f "deploy/charts/planner/values-${environment}.yaml" >/dev/null
+            helm lint deploy/charts/planner-bootstrap -f "deploy/charts/planner-bootstrap/values-${environment}.yaml"
+            helm template planner deploy/charts/planner-bootstrap -f "deploy/charts/planner-bootstrap/values-${environment}.yaml" >/dev/null
+          done
+      - name: Validate shell
+        run: |
+          bash -n deploy/bootstrap.sh deploy/test/container-smoke.sh
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+          shellcheck deploy/bootstrap.sh deploy/test/container-smoke.sh
+      - name: Validate workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7
+
+  container-smoke:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build --tag planner:pr .
+      - name: Smoke test read-only image
+        run: bash deploy/test/container-smoke.sh planner:pr

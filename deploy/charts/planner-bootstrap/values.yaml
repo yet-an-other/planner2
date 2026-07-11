@@ -1,0 +1,15 @@
+argoNamespace: argocd
+projectName: planner
+applicationName: planner
+
+repository: https://github.com/yet-an-other/planner2.git
+targetRevision: main
+workloadChartPath: deploy/charts/planner
+environmentValuesFile: ""
+
+releaseName: planner
+destination:
+  server: https://kubernetes.default.svc
+  namespace: planner
+
+runtimeChecksum: ""

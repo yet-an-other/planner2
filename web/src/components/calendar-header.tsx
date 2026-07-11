@@ -3,7 +3,7 @@ import { formatFullDate } from '@/lib/calendar-dates'
 import { type GoogleAccountProfile } from '@/lib/google-account-connection'
 import type { HeaderStatus } from '@/lib/use-google-account-connection'
 import { Avatar } from './avatar'
-import { PRODUCT_VERSION } from '@/lib/product-version'
+import { getProductVersion } from '@/lib/product-version'
 import { cn } from '@/lib/utils'
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -61,7 +61,7 @@ export function CalendarHeader({
             Planner
           </div>
           <div className="self-end -mr-1 text-[10px] font-medium leading-none tracking-[0.12em] text-[#8b8f72]">
-            v{PRODUCT_VERSION}
+            v{getProductVersion()}
           </div>
         </div>
         <h1 className="relative z-0 col-start-1 col-end-4 row-start-1 h-[clamp(37px,calc(6vw+16px),55px)] min-w-0 self-center whitespace-nowrap text-center text-[clamp(14px,4vw,26px)] font-extrabold tracking-tight">

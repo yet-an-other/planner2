@@ -1,0 +1,45 @@
+replicaCount: 3
+
+image:
+  repository: ghcr.io/yet-an-other/planner2
+  tag: ""
+  pullPolicy: IfNotPresent
+
+runtime:
+  secretName: ""
+  checksum: ""
+
+service:
+  port: 80
+  targetPort: 3000
+
+certificate:
+  issuerName: ""
+  secretName: planner-tls
+
+ingress:
+  hostname: ""
+  entryPoint: websecure
+  affinityCookieName: planner-affinity
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+securityContext:
+  runAsUser: 10001
+  runAsGroup: 10001
+
+probes:
+  startup:
+    periodSeconds: 2
+    failureThreshold: 30
+  readiness:
+    periodSeconds: 5
+    failureThreshold: 2
+  liveness:
+    periodSeconds: 10
+    failureThreshold: 3

@@ -1,3 +1,5 @@
-import packageJson from '../../package.json'
+import { getRuntimeConfig } from './runtime-config'
 
-export const PRODUCT_VERSION = packageJson.version
+export function getProductVersion(): string {
+  return getRuntimeConfig().productVersion
+}

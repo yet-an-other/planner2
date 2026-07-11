@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["replicaCount", "image", "runtime", "certificate", "ingress"],
+  "properties": {
+    "replicaCount": { "type": "integer", "const": 3 },
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag", "pullPolicy"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string", "pattern": "^sha-[0-9a-f]{7}$" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["secretName", "checksum"],
+      "properties": {
+        "secretName": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
+        "checksum": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "certificate": {
+      "type": "object",
+      "required": ["issuerName", "secretName"],
+      "properties": {
+        "issuerName": { "type": "string", "minLength": 1 },
+        "secretName": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "required": ["hostname", "entryPoint", "affinityCookieName"],
+      "properties": {
+        "hostname": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])$" },
+        "entryPoint": { "type": "string", "minLength": 1 },
+        "affinityCookieName": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

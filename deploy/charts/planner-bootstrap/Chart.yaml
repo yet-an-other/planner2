@@ -1,0 +1,6 @@
+apiVersion: v2
+name: planner-bootstrap
+description: Restricted Argo CD project and application for Planner
+type: application
+version: 0.1.0
+appVersion: "1.0"

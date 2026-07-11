@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .Values.applicationName }}
+  namespace: {{ .Values.argoNamespace }}
+spec:
+  project: {{ .Values.projectName }}
+  source:
+    repoURL: {{ .Values.repository }}
+    targetRevision: {{ .Values.targetRevision }}
+    path: {{ .Values.workloadChartPath }}
+    helm:
+      releaseName: {{ .Values.releaseName }}
+      valueFiles:
+        - {{ .Values.environmentValuesFile }}
+      parameters:
+        - name: runtime.checksum
+          value: {{ required "runtimeChecksum is required" .Values.runtimeChecksum | quote }}
+          forceString: true
+  destination:
+    server: {{ .Values.destination.server }}
+    namespace: {{ .Values.destination.namespace }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

@@ -10,12 +10,29 @@ import {
 } from '@/lib/calendar-dates'
 import { CalendarSurface } from '@/components/calendar-surface'
 import { mountWithEvents } from './calendar-surface-harness'
+import { setRuntimeConfig } from '../runtime-config'
+
+describe('Runtime configuration', () => {
+  it('uses the runtime Google client id and displays the runtime Product Version', () => {
+    setRuntimeConfig({
+      googleClientId: 'runtime-client-id',
+      productVersion: 'sha-abcdef0',
+    })
+
+    render(<CalendarSurface />)
+
+    expect(screen.getByText('vsha-abcdef0')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /connect google account/i }),
+    ).toBeEnabled()
+  })
+})
 
 describe('Google Account Connection', () => {
   beforeEach(() => {
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
-    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', '')
+    setRuntimeConfig({ googleClientId: '' })
   })
 
   it('tells the user when Google Account Connection is not configured', () => {
@@ -30,7 +47,7 @@ describe('Google Account Connection', () => {
   })
 
   it('connects a Google Account and displays the real profile', async () => {
-    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    setRuntimeConfig({ googleClientId: 'test-client-id' })
     const user = userEvent.setup()
     stubSuccessfulGoogleConnection()
 
@@ -49,7 +66,7 @@ describe('Google Account Connection', () => {
   })
 
   it('fetches calendar events after connecting', async () => {
-    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    setRuntimeConfig({ googleClientId: 'test-client-id' })
     const user = userEvent.setup()
     const mockFetch = stubSuccessfulGoogleConnectionWithEvents()
 
@@ -70,7 +87,7 @@ describe('Google Account Connection', () => {
   })
 
   it('opens the Source Calendar Picker from the header control while connected', async () => {
-    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    setRuntimeConfig({ googleClientId: 'test-client-id' })
     const user = userEvent.setup()
     stubSuccessfulGoogleConnectionWithEvents()
 
@@ -88,7 +105,7 @@ describe('Google Account Connection', () => {
   })
 
   it('disconnects a Google Account and returns to the connect state', async () => {
-    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    setRuntimeConfig({ googleClientId: 'test-client-id' })
     const user = userEvent.setup()
     stubSuccessfulGoogleConnection()
 
@@ -115,7 +132,7 @@ describe('Scroll-driven fetching', () => {
   beforeEach(() => {
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
-    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    setRuntimeConfig({ googleClientId: 'test-client-id' })
     vi.setSystemTime(new Date(2026, 5, 19))
   })
 
@@ -303,7 +320,7 @@ describe('Account lifecycle and error recovery', () => {
   beforeEach(() => {
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
-    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    setRuntimeConfig({ googleClientId: 'test-client-id' })
     vi.setSystemTime(new Date(2026, 5, 19))
   })
 
@@ -346,7 +363,7 @@ describe('Event Detail Popover', () => {
   beforeEach(() => {
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
-    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    setRuntimeConfig({ googleClientId: 'test-client-id' })
     vi.setSystemTime(new Date(2026, 5, 19))
   })
 
@@ -875,7 +892,7 @@ describe('Day Events Popover', () => {
   beforeEach(() => {
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
-    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client-id')
+    setRuntimeConfig({ googleClientId: 'test-client-id' })
     vi.setSystemTime(new Date(2026, 5, 19))
   })
 
