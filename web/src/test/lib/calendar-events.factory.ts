@@ -21,6 +21,7 @@ function emptyDetail(): EventDetail {
 
 type MakeBarInput = {
   id: string
+  sourceCalendarId?: string
   title?: string
   eventType?: 'all-day' | 'multiday'
   date: Date
@@ -37,6 +38,7 @@ export function makeBar(input: MakeBarInput): CalendarEventBar {
   return {
     kind: 'bar',
     eventType,
+    sourceCalendarId: input.sourceCalendarId ?? 'primary',
     id: input.id,
     title: input.title ?? input.id,
     date: input.date,
@@ -54,6 +56,7 @@ export function makeBar(input: MakeBarInput): CalendarEventBar {
 
 type MakeRowInput = {
   id: string
+  sourceCalendarId?: string
   title?: string
   date: Date
   startTime?: string
@@ -66,6 +69,7 @@ type MakeRowInput = {
 export function makeRow(input: MakeRowInput): CalendarEventRow {
   return {
     kind: 'row',
+    sourceCalendarId: input.sourceCalendarId ?? 'primary',
     id: input.id,
     title: input.title ?? input.id,
     date: input.date,

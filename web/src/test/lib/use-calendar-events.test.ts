@@ -197,7 +197,7 @@ describe('useCalendarEvents', () => {
     expect(result.current.events[0].id).toBe('evt-2')
   })
 
-  it('clears events and status when the connection becomes disconnected', async () => {
+  it('falls back to privacy-safe Saved Busy Blocks when disconnected', async () => {
     const fetchEvents = eventsFn(ok([bar('evt-1', 'Lunch', today)]))
     let connection: GoogleAccountConnectionState = connected()
 
@@ -216,7 +216,14 @@ describe('useCalendarEvents', () => {
     rerender()
 
     await waitFor(() => {
-      expect(result.current.events).toHaveLength(0)
+      expect(result.current.events).toHaveLength(1)
+      expect(result.current.events[0].title).toBe('Busy')
+      expect(result.current.events[0].detail).toEqual({
+        htmlLink: null,
+        location: null,
+        description: null,
+        attendees: [],
+      })
       expect(result.current.status).toBe(null)
     })
   })
@@ -292,5 +299,124 @@ describe('useCalendarEvents', () => {
       'primary',
       'family',
     ])
+  })
+
+  it('silently replaces a bounded visible range while retaining stale events in flight', async () => {
+    let resolveRefresh!: (value: FetchCalendarEventsResult) => void
+    const oldEvent = bar('event', 'Old title', today)
+    const newEvent = bar('event', 'New title', today)
+    const fetchEvents = vi
+      .fn<FetchCalendarEvents>()
+      .mockResolvedValueOnce(ok([oldEvent]))
+      .mockImplementationOnce(
+        () => new Promise<FetchCalendarEventsResult>((resolve) => {
+          resolveRefresh = resolve
+        }),
+      )
+    const connection = connected()
+    const { result } = renderHook(() =>
+      useCalendarEvents({
+        connection,
+        today,
+        range,
+        selection: [primary()],
+        fetchEvents,
+      }),
+    )
+    await waitFor(() => expect(result.current.events[0]?.title).toBe('Old title'))
+
+    act(() => {
+      result.current.refresh({ start: today, end: addMonths(today, 0) })
+    })
+    expect(result.current.events[0]?.title).toBe('Old title')
+    expect(result.current.status).toBe(null)
+    const [, , refreshRange] = fetchEvents.mock.calls[1]
+    expect(refreshRange.start).toEqual(addMonths(today, -1))
+    expect(refreshRange.end).toEqual(addMonths(today, 1))
+
+    await act(async () => {
+      resolveRefresh({
+        events: [newEvent],
+        outcomes: [{ calendarId: 'primary', events: [newEvent] }],
+        failedCalendarCount: 0,
+        totalCalendarCount: 1,
+      })
+    })
+    expect(result.current.events[0]?.title).toBe('New title')
+  })
+
+  it('queues refresh until the initial load completes so stale responses cannot win', async () => {
+    let resolveInitial!: (value: FetchCalendarEventsResult) => void
+    const initialEvent = bar('event', 'Initial', today)
+    const refreshedEvent = bar('event', 'Refreshed', today)
+    const fetchEvents = vi
+      .fn<FetchCalendarEvents>()
+      .mockImplementationOnce(
+        () => new Promise<FetchCalendarEventsResult>((resolve) => {
+          resolveInitial = resolve
+        }),
+      )
+      .mockResolvedValueOnce({
+        events: [refreshedEvent],
+        outcomes: [{ calendarId: 'primary', events: [refreshedEvent] }],
+        failedCalendarCount: 0,
+        totalCalendarCount: 1,
+      })
+    const { result } = renderHook(() =>
+      useCalendarEvents({
+        connection: connected(),
+        today,
+        range,
+        selection: [primary()],
+        fetchEvents,
+      }),
+    )
+
+    act(() => result.current.refresh({ start: today, end: today }))
+    expect(fetchEvents).toHaveBeenCalledTimes(1)
+
+    await act(async () => resolveInitial(ok([initialEvent])))
+    await waitFor(() => expect(fetchEvents).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.events[0]?.title).toBe('Refreshed'))
+  })
+
+  it('ignores an in-flight refresh after cancellation or unmount', async () => {
+    let resolveRefresh!: (value: FetchCalendarEventsResult) => void
+    const oldEvent = makeBar({ id: 'event', date: today, color: '#111111' })
+    const newEvent = makeBar({ id: 'event', date: today, color: '#eeeeee' })
+    const fetchEvents = vi
+      .fn<FetchCalendarEvents>()
+      .mockResolvedValueOnce(ok([oldEvent]))
+      .mockImplementationOnce(
+        () => new Promise<FetchCalendarEventsResult>((resolve) => {
+          resolveRefresh = resolve
+        }),
+      )
+    const { result, unmount } = renderHook(() =>
+      useCalendarEvents({
+        connection: connected(),
+        today,
+        range,
+        selection: [primary()],
+        fetchEvents,
+      }),
+    )
+    await waitFor(() => expect(result.current.events).toHaveLength(1))
+    act(() => result.current.refresh({ start: today, end: today }))
+    result.current.cancel()
+    unmount()
+
+    await act(async () => {
+      resolveRefresh({
+        events: [newEvent],
+        outcomes: [{ calendarId: 'primary', events: [newEvent] }],
+        failedCalendarCount: 0,
+        totalCalendarCount: 1,
+      })
+    })
+
+    const persisted = localStorage.getItem('planner.savedBusyBlocks') ?? ''
+    expect(persisted).toContain('#111111')
+    expect(persisted).not.toContain('#eeeeee')
   })
 })

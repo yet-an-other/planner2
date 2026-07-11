@@ -322,14 +322,17 @@ describe('assembleCalendarEvents', () => {
     expect(result.totalCalendarCount).toBe(2)
   })
 
-  it('collapses an event appearing in two calendars to one, first calendar winning', () => {
+  it('keeps the same Google event id distinct across Source Calendars', () => {
     const result = assembleCalendarEvents([
       { calendarId: 'work', events: [makeBar({ id: 'shared', date: JUNE_17, color: '#work' })] },
       { calendarId: 'family', events: [makeBar({ id: 'shared', date: JUNE_17, color: '#family' })] },
     ])
 
-    expect(result.events).toHaveLength(1)
-    expect(result.events[0].color).toBe('#work')
+    expect(result.events).toHaveLength(2)
+    expect(result.events.map((event) => event.sourceCalendarId)).toEqual([
+      'work',
+      'family',
+    ])
   })
 })
 
@@ -373,6 +376,29 @@ describe('normalizeGoogleCalendarEvents color resolution', () => {
 describe('fetchCalendarList', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('loads every page before returning Source Calendars', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          items: [{ id: 'primary', summary: 'Primary', accessRole: 'owner', primary: true }],
+          nextPageToken: 'page-2',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          items: [{ id: 'family', summary: 'Family', accessRole: 'reader' }],
+        }),
+      })
+    vi.stubGlobal('fetch', fetch)
+
+    const calendars = await fetchCalendarList('token')
+
+    expect(calendars.map((calendar) => calendar.id)).toEqual(['primary', 'family'])
+    expect(String(fetch.mock.calls[1][0])).toContain('pageToken=page-2')
   })
 
   it('throws UnauthorizedError on a 401 response', async () => {

@@ -7,11 +7,13 @@ import {
   type SourceCalendar,
 } from './google-calendar-events'
 import { mergeCalendarEvents } from './merge-calendar-events'
+import { replaceCalendarEventRange, type DateRange } from './calendar-event-collection'
 import {
   computeScrollTrigger,
   createFetchedWindow,
   extendFetchedWindow,
   FETCHED_WINDOW_SLAB_MONTHS,
+  FETCHED_WINDOW_TRIGGER_BUFFER_MONTHS,
   type CalendarRangeBounds,
   type FetchedWindow,
   type FetchedWindowDirection,
@@ -21,26 +23,28 @@ import type {
   GoogleAccountConnectionState,
   HeaderStatus,
 } from './use-google-account-connection'
+import {
+  loadSavedBusyBlocks,
+  persistSavedBusyBlocks,
+} from './saved-busy-blocks'
 
-/** Fetches Calendar Events for the Selected Source Calendars over a date range. */
 export type FetchCalendarEvents = (
   accessToken: string,
   calendars: SourceCalendar[],
   range: { start: Date; end: Date },
 ) => Promise<FetchCalendarEventsResult>
 
-/** The interface of the Calendar Events module. */
 export type CalendarEvents = {
-  /** The merged Calendar Events currently available for rendering. */
   events: CalendarEvent[]
-  /** Status from the fetch lifecycle: loading, a non-fatal warning, or a load error. */
   status: HeaderStatus | null
-  /**
-   * Ask the module to fetch another slab if the visible range has approached a
-   * Fetched Window edge. No-op when disconnected, inside the window, or already
-   * at the Extended Calendar Range boundary.
-   */
   maybeFetchMore: (visibleRange: VisibleDateRange) => void
+  /** Silently revalidate visible dates plus the shared one-month buffer. */
+  refresh: (
+    visibleRange: VisibleDateRange,
+    selectionOverride?: SourceCalendar[],
+  ) => void
+  /** Immediately invalidate in-flight work before explicit disconnect. */
+  cancel: () => void
 }
 
 const LOADING_STATUS: HeaderStatus = { message: 'Loading events…', tone: 'info' }
@@ -48,8 +52,16 @@ const LOAD_FAILED_STATUS: HeaderStatus = {
   message: 'Calendar events could not be loaded',
   tone: 'error',
 }
-const SOME_CALENDARS_FAILED_STATUS: HeaderStatus = {
+const REFRESH_FAILED_STATUS: HeaderStatus = {
+  message: 'Calendar events could not be refreshed',
+  tone: 'error',
+}
+const SOME_CALENDARS_LOAD_FAILED_STATUS: HeaderStatus = {
   message: 'Some calendars could not be loaded',
+  tone: 'warning',
+}
+const SOME_CALENDARS_REFRESH_FAILED_STATUS: HeaderStatus = {
+  message: 'Some calendars could not be refreshed',
   tone: 'warning',
 }
 
@@ -57,22 +69,14 @@ type UseCalendarEventsParams = {
   connection: GoogleAccountConnectionState
   today: Date
   range: CalendarRangeBounds
-  /** The Selected Source Calendars to fetch Calendar Events from. */
   selection: SourceCalendar[]
-  /** Injected so tests can drive fetching without the network or jsdom. */
   fetchEvents?: FetchCalendarEvents
 }
 
 /**
- * Owns the Fetched Window and the scroll-driven fetch orchestration that fills
- * it for the current Selected Source Calendars: the initial ±6-month fetch on
- * connect, the per-slab boundary trigger, the optimistic window extension that
- * is rolled back on failure, the by-id dedup merge, and the loading/warning/
- * error status those produce. A change to the selection resets and refetches.
- *
- * The render module computes the visible date range from scroll position (which
- * needs the DOM/virtualizer) and hands it to `maybeFetchMore`. Everything else —
- * the Fetched Window bookkeeping, rollback, and counter — stays behind this seam.
+ * Owns the Fetched Window and all Calendar Event fetch orchestration. Initial
+ * loads, slab extension, and bounded stale-while-revalidate refresh share one
+ * canonical event collection and reject results from obsolete generations.
  */
 export function useCalendarEvents({
   connection,
@@ -81,205 +85,384 @@ export function useCalendarEvents({
   selection,
   fetchEvents = fetchSourceCalendarEvents,
 }: UseCalendarEventsParams): CalendarEvents {
-  const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [events, setEvents] = useState<CalendarEvent[]>(() =>
+    connection.status === 'disconnected' ? loadSavedBusyBlocks() : [],
+  )
+  const eventsRef = useRef(events)
   const [eventsStatus, setEventsStatus] = useState<HeaderStatus | null>(null)
-  // The Fetched Window is the source of truth for scroll-trigger decisions. It is
-  // stored in a ref rather than state because it is not rendered directly and the
-  // scroll handler must always read the most recent edges synchronously.
+  const cancelledRef = useRef(false)
+  const mountedRef = useRef(true)
   const fetchedWindowRef = useRef<FetchedWindow | null>(null)
+  const freshRangesRef = useRef<DateRange[]>([])
   const [pendingFetchCount, setPendingFetchCount] = useState(0)
-  // The effect and slab fetches key on the selection's content (ids) rather than
-  // the array reference, so a calendar-list refetch that yields the same set of
-  // calendars (e.g. reopening the picker) does not spuriously reload events.
-  const selectionKey = selection.map((c) => c.id).sort().join('\n')
+  const blockingFetchCountRef = useRef(0)
+  const refreshInFlightRef = useRef(false)
+  const refreshOwnerRef = useRef<string | null>(null)
+  const queuedRefreshRef = useRef<{
+    visibleRange: VisibleDateRange
+    calendars: SourceCalendar[]
+  } | null>(null)
+  const executeRefreshRef = useRef<(
+    visibleRange: VisibleDateRange,
+    calendars: SourceCalendar[],
+  ) => void>(() => undefined)
+  const queuedScrollRangeRef = useRef<VisibleDateRange | null>(null)
+  const maybeFetchMoreRef = useRef<(visibleRange: VisibleDateRange) => void>(
+    () => undefined,
+  )
 
-  // Reset fetched events when the connection transitions to disconnected. Done
-  // during render (the React "adjust state when a prop changes" pattern) rather
-  // than in an effect, so it does not cascade an extra render.
-  const [prevStatus, setPrevStatus] = useState(connection.status)
-  if (connection.status !== prevStatus) {
-    setPrevStatus(connection.status)
-    if (connection.status === 'disconnected') {
-      setEvents([])
-      setEventsStatus(null)
-    }
+  const selectionKey = selection.map((calendar) => calendar.id).sort().join('\n')
+  const identity =
+    connection.status === 'connected'
+      ? `${connection.profile.email}\n${selectionKey}`
+      : 'disconnected'
+  const identityRef = useRef(identity)
+  const connectionRef = useRef(connection)
+  const selectionRef = useRef(selection)
+  const [previousIdentity, setPreviousIdentity] = useState(identity)
+
+  useEffect(() => () => {
+    mountedRef.current = false
+    cancelledRef.current = true
+  }, [])
+
+  useEffect(() => {
+    identityRef.current = identity
+    connectionRef.current = connection
+    selectionRef.current = selection
+    eventsRef.current = events
+  }, [identity, connection, selection, events])
+
+  useEffect(() => {
+    cancelledRef.current = false
+    refreshInFlightRef.current = false
+    refreshOwnerRef.current = null
+    queuedRefreshRef.current = null
+    queuedScrollRangeRef.current = null
+    blockingFetchCountRef.current = 0
+    fetchedWindowRef.current = null
+    freshRangesRef.current = []
+  }, [identity])
+
+  const applyEvents = useCallback((next: CalendarEvent[], persist: boolean) => {
+    if (!mountedRef.current || cancelledRef.current) return
+    eventsRef.current = next
+    setEvents(next)
+    if (persist) persistSavedBusyBlocks(next)
+  }, [])
+
+  if (previousIdentity !== identity) {
+    setPreviousIdentity(identity)
+    setEventsStatus(null)
+    setPendingFetchCount(0)
+    setEvents(connection.status === 'disconnected' ? loadSavedBusyBlocks() : [])
   }
 
   useEffect(() => {
-    if (connection.status !== 'connected' || selection.length === 0) {
-      // Nothing to fetch. Events and status are cleared on disconnect by the
-      // render-time adjustment above; while connected with an empty selection
-      // (e.g. the list is still loading) there is simply nothing to show yet.
-      fetchedWindowRef.current = null
-      return
-    }
+    if (connection.status !== 'connected' || selection.length === 0) return
 
-    const accessToken = connection.accessToken
+    const expectedIdentity = identity
     const earliest = addMonths(today, -6)
     const latest = addMonths(today, 6)
     const fetchRange = { start: earliest, end: latest }
-
     fetchedWindowRef.current = createFetchedWindow(earliest, latest)
+    freshRangesRef.current = [fetchRange]
+    blockingFetchCountRef.current += 1
 
-    fetchEvents(accessToken, selection, fetchRange)
+    fetchEvents(connection.accessToken, selection, fetchRange)
       .then((result) => {
-        setEvents(result.events)
-        setEventsStatus(statusForResult(result))
+        if (cancelledRef.current || expectedIdentity !== identityRef.current) return
+        applyEvents(result.events, true)
+        setEventsStatus(statusForResult(result, false))
       })
-      .catch(() => setEventsStatus(LOAD_FAILED_STATUS))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection, today, selectionKey, fetchEvents])
+      .catch(() => {
+        if (!cancelledRef.current && expectedIdentity === identityRef.current) {
+          setEventsStatus(LOAD_FAILED_STATUS)
+        }
+      })
+      .finally(() => {
+        if (cancelledRef.current || expectedIdentity !== identityRef.current) return
+        blockingFetchCountRef.current = Math.max(0, blockingFetchCountRef.current - 1)
+        drainQueuedWork(
+          queuedRefreshRef,
+          executeRefreshRef,
+          queuedScrollRangeRef,
+          maybeFetchMoreRef,
+        )
+      })
+  // The content key deliberately prevents calendar-list metadata refetches from
+  // triggering a new ±6-month initial load.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity, today, fetchEvents, applyEvents])
+
+  const executeRefresh = useCallback(
+    (visibleRange: VisibleDateRange, calendars: SourceCalendar[]) => {
+      const currentConnection = connectionRef.current
+      if (
+        cancelledRef.current ||
+        currentConnection.status !== 'connected' ||
+        calendars.length === 0
+      ) return
+      if (refreshInFlightRef.current || blockingFetchCountRef.current > 0) {
+        queuedRefreshRef.current = { visibleRange, calendars }
+        return
+      }
+
+      const refreshRange = bufferedRange(visibleRange, range)
+      const expectedIdentity = identityRef.current
+      refreshInFlightRef.current = true
+      refreshOwnerRef.current = expectedIdentity
+
+      fetchEvents(currentConnection.accessToken, calendars, refreshRange)
+        .then((result) => {
+          if (cancelledRef.current || expectedIdentity !== identityRef.current) return
+          const next = replaceCalendarEventRange(
+            eventsRef.current,
+            result,
+            refreshRange,
+            calendars.map((calendar) => calendar.id),
+          )
+          applyEvents(next, true)
+          // A foreground refresh intentionally makes previously fetched distant
+          // ranges stale; approached slabs add their own disjoint fresh ranges.
+          freshRangesRef.current = [refreshRange]
+          setEventsStatus(statusForResult(result, true))
+        })
+        .catch(() => {
+          if (!cancelledRef.current && expectedIdentity === identityRef.current) {
+            setEventsStatus(REFRESH_FAILED_STATUS)
+          }
+        })
+        .finally(() => {
+          if (refreshOwnerRef.current !== expectedIdentity) return
+          refreshInFlightRef.current = false
+          refreshOwnerRef.current = null
+          if (cancelledRef.current || expectedIdentity !== identityRef.current) return
+          drainQueuedWork(
+            queuedRefreshRef,
+            executeRefreshRef,
+            queuedScrollRangeRef,
+            maybeFetchMoreRef,
+          )
+        })
+    },
+    [applyEvents, fetchEvents, range],
+  )
+  useEffect(() => {
+    executeRefreshRef.current = executeRefresh
+  }, [executeRefresh])
+
+  const refresh = useCallback(
+    (visibleRange: VisibleDateRange, selectionOverride?: SourceCalendar[]) => {
+      executeRefresh(visibleRange, selectionOverride ?? selectionRef.current)
+    },
+    [executeRefresh],
+  )
 
   const fetchSlab = useCallback(
     (accessToken: string, fetchedWindow: FetchedWindow, slab: SlabDirection) => {
+      if (refreshInFlightRef.current) return
       const extended = extendFetchedWindow(
         fetchedWindow,
         slab.direction,
         FETCHED_WINDOW_SLAB_MONTHS,
-        { start: range.start, end: range.end },
+        range,
       )
-
-      // The module clamps the new edge to the Extended Calendar Range, so a no-op
-      // move means the window has already reached that edge.
-      if (!slab.advanced(extended, fetchedWindow)) {
-        return
-      }
+      if (!slab.advanced(extended, fetchedWindow)) return
 
       const slabRange = slab.fetchRange(extended, fetchedWindow)
-      // Optimistically extend the Fetched Window so repeated calls in the same
-      // trigger zone do not fire the same slab twice. Rolled back on failure.
+      const expectedIdentity = identityRef.current
+      const calendars = selectionRef.current
       fetchedWindowRef.current = extended
+      blockingFetchCountRef.current += 1
       setPendingFetchCount((count) => count + 1)
 
-      fetchEvents(accessToken, selection, slabRange)
+      fetchEvents(accessToken, calendars, slabRange)
         .then((result) => {
+          if (cancelledRef.current || expectedIdentity !== identityRef.current) return
           if (isTotalFailure(result)) {
-            // Total slab failure: roll the window back so the next scroll retries.
             const current = fetchedWindowRef.current
-            if (
-              current &&
-              slab.edge(current).getTime() === slab.edge(extended).getTime()
-            ) {
+            if (current && slab.edge(current).getTime() === slab.edge(extended).getTime()) {
               fetchedWindowRef.current = slab.rollback(current, fetchedWindow)
             }
             setEventsStatus(LOAD_FAILED_STATUS)
             return
           }
-
-          setEvents((previous) => mergeCalendarEvents(previous, result.events))
-          setEventsStatus(
-            result.failedCalendarCount > 0
-              ? SOME_CALENDARS_FAILED_STATUS
-              : null,
-          )
+          const next = mergeCalendarEvents(eventsRef.current, result.events)
+          applyEvents(next, true)
+          freshRangesRef.current = addFreshRange(freshRangesRef.current, slabRange)
+          setEventsStatus(statusForResult(result, false))
         })
         .catch(() => {
-          // Defensive: per-calendar failures are absorbed inside the fetch, so a
-          // rejection here means something unexpected (e.g. a thrown bug). Roll
-          // back like a total failure so a later success can recover.
+          if (cancelledRef.current || expectedIdentity !== identityRef.current) return
           const current = fetchedWindowRef.current
-          if (
-            current &&
-            slab.edge(current).getTime() === slab.edge(extended).getTime()
-          ) {
+          if (current && slab.edge(current).getTime() === slab.edge(extended).getTime()) {
             fetchedWindowRef.current = slab.rollback(current, fetchedWindow)
           }
+          setEventsStatus(LOAD_FAILED_STATUS)
         })
         .finally(() => {
-          setPendingFetchCount((count) => count - 1)
+          if (!cancelledRef.current && expectedIdentity === identityRef.current) {
+            blockingFetchCountRef.current = Math.max(0, blockingFetchCountRef.current - 1)
+            setPendingFetchCount((count) => Math.max(0, count - 1))
+            drainQueuedWork(
+              queuedRefreshRef,
+              executeRefreshRef,
+              queuedScrollRangeRef,
+              maybeFetchMoreRef,
+            )
+          }
         })
     },
-    [range.start, range.end, selection, fetchEvents],
+    [applyEvents, fetchEvents, range],
   )
 
   const maybeFetchMore = useCallback(
     (visibleRange: VisibleDateRange) => {
-      if (connection.status !== 'connected') {
+      const currentConnection = connectionRef.current
+      if (cancelledRef.current || currentConnection.status !== 'connected') return
+      if (refreshInFlightRef.current || blockingFetchCountRef.current > 0) {
+        queuedScrollRangeRef.current = visibleRange
         return
       }
-
       const fetchedWindow = fetchedWindowRef.current
-      if (!fetchedWindow) {
-        return
-      }
+      if (!fetchedWindow) return
 
-      const trigger = computeScrollTrigger(visibleRange, fetchedWindow, undefined, {
-        start: range.start,
-        end: range.end,
-      })
+      const trigger = computeScrollTrigger(
+        visibleRange,
+        fetchedWindow,
+        undefined,
+        range,
+      )
       if (trigger === 'fetch-future') {
-        fetchSlab(connection.accessToken, fetchedWindow, FUTURE_SLAB)
+        fetchSlab(currentConnection.accessToken, fetchedWindow, FUTURE_SLAB)
       } else if (trigger === 'fetch-past') {
-        fetchSlab(connection.accessToken, fetchedWindow, PAST_SLAB)
+        fetchSlab(currentConnection.accessToken, fetchedWindow, PAST_SLAB)
+      } else if (!freshRangesRef.current.some((fresh) => rangeContains(fresh, visibleRange))) {
+        refresh(visibleRange)
       }
     },
-    [connection, fetchSlab, range.start, range.end],
+    [fetchSlab, range, refresh],
   )
 
-  const status = pendingFetchCount > 0 ? LOADING_STATUS : eventsStatus
+  useEffect(() => {
+    maybeFetchMoreRef.current = maybeFetchMore
+  }, [maybeFetchMore])
 
-  return { events, status, maybeFetchMore }
-}
+  const cancel = useCallback(() => {
+    cancelledRef.current = true
+    refreshInFlightRef.current = false
+    refreshOwnerRef.current = null
+    queuedRefreshRef.current = null
+    queuedScrollRangeRef.current = null
+  }, [])
 
-/** A total failure is every requested calendar failing; it is a hard error. */
-function isTotalFailure(result: FetchCalendarEventsResult): boolean {
-  return (
-    result.totalCalendarCount > 0 &&
-    result.failedCalendarCount === result.totalCalendarCount
-  )
-}
-
-/** Maps a fetch result to the Header Status it should surface. */
-function statusForResult(result: FetchCalendarEventsResult): HeaderStatus | null {
-  if (isTotalFailure(result)) {
-    return LOAD_FAILED_STATUS
+  return {
+    events,
+    status: pendingFetchCount > 0 ? LOADING_STATUS : eventsStatus,
+    maybeFetchMore,
+    refresh,
+    cancel,
   }
+}
+
+function bufferedRange(
+  visible: VisibleDateRange,
+  bounds: CalendarRangeBounds,
+): DateRange {
+  const start = addMonths(visible.start, -FETCHED_WINDOW_TRIGGER_BUFFER_MONTHS)
+  const end = addMonths(visible.end, FETCHED_WINDOW_TRIGGER_BUFFER_MONTHS)
+  return {
+    start: start < bounds.start ? bounds.start : start,
+    end: end > bounds.end ? bounds.end : end,
+  }
+}
+
+function rangeContains(range: DateRange, visible: VisibleDateRange): boolean {
+  return range.start <= visible.start && range.end >= visible.end
+}
+
+function addFreshRange(ranges: DateRange[], next: DateRange): DateRange[] {
+  const overlapping = ranges.filter(
+    (range) => range.start <= next.end && range.end >= next.start,
+  )
+  if (overlapping.length === 0) return [...ranges, next]
+  const start = overlapping.reduce(
+    (earliest, range) => (range.start < earliest ? range.start : earliest),
+    next.start,
+  )
+  const end = overlapping.reduce(
+    (latest, range) => (range.end > latest ? range.end : latest),
+    next.end,
+  )
+  return [
+    ...ranges.filter((range) => !overlapping.includes(range)),
+    { start, end },
+  ]
+}
+
+function drainQueuedWork(
+  queuedRefreshRef: React.RefObject<{
+    visibleRange: VisibleDateRange
+    calendars: SourceCalendar[]
+  } | null>,
+  executeRefreshRef: React.RefObject<(
+    visibleRange: VisibleDateRange,
+    calendars: SourceCalendar[],
+  ) => void>,
+  queuedScrollRef: React.RefObject<VisibleDateRange | null>,
+  maybeFetchMoreRef: React.RefObject<(visibleRange: VisibleDateRange) => void>,
+): void {
+  const queuedRefresh = queuedRefreshRef.current
+  queuedRefreshRef.current = null
+  if (queuedRefresh) {
+    executeRefreshRef.current(
+      queuedRefresh.visibleRange,
+      queuedRefresh.calendars,
+    )
+  }
+  const queuedScroll = queuedScrollRef.current
+  queuedScrollRef.current = null
+  if (queuedScroll) maybeFetchMoreRef.current(queuedScroll)
+}
+
+function isTotalFailure(result: FetchCalendarEventsResult): boolean {
+  return result.totalCalendarCount > 0 && result.failedCalendarCount === result.totalCalendarCount
+}
+
+function statusForResult(
+  result: FetchCalendarEventsResult,
+  refreshing: boolean,
+): HeaderStatus | null {
+  if (isTotalFailure(result)) return refreshing ? REFRESH_FAILED_STATUS : LOAD_FAILED_STATUS
   if (result.failedCalendarCount > 0) {
-    return SOME_CALENDARS_FAILED_STATUS
+    return refreshing
+      ? SOME_CALENDARS_REFRESH_FAILED_STATUS
+      : SOME_CALENDARS_LOAD_FAILED_STATUS
   }
   return null
 }
 
-/**
- * Describes one direction of Fetched Window growth as a small set of pure edge
- * operations. Captures everything that differs between past and future slab
- * fetches so the fetch algorithm can be written once, branchlessly.
- */
 type SlabDirection = {
   direction: FetchedWindowDirection
-  /** The window edge this direction moves (latest for future, earliest for past). */
   edge: (window: FetchedWindow) => Date
-  /** True when the extended window actually advanced past the original edge. */
   advanced: (extended: FetchedWindow, original: FetchedWindow) => boolean
-  /** Fetch range spanning from the original edge to the extended edge. */
-  fetchRange: (
-    extended: FetchedWindow,
-    original: FetchedWindow,
-  ) => { start: Date; end: Date }
-  /** Restore this direction's edge after a failed fetch, leaving the other edge. */
+  fetchRange: (extended: FetchedWindow, original: FetchedWindow) => DateRange
   rollback: (current: FetchedWindow, original: FetchedWindow) => FetchedWindow
 }
 
 const FUTURE_SLAB: SlabDirection = {
   direction: 'future',
   edge: (window) => window.latest,
-  advanced: (extended, original) =>
-    extended.latest.getTime() > original.latest.getTime(),
-  fetchRange: (extended, original) => ({
-    start: original.latest,
-    end: extended.latest,
-  }),
+  advanced: (extended, original) => extended.latest > original.latest,
+  fetchRange: (extended, original) => ({ start: original.latest, end: extended.latest }),
   rollback: (current, original) => ({ ...current, latest: original.latest }),
 }
 
 const PAST_SLAB: SlabDirection = {
   direction: 'past',
   edge: (window) => window.earliest,
-  advanced: (extended, original) =>
-    extended.earliest.getTime() < original.earliest.getTime(),
-  fetchRange: (extended, original) => ({
-    start: extended.earliest,
-    end: original.earliest,
-  }),
+  advanced: (extended, original) => extended.earliest < original.earliest,
+  fetchRange: (extended, original) => ({ start: extended.earliest, end: original.earliest }),
   rollback: (current, original) => ({ ...current, earliest: original.earliest }),
 }

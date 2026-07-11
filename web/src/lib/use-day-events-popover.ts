@@ -15,6 +15,8 @@ export type DayEventsPopoverController = {
   triggerRef: React.RefObject<HTMLElement | null>
   /** Summon the popover for a day, anchored to the element that triggered it. */
   open: (dayEvents: CalendarEvent[], date: Date, trigger: HTMLElement) => void
+  /** Replace the list after canonical Calendar Events refresh. */
+  update: (dayEvents: CalendarEvent[]) => void
   /** Dismiss the popover. A no-op (no focus theft) when nothing is open. */
   close: () => void
 }
@@ -63,6 +65,11 @@ export function useDayEventsPopover({
     },
     [],
   )
+
+  const update = useCallback((next: CalendarEvent[]) => {
+    dayEventsRef.current = next
+    setDayEvents(next)
+  }, [])
 
   const close = useCallback(() => {
     if (dayEventsRef.current === null) {
@@ -123,5 +130,5 @@ export function useDayEventsPopover({
     return () => document.removeEventListener('mousedown', handleMouseDown)
   }, [dayEvents, close])
 
-  return { dayEvents, date, anchorRect, popoverRef, triggerRef, open, close }
+  return { dayEvents, date, anchorRect, popoverRef, triggerRef, open, update, close }
 }

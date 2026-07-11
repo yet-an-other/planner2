@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchCalendarList as fetchCalendarListFromGoogle,
   type SourceCalendar,
@@ -48,6 +48,24 @@ export function useSourceCalendars({
   const [status, setStatus] = useState<HeaderStatus | null>(null)
   const [isLoadingList, setIsLoadingList] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const availableRef = useRef(available)
+  const selectedIdsRef = useRef(selectedIds)
+  const connectionIdentity =
+    connection.status === 'connected' ? connection.profile.email : 'disconnected'
+  const connectionIdentityRef = useRef(connectionIdentity)
+  const reconcileRequestRef = useRef(0)
+  const reconciliationEpochRef = useRef(0)
+  const reconcileInFlightRef = useRef<Promise<SourceCalendar[]> | null>(null)
+  const queuedReconcileRef = useRef<Promise<SourceCalendar[]> | null>(null)
+  useEffect(() => {
+    availableRef.current = available
+    selectedIdsRef.current = selectedIds
+    if (connectionIdentityRef.current !== connectionIdentity) {
+      reconcileRequestRef.current += 1
+      reconciliationEpochRef.current += 1
+    }
+    connectionIdentityRef.current = connectionIdentity
+  }, [available, selectedIds, connectionIdentity])
 
   // Adjust state during render when the connection transitions. This is the
   // React "adjust state when a prop changes" pattern: on connect we start the
@@ -70,17 +88,22 @@ export function useSourceCalendars({
   // is safe to call from an effect (no synchronous setState in the effect body).
   // A failed refetch keeps the previously-loaded list rather than wiping it.
   const refreshList = useCallback(
-    async (accessToken: string) => {
+    async (accessToken: string, expectedIdentity: string) => {
       try {
         const calendars = await fetchCalendarList(accessToken)
+        if (connectionIdentityRef.current !== expectedIdentity) return []
         setAvailable(calendars)
         setStatus(null)
         return calendars
       } catch {
-        setStatus(LIST_FAILED_STATUS)
+        if (connectionIdentityRef.current === expectedIdentity) {
+          setStatus(LIST_FAILED_STATUS)
+        }
         return []
       } finally {
-        setIsLoadingList(false)
+        if (connectionIdentityRef.current === expectedIdentity) {
+          setIsLoadingList(false)
+        }
       }
     },
     [fetchCalendarList],
@@ -124,14 +147,16 @@ export function useSourceCalendars({
   }, [connection, fetchCalendarList])
 
   const openPicker = useCallback(() => {
-    if (connection.status !== 'connected') {
-      return
-    }
-    setPickerOpen(true)
-    // Refetch so calendars added or removed in another tab since connecting
-    // become pickable without reconnecting.
+    if (connection.status !== 'connected') return
+    const expectedIdentity = connection.profile.email
+    // Complete the refetch before mounting the picker so its draft cannot have
+    // choices replaced underneath it.
     setIsLoadingList(true)
-    void refreshList(connection.accessToken)
+    void refreshList(connection.accessToken, expectedIdentity).then(() => {
+      if (connectionIdentityRef.current === expectedIdentity) {
+        setPickerOpen(true)
+      }
+    })
   }, [connection, refreshList])
 
   const closePicker = useCallback(() => setPickerOpen(false), [])
@@ -157,6 +182,74 @@ export function useSourceCalendars({
     [available, selectedIds],
   )
 
+  /**
+   * Align the committed selection with Google's complete current list. Failure
+   * is deliberately non-destructive and returns the last known selection so an
+   * event refresh can still proceed.
+   */
+  const performReconciliation = useCallback(async (): Promise<SourceCalendar[]> => {
+    if (connection.status !== 'connected') return []
+
+    const expectedIdentity = connection.profile.email
+    const request = ++reconcileRequestRef.current
+    try {
+      const calendars = await fetchCalendarList(connection.accessToken)
+      if (
+        connectionIdentityRef.current !== expectedIdentity ||
+        reconcileRequestRef.current !== request
+      ) return []
+      const nextIds = reconcileSelection(selectedIdsRef.current, calendars)
+      availableRef.current = calendars
+      selectedIdsRef.current = nextIds
+      setAvailable(calendars)
+      setSelectedIds(nextIds)
+      setStatus(null)
+      persistSelection(connection.profile.email, nextIds)
+      return calendars.filter((calendar) => nextIds.includes(calendar.id))
+    } catch {
+      if (
+        connectionIdentityRef.current !== expectedIdentity ||
+        reconcileRequestRef.current !== request
+      ) return []
+      setStatus(LIST_FAILED_STATUS)
+      return availableRef.current.filter((calendar) =>
+        selectedIdsRef.current.includes(calendar.id),
+      )
+    }
+  }, [connection, fetchCalendarList])
+
+  const reconcileCalendars = useCallback((): Promise<SourceCalendar[]> => {
+    const epoch = reconciliationEpochRef.current
+    const run = () => {
+      if (reconciliationEpochRef.current !== epoch) return Promise.resolve([])
+      const promise = performReconciliation()
+      reconcileInFlightRef.current = promise
+      void promise.finally(() => {
+        if (reconcileInFlightRef.current === promise) {
+          reconcileInFlightRef.current = null
+        }
+      })
+      return promise
+    }
+
+    const inFlight = reconcileInFlightRef.current
+    if (!inFlight) return run()
+    if (queuedReconcileRef.current) return queuedReconcileRef.current
+
+    const queued = inFlight.then(run, run).finally(() => {
+      if (queuedReconcileRef.current === queued) queuedReconcileRef.current = null
+    })
+    queuedReconcileRef.current = queued
+    return queued
+  }, [performReconciliation])
+
+  const cancelPendingReconciliation = useCallback(() => {
+    reconcileRequestRef.current += 1
+    reconciliationEpochRef.current += 1
+    reconcileInFlightRef.current = null
+    queuedReconcileRef.current = null
+  }, [])
+
   return {
     available,
     selectionCalendars,
@@ -166,5 +259,7 @@ export function useSourceCalendars({
     openPicker,
     closePicker,
     saveSelection,
+    reconcileCalendars,
+    cancelPendingReconciliation,
   }
 }

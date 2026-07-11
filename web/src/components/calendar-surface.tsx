@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   addDays,
@@ -8,11 +8,13 @@ import {
   getCalendarRange,
   isSameCalendarDate,
   isWeekend,
+  startOfMondayWeek,
   toISODate,
   toLocalDate,
 } from '@/lib/calendar-dates'
 import { useGoogleAccountConnection } from '@/lib/use-google-account-connection'
 import { useCalendarEvents } from '@/lib/use-calendar-events'
+import { useCalendarEventRefresh } from '@/lib/use-calendar-event-refresh'
 import { useSourceCalendars } from '@/lib/use-source-calendars'
 import {
   fetchCalendarList as fetchCalendarListFromGoogle,
@@ -29,6 +31,8 @@ import { SourceCalendarPicker } from './source-calendar-picker'
 import { layoutWeekEvents } from '@/lib/event-layout'
 import { getContrastTextColor } from '@/lib/text-contrast'
 import { cn } from '@/lib/utils'
+import { calendarEventKey } from '@/lib/merge-calendar-events'
+import { clearSavedBusyBlocks } from '@/lib/saved-busy-blocks'
 
 const WEEK_ROW_HEIGHT = 128
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -39,6 +43,10 @@ export function CalendarSurface() {
   const today = useMemo(() => toLocalDate(new Date()), [])
   const range = useMemo(() => getCalendarRange(today), [today])
   const [topWeekIndex, setTopWeekIndex] = useState(range.todayWeekIndex)
+  const [visibleDateRange, setVisibleDateRange] = useState(() => {
+    const start = addDays(range.start, range.todayWeekIndex * 7)
+    return { start, end: addDays(start, 6) }
+  })
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? ''
   const googleAccountConnection = useGoogleAccountConnection(googleClientId)
   const connection = googleAccountConnection.connection
@@ -71,23 +79,65 @@ export function CalendarSurface() {
     [refreshAccessToken],
   )
   const sourceCalendars = useSourceCalendars({ connection, fetchCalendarList })
+  const { reconcileCalendars, cancelPendingReconciliation } = sourceCalendars
   // The Fetched Window, scroll-driven slab fetching, and loading/error status
   // live behind this seam; the render module only computes the visible range
   // from scroll position and hands it to maybeFetchMore.
-  const { events, status: eventsStatus, maybeFetchMore } = useCalendarEvents({
+  const {
+    events,
+    status: eventsStatus,
+    maybeFetchMore,
+    refresh: refreshCalendarEvents,
+    cancel: cancelCalendarEventWork,
+  } = useCalendarEvents({
     connection,
     today,
     range,
     selection: sourceCalendars.selectionCalendars,
     fetchEvents,
   })
+  const refreshAfterReconciliation = useCallback(
+    (visibleRange: { start: Date; end: Date }) => {
+      void reconcileCalendars().then((calendars) => {
+        refreshCalendarEvents(visibleRange, calendars)
+      })
+    },
+    [reconcileCalendars, refreshCalendarEvents],
+  )
+  useCalendarEventRefresh({
+    enabled: googleAccountConnected,
+    deferred: sourceCalendars.pickerOpen,
+    visibleRange: visibleDateRange,
+    onRefresh: refreshAfterReconciliation,
+  })
   const eventDetailPopover = useEventDetailPopover({
     scrollContainerRef: scrollParentRef,
     isConnected: googleAccountConnected,
+    events,
   })
   const dayEventsPopover = useDayEventsPopover({
     scrollContainerRef: scrollParentRef,
   })
+  const {
+    date: openDayEventsDate,
+    update: updateDayEventsPopover,
+    close: closeDayEventsPopover,
+  } = dayEventsPopover
+
+  useEffect(() => {
+    const openDate = openDayEventsDate
+    if (!openDate) return
+    const weekStart = startOfMondayWeek(openDate)
+    const dayIndex = Math.round(
+      (openDate.getTime() - weekStart.getTime()) / 86_400_000,
+    )
+    const cell = layoutWeekEvents(events, weekStart).cells[dayIndex]
+    if (cell?.items.some((item) => item.kind === 'overflow')) {
+      updateDayEventsPopover(cell.dayEvents)
+    } else {
+      closeDayEventsPopover()
+    }
+  }, [events, openDayEventsDate, updateDayEventsPopover, closeDayEventsPopover])
 
   // Mutual exclusivity (ADR 0004): at most one separate-layer overlay is open
   // at a time. Each opener closes the other overlay first, at the wiring level —
@@ -150,19 +200,21 @@ export function CalendarSurface() {
         : nextTopWeekIndex,
     )
 
-    if (connection.status !== 'connected') {
-      return
-    }
-
     const bottomWeekIndex = clamp(
       Math.floor((scrollTop + scrollParent.clientHeight) / WEEK_ROW_HEIGHT),
       0,
       range.weekCount - 1,
     )
-    maybeFetchMore({
+    const nextVisibleRange = {
       start: addDays(range.start, nextTopWeekIndex * 7),
       end: addDays(range.start, bottomWeekIndex * 7 + 6),
-    })
+    }
+    setVisibleDateRange(nextVisibleRange)
+
+    if (connection.status !== 'connected' || sourceCalendars.pickerOpen) {
+      return
+    }
+    maybeFetchMore(nextVisibleRange)
   }
 
   function jumpToToday() {
@@ -191,7 +243,12 @@ export function CalendarSurface() {
         }
         onJumpToToday={jumpToToday}
         onConnect={googleAccountConnection.connect}
-        onDisconnect={googleAccountConnection.disconnect}
+        onDisconnect={() => {
+          cancelPendingReconciliation()
+          cancelCalendarEventWork()
+          clearSavedBusyBlocks()
+          void googleAccountConnection.disconnect().finally(clearSavedBusyBlocks)
+        }}
         onOpenSourceCalendars={sourceCalendars.openPicker}
         sourceCalendarsLoading={sourceCalendars.isLoadingList}
       />
@@ -233,7 +290,9 @@ export function CalendarSurface() {
                     const top = bar.laneIndex * 24
                     const textColor = getContrastTextColor(bar.event.color)
                     const isOpen =
-                      eventDetailPopover.selectedEvent?.id === bar.event.id
+                      eventDetailPopover.selectedEvent !== null &&
+                      calendarEventKey(eventDetailPopover.selectedEvent) ===
+                        calendarEventKey(bar.event)
                     const positionStyle = {
                       left: `${left}%`,
                       width: `${width}%`,
@@ -254,7 +313,7 @@ export function CalendarSurface() {
                           className={cn(
                             'pointer-events-auto absolute h-[18px] cursor-pointer overflow-hidden truncate pl-4 pr-1 text-left text-[10px] font-medium leading-[18px]',
                           )}
-                          key={bar.event.id}
+                          key={calendarEventKey(bar.event)}
                           onClick={(event) =>
                             openEventDetail(bar.event, event.currentTarget)
                           }
@@ -270,7 +329,7 @@ export function CalendarSurface() {
                     return (
                       <div
                         className="absolute h-[18px] overflow-hidden truncate pl-4 pr-1 text-[10px] font-medium leading-[18px]"
-                        key={bar.event.id}
+                        key={calendarEventKey(bar.event)}
                         style={positionStyle}
                         title={bar.event.title}
                       >
@@ -343,7 +402,9 @@ export function CalendarSurface() {
                                 connected={googleAccountConnected}
                                 isOpen={
                                   item.kind === 'row' &&
-                                  eventDetailPopover.selectedEvent?.id === item.event.id
+                                  eventDetailPopover.selectedEvent !== null &&
+                                  calendarEventKey(eventDetailPopover.selectedEvent) ===
+                                    calendarEventKey(item.event)
                                 }
                                 onOpen={(trigger) =>
                                   item.kind === 'row' &&

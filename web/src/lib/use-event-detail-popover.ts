@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CalendarEvent } from './google-calendar-events'
+import { calendarEventKey } from './merge-calendar-events'
 
 /** State and actions for the Event Detail Popover, owned by the Calendar Surface. */
 export type EventDetailPopoverController = {
@@ -20,6 +21,8 @@ type UseEventDetailPopoverParams = {
   scrollContainerRef: React.RefObject<HTMLElement | null>
   /** Whether the Google Account Connection is currently connected. */
   isConnected: boolean
+  /** Canonical refreshed Calendar Events. */
+  events?: CalendarEvent[]
 }
 
 /**
@@ -36,6 +39,7 @@ type UseEventDetailPopoverParams = {
 export function useEventDetailPopover({
   scrollContainerRef,
   isConnected,
+  events,
 }: UseEventDetailPopoverParams): EventDetailPopoverController {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
@@ -76,6 +80,15 @@ export function useEventDetailPopover({
     }
     prevSelectedRef.current = selectedEvent
   }, [selectedEvent])
+
+  // Reconcile an open detail against the canonical refreshed collection.
+  useEffect(() => {
+    if (!events || selectedEventRef.current === null) return
+    const selectedKey = calendarEventKey(selectedEventRef.current)
+    const refreshed = events.find((event) => calendarEventKey(event) === selectedKey)
+    if (refreshed) setSelectedEvent(refreshed)
+    else close()
+  }, [events, close])
 
   // Close on disconnect. State is cleared during render (the React "adjust state
   // when a prop changes" pattern); focus return is skipped because the trigger

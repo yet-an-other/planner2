@@ -76,9 +76,17 @@ _Avoid_: calendar, Google calendar, calendar list, feed
 The subset of the user's Source Calendars that Planner currently fetches Calendar Events from. Defaults to the primary calendar on first connect.
 _Avoid_: chosen calendars, enabled calendars, visible calendars
 
+**Source Calendar Reconciliation**:
+The alignment of Planner's Source Calendars and Selected Source Calendars with the calendars currently available from Google.
+_Avoid_: Calendar sync, selection reset, calendar reload
+
 **Calendar Event**:
 A Google Calendar event fetched from one of the Selected Source Calendars and rendered on the Calendar Surface while the Google Account Connection is active.
 _Avoid_: Event item, schedule entry, appointment
+
+**Calendar Event Refresh**:
+A replacement of Calendar Events for the visible dates and the one-month scroll-prefetch buffer with their current state from the Selected Source Calendars while Planner is visible.
+_Avoid_: Page refresh, reload, calendar refresh, sync
 
 **Calendar Event Bar**:
 A visual representation of a multiday or all-day Calendar Event rendered as a solid colored bar spanning one or more Date Cells.
@@ -122,14 +130,23 @@ _Avoid_: Infinite range, endless dates, all dates
 - A **Source Calendar** belongs to a connected **Google Account Connection**.
 - **Selected Source Calendars** is the subset of **Source Calendars** the user has chosen; Planner fetches **Calendar Events** only from these.
 - A **Calendar Event** belongs to exactly one **Source Calendar**.
+- A **Calendar Event Refresh** covers the visible dates and the same one-month buffer used by scroll prefetch.
+- A **Calendar Event Refresh** occurs when connected Planner returns to the foreground, regains connectivity, or remains visible for five minutes since its previous refresh.
+- Periodic **Calendar Event Refreshes** pause while Planner is hidden.
+- Dates outside a **Calendar Event Refresh** retain their previously fetched events; when scrolling approaches them, Planner presents those events immediately and refreshes them in place.
 - A **Source Calendar Control** appears only while the **Google Account Connection** is connected.
 - A **Source Calendar Control** opens the **Source Calendar Picker**.
 - A **Source Calendar Picker** changes the **Selected Source Calendars**, which are persisted per device (ADR 0003).
+- A **Calendar Event Refresh** begins with **Source Calendar Reconciliation**.
+- **Source Calendar Reconciliation** retains existing selections that remain available, leaves newly available **Source Calendars** unselected, and removes selections that are no longer available.
+- **Source Calendar Reconciliation** falls back to the primary **Source Calendar** when no previous selection remains available.
 - A **Calendar Surface** presents the **Extended Calendar Range**.
 - A **Calendar Surface** contains **Week Rows** ordered by date.
 - A **Week Row** contains exactly seven **Date Cells**.
 - A **Calendar Surface** displays **Calendar Events** when the **Google Account Connection** is connected.
 - A **Calendar Surface** displays **Saved Busy Blocks** when the **Google Account Connection** is disconnected.
+- A successful **Calendar Event Refresh** updates **Saved Busy Blocks** for each successfully refreshed **Source Calendar** without persisting event titles or details.
+- A failed per-source refresh retains that **Source Calendar**'s previous **Saved Busy Blocks**.
 - A **Visible Month** is derived from exactly one topmost visible **Week Row** in the **Calendar Surface**.
 - A **Calendar Surface** contains one **Date Cell** for each consecutive date it presents.
 - Each calendar month in the **Calendar Surface** has exactly one **Month Marker**.
@@ -158,6 +175,9 @@ _Avoid_: Infinite range, endless dates, all dates
 >
 > **Dev:** "What happens to Calendar Events when the user disconnects their Google Account Connection?"
 > **Domain expert:** "The Calendar Surface falls back to **Saved Busy Blocks** — placeholders that keep the shape of the calendar without exposing the original event titles."
+>
+> **Dev:** "If a **Calendar Event** changes in Google Calendar while Planner is open, when does it update?"
+> **Domain expert:** "A **Calendar Event Refresh** updates visible and nearby dates when Planner returns to the foreground and every five minutes while it remains visible; distant dates refresh when scrolling approaches them."
 
 ## Flagged ambiguities
 
@@ -166,3 +186,4 @@ _Avoid_: Infinite range, endless dates, all dates
 - "event-free" was the original definition of the Calendar Surface; resolved: the Calendar Surface now displays **Calendar Events** while connected and **Saved Busy Blocks** while disconnected.
 - "all-day" vs "multiday" in Google Calendar: an all-day event spanning multiple days is visually treated the same as a multiday timed event and rendered as a single **Calendar Event Bar** spanning all affected **Date Cells**.
 - "calendar" used loosely to mean the pickable account-level entry; resolved: that concept is a **Source Calendar**, distinct from the **Calendar Surface**, **Calendar Header**, and **Calendar Event**.
+- "Selected Source Calendars are changing" could mean the selection changed; resolved: the selection remains stable while upstream **Calendar Events** are added, removed, or edited, and a **Calendar Event Refresh** reflects those changes.

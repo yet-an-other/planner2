@@ -5,6 +5,8 @@ export type CalendarEvent = CalendarEventBar | CalendarEventRow
 export type CalendarEventBar = {
   kind: 'bar'
   eventType: 'all-day' | 'multiday'
+  /** The Source Calendar that owns this event. */
+  sourceCalendarId: string
   id: string
   title: string
   date: Date
@@ -18,6 +20,8 @@ export type CalendarEventBar = {
 
 export type CalendarEventRow = {
   kind: 'row'
+  /** The Source Calendar that owns this event. */
+  sourceCalendarId: string
   id: string
   title: string
   date: Date
@@ -91,6 +95,7 @@ type GoogleCalendarListEntry = {
 
 type GoogleCalendarListResponse = {
   items?: GoogleCalendarListEntry[]
+  nextPageToken?: string
 }
 
 type GoogleCalendarEventsResponse = {
@@ -144,7 +149,7 @@ export type SourceCalendar = {
 }
 
 /** One Selected Source Calendar's fetch outcome: its events, or that it failed. */
-type CalendarFetchOutcome =
+export type CalendarFetchOutcome =
   | { calendarId: string; events: CalendarEvent[] }
   | { calendarId: string; failed: true }
 
@@ -155,6 +160,10 @@ type CalendarFetchOutcome =
  */
 export type FetchCalendarEventsResult = {
   events: CalendarEvent[]
+  /** Per-source outcomes are present for production fetches; optional for adapters. */
+  outcomes?: CalendarFetchOutcome[]
+  /** False when event color metadata failed and Source Calendar colors were used. */
+  colorMetadataAvailable?: boolean
   failedCalendarCount: number
   totalCalendarCount: number
 }
@@ -191,18 +200,20 @@ function assertOk(response: Response, fallbackMessage: string) {
 export async function fetchCalendarList(
   accessToken: string,
 ): Promise<SourceCalendar[]> {
-  const response = await fetch(
-    `${GOOGLE_CALENDAR_API_BASE}/users/me/calendarList`,
-    {
-      headers: getAuthHeaders(accessToken),
-    },
-  )
+  const entries: GoogleCalendarListEntry[] = []
+  let nextPageToken: string | undefined
+  do {
+    const url = new URL(`${GOOGLE_CALENDAR_API_BASE}/users/me/calendarList`)
+    url.searchParams.set('maxResults', '250')
+    if (nextPageToken) url.searchParams.set('pageToken', nextPageToken)
+    const response = await fetch(url, { headers: getAuthHeaders(accessToken) })
+    assertOk(response, 'Calendar list could not be loaded')
+    const body = (await response.json()) as GoogleCalendarListResponse
+    entries.push(...(body.items ?? []))
+    nextPageToken = body.nextPageToken
+  } while (nextPageToken)
 
-  assertOk(response, 'Calendar list could not be loaded')
-
-  const body = (await response.json()) as GoogleCalendarListResponse
-
-  return (body.items ?? [])
+  return entries
     .filter(
       (entry) =>
         !entry.deleted &&
@@ -228,18 +239,23 @@ export function assembleCalendarEvents(
 ): FetchCalendarEventsResult {
   let failedCalendarCount = 0
   let merged: CalendarEvent[] = []
-
-  for (const outcome of outcomes) {
+  const normalizedOutcomes = outcomes.map((outcome): CalendarFetchOutcome => {
     if ('failed' in outcome) {
       failedCalendarCount += 1
-      continue
+      return outcome
     }
 
-    merged = mergeCalendarEvents(merged, outcome.events)
-  }
+    const events = outcome.events.map((event) => ({
+      ...event,
+      sourceCalendarId: outcome.calendarId,
+    }))
+    merged = mergeCalendarEvents(merged, events)
+    return { ...outcome, events }
+  })
 
   return {
     events: merged,
+    outcomes: normalizedOutcomes,
     failedCalendarCount,
     totalCalendarCount: outcomes.length,
   }
@@ -275,7 +291,14 @@ export async function fetchSourceCalendarEvents(
     return { events: [], failedCalendarCount: 0, totalCalendarCount: 0 }
   }
 
-  const eventColors = (await fetchColors(accessToken)).event ?? {}
+  // Color metadata is cosmetic: content refresh must remain available when it fails.
+  let colorMetadataAvailable = true
+  const eventColors = await fetchColors(accessToken)
+    .then((colors) => colors.event ?? {})
+    .catch(() => {
+      colorMetadataAvailable = false
+      return {}
+    })
 
   const outcomes = await Promise.all(
     calendars.map(
@@ -292,6 +315,7 @@ export async function fetchSourceCalendarEvents(
               resources,
               calendar.backgroundColor,
               eventColors,
+              calendar.id,
             ),
           }
         } catch (error) {
@@ -304,13 +328,14 @@ export async function fetchSourceCalendarEvents(
     ),
   )
 
-  return assembleCalendarEvents(outcomes)
+  return { ...assembleCalendarEvents(outcomes), colorMetadataAvailable }
 }
 
 export function normalizeGoogleCalendarEvents(
   events: GoogleCalendarEventResource[],
   calendarColor: string,
   eventColors: Record<string, { background?: string }> = {},
+  sourceCalendarId = 'primary',
 ): CalendarEvent[] {
   return events.flatMap<CalendarEvent>((event) => {
     if (event.status === 'cancelled' || isDeclinedByViewer(event)) {
@@ -338,6 +363,7 @@ export function normalizeGoogleCalendarEvents(
         {
           kind: 'bar' as const,
           eventType: 'all-day' as const,
+          sourceCalendarId,
           id: event.id ?? event.iCalUID ?? `${event.start.date}-${title}`,
           title,
           date: startDate,
@@ -367,6 +393,7 @@ export function normalizeGoogleCalendarEvents(
         {
           kind: 'bar' as const,
           eventType: 'multiday' as const,
+          sourceCalendarId,
           id: event.id ?? event.iCalUID ?? `${event.start.dateTime}-${title}`,
           title,
           date: eventDate,
@@ -386,6 +413,7 @@ export function normalizeGoogleCalendarEvents(
     return [
       {
         kind: 'row' as const,
+        sourceCalendarId,
         id: event.id ?? event.iCalUID ?? `${event.start.dateTime}-${title}`,
         title,
         date: eventDate,

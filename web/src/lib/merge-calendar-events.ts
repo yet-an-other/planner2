@@ -12,16 +12,22 @@ export function mergeCalendarEvents(
   existing: CalendarEvent[],
   incoming: CalendarEvent[],
 ): CalendarEvent[] {
-  const seenIds = new Set(existing.map((event) => event.id))
+  const seenIds = new Set(existing.map(calendarEventKey))
   const merged = [...existing]
 
   for (const event of incoming) {
-    if (seenIds.has(event.id)) {
+    const key = calendarEventKey(event)
+    if (seenIds.has(key)) {
       continue
     }
-    seenIds.add(event.id)
+    seenIds.add(key)
     merged.push(event)
   }
 
   return merged
+}
+
+/** Stable identity across Source Calendars, where Google ids are not global. */
+export function calendarEventKey(event: CalendarEvent): string {
+  return `${event.sourceCalendarId}\n${event.id}`
 }
