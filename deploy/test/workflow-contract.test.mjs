@@ -18,6 +18,35 @@ function assertPinnedActions(text) {
 }
 
 describe('CI workflow policy', () => {
+  it('uses resolvable action generations that run on Node.js 24', async () => {
+    const workflows = await Promise.all([
+      workflow('ci.yml'),
+      workflow('publish.yml'),
+      workflow('promote-production.yml'),
+      workflow('rollback-production.yml'),
+    ])
+    const text = workflows.join('\n')
+
+    for (const reference of [
+      'actions/checkout@v7',
+      'actions/setup-node@v6',
+      'azure/setup-helm@v5',
+      'pnpm/action-setup@v6',
+      'docker/setup-qemu-action@v4',
+      'docker/setup-buildx-action@v4',
+      'docker/login-action@v4',
+      'docker/build-push-action@v7',
+      'aquasecurity/trivy-action@v0.36.0',
+    ]) {
+      assert.ok(text.includes(reference), `missing current action reference: ${reference}`)
+    }
+    assert.doesNotMatch(
+      text,
+      /(?:actions\/checkout|actions\/setup-node|azure\/setup-helm|pnpm\/action-setup)@v4\b/,
+    )
+    assert.doesNotMatch(text, /aquasecurity\/trivy-action@0\./)
+  })
+
   it('runs application, deployment, shell, workflow, and PR container gates', async () => {
     const text = await workflow('ci.yml')
 
