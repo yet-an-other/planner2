@@ -1,6 +1,7 @@
 name: Publish image and advance staging
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -23,7 +24,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/ci.yml
 
-  publish-candidate:
+  publish-immutable:
     needs: quality
     runs-on: ubuntu-latest
     permissions:
@@ -32,88 +33,89 @@ jobs:
       id-token: write
       attestations: write
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
+      image-tag: ${{ steps.meta.outputs.tag }}
+      source-sha: ${{ steps.meta.outputs.source-sha }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build one multi-platform candidate with attestations
-        id: build
+      - name: Compute immutable image identity
+        id: meta
+        run: |
+          source_sha=$(git rev-list -1 "$GITHUB_SHA" -- Dockerfile package.json pnpm-workspace.yaml pnpm-lock.yaml web server shared)
+          [[ -n "$source_sha" ]]
+          echo "source-sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${source_sha::7}" >> "$GITHUB_OUTPUT"
+      - name: Build one multi-platform OCI archive with attestations
         uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ env.IMAGE }}:build-${{ github.sha }}
+          outputs: type=oci,dest=/tmp/planner-image.tar
           provenance: mode=max
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  scan-candidate:
-    needs: publish-candidate
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [linux/amd64, linux/arm64]
-    permissions:
-      contents: read
-      packages: read
-    env:
-      TRIVY_USERNAME: ${{ github.actor }}
-      TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-      TRIVY_PLATFORM: ${{ matrix.platform }}
-      RELEASE_DIGEST: ${{ needs.publish-candidate.outputs.digest }}
-    steps:
-      - name: Report high and critical vulnerabilities in the release digest
+      - name: Install OCI registry copier
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
+      - name: Select exact platform images for scanning
+        run: |
+          skopeo copy --override-os linux --override-arch amd64 \
+            oci-archive:/tmp/planner-image.tar \
+            docker-archive:/tmp/planner-amd64.tar
+          skopeo copy --override-os linux --override-arch arm64 \
+            oci-archive:/tmp/planner-image.tar \
+            docker-archive:/tmp/planner-arm64.tar
+      - name: Report high and critical vulnerabilities in the release digest (amd64)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ env.IMAGE }}@${{ env.RELEASE_DIGEST }}
+          input: /tmp/planner-amd64.tar
           severity: HIGH,CRITICAL
           ignore-unfixed: false
           exit-code: 0
-      - name: Block fixable critical vulnerabilities in the release digest
+      - name: Block fixable critical vulnerabilities in the release digest (amd64)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ env.IMAGE }}@${{ env.RELEASE_DIGEST }}
+          input: /tmp/planner-amd64.tar
           severity: CRITICAL
           ignore-unfixed: true
           exit-code: 1
-
-  publish-immutable:
-    needs: [publish-candidate, scan-candidate]
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-    outputs:
-      image-tag: ${{ steps.meta.outputs.tag }}
-    env:
-      RELEASE_DIGEST: ${{ needs.publish-candidate.outputs.digest }}
-    steps:
-      - uses: docker/setup-buildx-action@v4
-      - name: Compute immutable image tag
-        id: meta
-        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Report high and critical vulnerabilities in the release digest (arm64)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          input: /tmp/planner-arm64.tar
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: 0
+      - name: Block fixable critical vulnerabilities in the release digest (arm64)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          input: /tmp/planner-arm64.tar
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Tag the exact scanned digest as the immutable release
+      - name: Publish the exact scanned OCI archive
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
         run: |
-          docker buildx imagetools create \
-            --tag "$IMAGE:${{ steps.meta.outputs.tag }}" \
-            "$IMAGE@$RELEASE_DIGEST"
+          skopeo copy --all \
+            --authfile "$HOME/.docker/config.json" \
+            oci-archive:/tmp/planner-image.tar \
+            "docker://$IMAGE:$IMAGE_TAG"
 
   advance-staging:
     needs: publish-immutable
@@ -126,6 +128,7 @@ jobs:
       packages: write
     env:
       IMAGE_TAG: ${{ needs.publish-immutable.outputs.image-tag }}
+      SOURCE_SHA: ${{ needs.publish-immutable.outputs.source-sha }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -148,7 +151,7 @@ jobs:
           for attempt in 1 2 3; do
             git fetch origin main
             git checkout -B main origin/main
-            result=$(node deploy/scripts/release-state.mjs stage "$GITHUB_SHA" "$IMAGE_TAG")
+            result=$(node deploy/scripts/release-state.mjs stage "$SOURCE_SHA" "$IMAGE_TAG")
             if [[ "$result" == superseded ]]; then
               echo "Candidate is superseded; immutable SHA remains published."
               echo "advanced=false" >> "$GITHUB_OUTPUT"
@@ -181,7 +184,7 @@ jobs:
           set -euo pipefail
           git fetch origin main
           newest=$(git rev-list -1 origin/main -- Dockerfile package.json pnpm-workspace.yaml pnpm-lock.yaml web server shared)
-          if [[ "$newest" != "$GITHUB_SHA" ]]; then
+          if [[ "$newest" != "$SOURCE_SHA" ]]; then
             echo 'A newer container commit exists; leaving latest unchanged.'
             exit 0
           fi

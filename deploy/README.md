@@ -127,12 +127,14 @@ serving, and fail-fast OAuth validation.
 
 A merge to `main` publishes only when a container input changes. It builds
 `linux/amd64` and `linux/arm64` as one public GHCR image tagged with the source
-revision in `sha-abcdef0` form. An OCI candidate is scanned before release tags
-are attached: fixable CRITICAL findings block publication, while HIGH and
-unfixable findings are reported. Published SHA images include OCI provenance and
-an SBOM. The candidate is pushed under a non-release build tag so both platform
-variants can be scanned by digest; only that exact approved digest receives the
-immutable SHA release tag.
+revision in `sha-abcdef0` form. A local multi-platform OCI archive is scanned
+before anything is published: fixable CRITICAL findings block publication,
+while HIGH and unfixable findings are reported. The exact approved archive is
+then copied to GHCR with OCI provenance and an SBOM. GHCR receives only the
+immutable short-SHA release tag and, for the newest eligible release, `latest`.
+The workflow can also be dispatched manually to republish the newest
+container-affecting revision after release-infrastructure repairs; it does not
+mint an image identity for a workflow-only commit.
 
 The first successful publication may create a private GHCR package even though
 the repository is public. A repository owner must open the package settings,
