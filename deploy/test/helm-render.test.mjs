@@ -49,14 +49,14 @@ describe('Planner workload chart', () => {
 
       assertIncludes(deployment, [
         /replicas: 3/,
-        /planner2:sha-0000000/,
+        /planner2:sha-[0-9a-f]{7}/,
         /automountServiceAccountToken: false/,
         /terminationGracePeriodSeconds: 30/,
         /maxUnavailable: 0/,
         /maxSurge: 1/,
         /name: planner-runtime-env/,
         /planner\.yet-an-other\.io\/runtime-env-checksum: "0{64}"/,
-        /name: APP_VERSION\s+value: "sha-0000000"/,
+        /name: APP_VERSION\s+value: "sha-[0-9a-f]{7}"/,
         /path: \/healthz/,
         /startupProbe:/,
         /readinessProbe:/,

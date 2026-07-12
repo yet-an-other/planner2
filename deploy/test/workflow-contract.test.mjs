@@ -37,6 +37,7 @@ describe('CI workflow policy', () => {
       'docker/login-action@v4',
       'docker/build-push-action@v7',
       'aquasecurity/trivy-action@v0.36.0',
+      'oras-project/setup-oras@v2',
     ]) {
       assert.ok(text.includes(reference), `missing current action reference: ${reference}`)
     }
@@ -102,7 +103,10 @@ describe('immutable image and staging workflow policy', () => {
     assert.match(text, /input: \/tmp\/planner-arm64\.tar[\s\S]*severity: CRITICAL[\s\S]*ignore-unfixed: true/)
     assert.match(text, /provenance: mode=max/)
     assert.match(text, /sbom: true/)
-    assert.match(text, /skopeo copy --all[\s\S]*oci-archive:\/tmp\/planner-image\.tar[\s\S]*docker:\/\/\$IMAGE:\$IMAGE_TAG/)
+    assert.match(text, /oras cp --from-oci-layout[\s\S]*planner-image\.tar@\$root_digest[\s\S]*"\$IMAGE:\$IMAGE_TAG"/)
+    assert.match(text, /oras manifest fetch "\$IMAGE@\$digest"/)
+    assert.match(text, /expected_platforms='linux\/amd64 linux\/arm64'/)
+    assert.doesNotMatch(text, /skopeo copy --all[\s\S]*docker:\/\/\$IMAGE:\$IMAGE_TAG/)
     assert.match(text, /packages: write/)
     assert.match(text, /attestations: write/)
     assertPinnedActions(text)
