@@ -1,6 +1,6 @@
 # CI replaces this render-only seed with the immutable image built from main.
 image:
-  tag: sha-0000000
+  tag: sha-630871e
 runtime:
   secretName: planner-runtime-env
   checksum: "0000000000000000000000000000000000000000000000000000000000000000"
