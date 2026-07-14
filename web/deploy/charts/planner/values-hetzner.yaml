@@ -1,6 +1,6 @@
 # Protected promotion replaces this render-only seed with staging's immutable image.
 image:
-  tag: sha-8457ccb
+  tag: sha-0e84fac
 runtime:
   secretName: planner-runtime-env
   checksum: "0000000000000000000000000000000000000000000000000000000000000000"
