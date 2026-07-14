@@ -1,0 +1,3 @@
+# Organize the repository by delivery stack
+
+Planner keeps each independently built and released delivery stack in a self-contained top-level directory, with platform-neutral product language at the repository root. The current UI, supporting server, TypeScript contracts, deployment tooling, and Node workspace therefore live together under `web/`; a future native application can become a peer without depending on the web toolchain. This was chosen over root-level `apps/`, `services/`, and `packages/` directories because those technical layers would imply reuse across delivery stacks that does not exist.

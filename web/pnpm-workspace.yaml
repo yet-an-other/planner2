@@ -1,0 +1,8 @@
+packages:
+  - 'web-ui'
+  - 'server'
+  - 'contracts'
+  - 'deploy'
+
+allowBuilds:
+  esbuild: true

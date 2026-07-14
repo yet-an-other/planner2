@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "argoNamespace",
+    "projectName",
+    "applicationName",
+    "repository",
+    "targetRevision",
+    "workloadChartPath",
+    "environmentValuesFile",
+    "releaseName",
+    "destination",
+    "runtimeChecksum"
+  ],
+  "properties": {
+    "argoNamespace": { "type": "string", "const": "argocd" },
+    "projectName": { "type": "string", "const": "planner" },
+    "applicationName": { "type": "string", "const": "planner" },
+    "repository": { "type": "string", "const": "https://github.com/yet-an-other/planner2.git" },
+    "targetRevision": { "type": "string", "const": "main" },
+    "workloadChartPath": { "type": "string", "const": "web/deploy/charts/planner" },
+    "environmentValuesFile": {
+      "type": "string",
+      "enum": ["values-proxmox.yaml", "values-hetzner.yaml"]
+    },
+    "releaseName": { "type": "string", "const": "planner" },
+    "destination": {
+      "type": "object",
+      "required": ["server", "namespace"],
+      "properties": {
+        "server": { "type": "string", "const": "https://kubernetes.default.svc" },
+        "namespace": { "type": "string", "const": "planner" }
+      }
+    },
+    "runtimeChecksum": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

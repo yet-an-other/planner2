@@ -1,0 +1,217 @@
+name: Publish web image and advance staging
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - web/.dockerignore
+      - web/Dockerfile
+      - web/package.json
+      - web/pnpm-workspace.yaml
+      - web/pnpm-lock.yaml
+      - web/web-ui/**
+      - web/server/**
+      - web/contracts/**
+
+permissions: {}
+
+env:
+  IMAGE: ghcr.io/yet-an-other/planner2
+
+jobs:
+  quality:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/web-ci.yml
+
+  publish-immutable:
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tag }}
+      source-sha: ${{ steps.meta.outputs.source-sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: oras-project/setup-oras@v2
+        with:
+          version: 1.3.3
+      - name: Compute immutable image identity
+        id: meta
+        working-directory: web
+        run: |
+          source_sha=$(git rev-list -1 "$GITHUB_SHA" -- .dockerignore Dockerfile package.json pnpm-workspace.yaml pnpm-lock.yaml web-ui server contracts)
+          [[ -n "$source_sha" ]]
+          echo "source-sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${source_sha::7}" >> "$GITHUB_OUTPUT"
+      - name: Build one multi-platform OCI archive with attestations
+        uses: docker/build-push-action@v7
+        with:
+          context: ./web
+          platforms: linux/amd64,linux/arm64
+          outputs: type=oci,dest=/tmp/planner-image.tar
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Install OCI registry copier
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
+      - name: Select exact platform images for scanning
+        run: |
+          skopeo copy --override-os linux --override-arch amd64 \
+            oci-archive:/tmp/planner-image.tar \
+            docker-archive:/tmp/planner-amd64.tar
+          skopeo copy --override-os linux --override-arch arm64 \
+            oci-archive:/tmp/planner-image.tar \
+            docker-archive:/tmp/planner-arm64.tar
+      - name: Report high and critical vulnerabilities in the release digest (amd64)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          input: /tmp/planner-amd64.tar
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: 0
+      - name: Block fixable critical vulnerabilities in the release digest (amd64)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          input: /tmp/planner-amd64.tar
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+      - name: Report high and critical vulnerabilities in the release digest (arm64)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          input: /tmp/planner-arm64.tar
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: 0
+      - name: Block fixable critical vulnerabilities in the release digest (arm64)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          input: /tmp/planner-arm64.tar
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+      - name: Log in to GHCR for OCI publication
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish the exact scanned OCI archive
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          root_digest=$(tar -xOf /tmp/planner-image.tar index.json | jq -r '.manifests[0].digest')
+          [[ "$root_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          oras cp --from-oci-layout \
+            "/tmp/planner-image.tar@$root_digest" \
+            "$IMAGE:$IMAGE_TAG"
+      - name: Verify every published manifest remains retrievable
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          expected_platforms='linux/amd64 linux/arm64'
+          verify_graph() {
+            index=$(oras manifest fetch "$IMAGE:$IMAGE_TAG")
+            platforms=$(jq -r '.manifests[].platform | select(.os == "linux" and (.architecture == "amd64" or .architecture == "arm64")) | "\(.os)/\(.architecture)"' <<<"$index" | sort | xargs)
+            [[ "$platforms" == "$expected_platforms" ]]
+            while IFS= read -r digest; do
+              oras manifest fetch "$IMAGE@$digest" >/dev/null
+            done < <(jq -r '.manifests[].digest' <<<"$index")
+          }
+          verify_graph
+          sleep 15
+          verify_graph
+
+  advance-staging:
+    needs: publish-immutable
+    runs-on: ubuntu-latest
+    concurrency:
+      group: planner-staging-advance
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: write
+    env:
+      IMAGE_TAG: ${{ needs.publish-immutable.outputs.image-tag }}
+      SOURCE_SHA: ${{ needs.publish-immutable.outputs.source-sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update newest staging release
+        id: stage
+        working-directory: web
+        run: |
+          set -euo pipefail
+          git config user.name planner-release-bot
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          advanced=false
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B main origin/main
+            result=$(node deploy/scripts/release-state.mjs stage "$SOURCE_SHA" "$IMAGE_TAG")
+            if [[ "$result" == superseded ]]; then
+              echo "Candidate is superseded; immutable SHA remains published."
+              echo "advanced=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if git diff --quiet -- deploy/charts/planner/values-proxmox.yaml; then
+              advanced=true
+              break
+            fi
+
+            git add deploy/charts/planner/values-proxmox.yaml
+            git commit -m "chore(deploy): stage $IMAGE_TAG [skip ci]"
+            if git push origin HEAD:main; then
+              advanced=true
+              break
+            fi
+            printf 'Staging update raced on attempt %s; retrying.\n' "$attempt" >&2
+            sleep "$attempt"
+          done
+
+          [[ "$advanced" == true ]] || {
+            echo 'Unable to update staging after three attempts.' >&2
+            exit 1
+          }
+          echo "advanced=true" >> "$GITHUB_OUTPUT"
+      - name: Move latest only while candidate remains newest
+        if: steps.stage.outputs.advanced == 'true'
+        working-directory: web
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          newest=$(git rev-list -1 origin/main -- .dockerignore Dockerfile package.json pnpm-workspace.yaml pnpm-lock.yaml web-ui server contracts)
+          if [[ "$newest" != "$SOURCE_SHA" ]]; then
+            echo 'A newer container commit exists; leaving latest unchanged.'
+            exit 0
+          fi
+          docker buildx imagetools create \
+            --tag "$IMAGE:latest" \
+            "$IMAGE:$IMAGE_TAG"
