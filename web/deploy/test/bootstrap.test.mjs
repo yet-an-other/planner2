@@ -76,7 +76,7 @@ async function writeExecutable(file, contents) {
   await chmod(file, 0o755)
 }
 
-function runBootstrap(workspace, args, { input = '' } = {}) {
+function runBootstrap(workspace, args, { input, beforeStdinEnd = () => {} } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn('bash', [path.join(workspace.deploy, 'bootstrap.sh'), ...args], {
       cwd: workspace.root,
@@ -88,7 +88,9 @@ function runBootstrap(workspace, args, { input = '' } = {}) {
     child.stderr.on('data', (chunk) => { stderr += chunk })
     child.on('error', reject)
     child.on('close', (status) => resolve({ status, stdout, stderr }))
-    child.stdin.end(input)
+    beforeStdinEnd()
+    if (input === undefined) child.stdin.end()
+    else child.stdin.end(input)
   })
 }
 
@@ -107,7 +109,10 @@ describe('bootstrap public command', () => {
   it('rejects unknown clusters and flags before invoking cluster tools', async () => {
     const workspace = await createWorkspace()
 
-    const invalidCluster = await runBootstrap(workspace, ['production'])
+    const invalidCluster = await runBootstrap(workspace, ['production'], {
+      // Exercise the Linux race where validation exits before the parent closes stdin.
+      beforeStdinEnd: () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20),
+    })
     const invalidFlag = await runBootstrap(workspace, ['proxmox', '--insecure-skip-tls-verify'])
 
     assert.notEqual(invalidCluster.status, 0)
