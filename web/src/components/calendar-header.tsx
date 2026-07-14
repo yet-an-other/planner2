@@ -61,7 +61,7 @@ export function CalendarHeader({
             Planner
           </div>
           <div className="self-end -mr-1 text-[10px] font-medium leading-none tracking-[0.12em] text-[#8b8f72]">
-            v{getProductVersion()}
+            {getProductVersion()}
           </div>
         </div>
         <h1 className="relative z-0 col-start-1 col-end-4 row-start-1 h-[clamp(37px,calc(6vw+16px),55px)] min-w-0 self-center whitespace-nowrap text-center text-[clamp(14px,4vw,26px)] font-extrabold tracking-tight">

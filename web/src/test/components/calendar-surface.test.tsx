@@ -13,7 +13,7 @@ import { mountWithEvents } from './calendar-surface-harness'
 import { setRuntimeConfig } from '../runtime-config'
 
 describe('Runtime configuration', () => {
-  it('uses the runtime Google client id and displays the runtime Product Version', () => {
+  it('uses the runtime Google client id and displays a non-numeric Product Version unchanged', () => {
     setRuntimeConfig({
       googleClientId: 'runtime-client-id',
       productVersion: 'sha-abcdef0',
@@ -21,10 +21,21 @@ describe('Runtime configuration', () => {
 
     render(<CalendarSurface />)
 
-    expect(screen.getByText('vsha-abcdef0')).toBeInTheDocument()
+    expect(screen.getByText('sha-abcdef0')).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: /connect google account/i }),
     ).toBeEnabled()
+  })
+
+  it.each([
+    ['1.2.3', 'v1.2.3'],
+    ['v1.2.3', 'v1.2.3'],
+  ])('displays the Product Version %s as %s', (productVersion, expected) => {
+    setRuntimeConfig({ productVersion })
+
+    render(<CalendarSurface />)
+
+    expect(screen.getByText(expected)).toBeInTheDocument()
   })
 })
 
