@@ -1,6 +1,6 @@
 # Planner
 
-Planner is a personal planning product whose first delivery stack is a calendar-focused web experience.
+Planner is a personal planning product.
 
 ## Repository
 

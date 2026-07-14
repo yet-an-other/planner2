@@ -1,6 +1,6 @@
 # The Planner
 
-A personal planning product whose first slice is a calendar-only surface.
+A personal planning product.
 This self-contained pnpm workspace contains `web-ui` (React + Vite SPA),
 `server` (Hono Node API + SPA host), `contracts` (web API transport types), and
 `deploy` (GitOps charts and release tooling). Run the commands below from this
