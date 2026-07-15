@@ -2,18 +2,22 @@ import Foundation
 import SwiftUI
 
 struct CalendarScreen: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model: CalendarGridModel
-    @State private var topWeekStart: WeekRow.ID?
+    @State private var scrollPosition: WeekRow.ID?
 
     init(environment: CalendarEnvironment) {
         let model = CalendarGridModel(environment: environment)
         _model = State(initialValue: model)
-        _topWeekStart = State(initialValue: model.todayWeek.id)
+        _scrollPosition = State(initialValue: model.todayWeek.id)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            CalendarShellHeader()
+            IOSCalendarHeader(
+                visibleMonth: model.visibleMonth,
+                onJumpToToday: jumpToToday
+            )
 
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: 0) {
@@ -23,23 +27,77 @@ struct CalendarScreen: View {
                 }
                 .scrollTargetLayout()
             }
-            .scrollPosition(id: $topWeekStart, anchor: .top)
+            .coordinateSpace(name: CalendarSurfaceCoordinateSpace.name)
+            .scrollPosition(id: $scrollPosition, anchor: .top)
+            .onPreferenceChange(WeekRowOffsetsKey.self, perform: updateTopWeek)
+        }
+    }
+
+    private func jumpToToday() {
+        guard let target = model.todayJumpTarget() else {
+            return
+        }
+
+        if reduceMotion {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                scrollPosition = target
+            }
+        } else {
+            withAnimation(.easeInOut(duration: 0.35)) {
+                scrollPosition = target
+            }
+        }
+    }
+
+    private func updateTopWeek(_ offsets: [WeekRow.ID: CGFloat]) {
+        let topWeekStart = offsets
+            .filter { $0.value <= 0.5 }
+            .max { $0.value < $1.value }?
+            .key
+            ?? offsets.min { $0.value < $1.value }?.key
+
+        if let topWeekStart, topWeekStart != model.topWeekStart {
+            model.showWeek(starting: topWeekStart)
         }
     }
 }
 
-private struct CalendarShellHeader: View {
+private struct IOSCalendarHeader: View {
     private let weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    @FocusState private var visibleMonthFocused: Bool
+    @State private var visibleMonthHovered = false
+
+    let visibleMonth: String
+    let onJumpToToday: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Planner")
-                .font(.title.bold())
-                .foregroundStyle(Color(red: 0.47, green: 0.49, blue: 0.38))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .frame(height: 64)
-                .background(Color(red: 0.96, green: 0.95, blue: 0.90))
+            ZStack {
+                Text("Planner")
+                    .font(.title.bold())
+                    .foregroundStyle(Color(red: 0.47, green: 0.49, blue: 0.38))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+
+                Button(action: onJumpToToday) {
+                    Text(visibleMonth)
+                        .font(.headline.bold())
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+                }
+                .buttonStyle(
+                    VisibleMonthButtonStyle(
+                        emphasized: visibleMonthFocused || visibleMonthHovered
+                    )
+                )
+                .focused($visibleMonthFocused)
+                .onHover { visibleMonthHovered = $0 }
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 64)
+            .background(Color(red: 0.96, green: 0.95, blue: 0.90))
 
             HStack(spacing: 0) {
                 ForEach(weekdayLabels, id: \.self) { label in
@@ -55,6 +113,22 @@ private struct CalendarShellHeader: View {
     }
 }
 
+private struct VisibleMonthButtonStyle: ButtonStyle {
+    let emphasized: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .background {
+                Capsule()
+                    .fill(Color(red: 0.92, green: 0.89, blue: 0.82))
+                    .opacity(configuration.isPressed || emphasized ? 1 : 0)
+            }
+            .contentShape(Capsule())
+    }
+}
+
 private struct WeekRowView: View {
     let weekRow: WeekRow
 
@@ -65,11 +139,38 @@ private struct WeekRowView: View {
             }
         }
         .frame(height: 96)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: WeekRowOffsetsKey.self,
+                    value: [
+                        weekRow.id: geometry.frame(
+                            in: .named(CalendarSurfaceCoordinateSpace.name)
+                        ).minY
+                    ]
+                )
+            }
+        }
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color(red: 0.85, green: 0.82, blue: 0.74))
                 .frame(height: 1)
         }
+    }
+}
+
+private enum CalendarSurfaceCoordinateSpace {
+    static let name = "iOS Calendar Surface"
+}
+
+private struct WeekRowOffsetsKey: PreferenceKey {
+    static var defaultValue: [WeekRow.ID: CGFloat] { [:] }
+
+    static func reduce(
+        value: inout [WeekRow.ID: CGFloat],
+        nextValue: () -> [WeekRow.ID: CGFloat]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
     }
 }
 

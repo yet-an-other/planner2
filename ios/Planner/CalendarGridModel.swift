@@ -23,6 +23,14 @@ final class CalendarGridModel {
     let weekRows: [WeekRow]
     let todayWeekIndex: Int
     let todayWeek: WeekRow
+    private(set) var topWeekStart: WeekRow.ID
+
+    @ObservationIgnored
+    private let visibleMonthFormatter: DateFormatter
+
+    var visibleMonth: String {
+        visibleMonthFormatter.string(from: topWeekStart)
+    }
 
     init(environment: CalendarEnvironment) {
         let calendar = environment.calendar
@@ -54,10 +62,26 @@ final class CalendarGridModel {
             preconditionFailure("The Extended Calendar Range must contain Today's Week Row")
         }
 
+        let visibleMonthFormatter = DateFormatter()
+        visibleMonthFormatter.calendar = calendar
+        visibleMonthFormatter.locale = environment.locale
+        visibleMonthFormatter.timeZone = environment.timeZone
+        visibleMonthFormatter.setLocalizedDateFormatFromTemplate("yyyyMMMM")
+
         self.today = today
         self.weekRows = weekRows
         self.todayWeekIndex = todayWeekIndex
         self.todayWeek = weekRows[todayWeekIndex]
+        self.topWeekStart = todayWeekStart
+        self.visibleMonthFormatter = visibleMonthFormatter
+    }
+
+    func showWeek(starting weekStart: WeekRow.ID) {
+        topWeekStart = weekStart
+    }
+
+    func todayJumpTarget() -> WeekRow.ID? {
+        topWeekStart == todayWeek.start ? nil : todayWeek.start
     }
 }
 

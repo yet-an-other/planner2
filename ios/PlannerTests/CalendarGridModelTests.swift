@@ -154,6 +154,114 @@ struct CalendarGridModelTests {
         #expect(elapsedHours.contains(23))
         #expect(elapsedHours.contains(25))
     }
+
+    @Test("Visible Month follows the topmost Week Row")
+    func visibleMonthFollowsTopmostWeekRow() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "en_US_POSIX")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(
+                    year: 2026,
+                    month: 7,
+                    day: 15,
+                    hour: 12
+                )
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let augustWeek = try #require(model.weekRows.first {
+            yearMonthDay(of: $0.start, calendar: calendar) == [2026, 8, 3]
+        })
+
+        #expect(model.visibleMonth == "July 2026")
+
+        model.showWeek(starting: augustWeek.start)
+
+        #expect(model.visibleMonth == "August 2026")
+    }
+
+    @Test("Visible Month uses the Monday of Today's Week Row at a year boundary")
+    func visibleMonthUsesMondayAtYearBoundary() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "en_US_POSIX")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(
+                    year: 2023,
+                    month: 1,
+                    day: 1,
+                    hour: 12
+                )
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+
+        #expect(yearMonthDay(of: model.topWeekStart, calendar: calendar) == [2022, 12, 26])
+        #expect(model.visibleMonth == "December 2022")
+    }
+
+    @Test("Today Jump targets Today's Week Row and is a no-op when already there")
+    func todayJumpTargetsTodayAndAvoidsUnnecessaryMovement() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "en_US_POSIX")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(
+                    year: 2026,
+                    month: 7,
+                    day: 15,
+                    hour: 12
+                )
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let augustWeek = try #require(model.weekRows.first {
+            yearMonthDay(of: $0.start, calendar: calendar) == [2026, 8, 3]
+        })
+
+        #expect(model.todayJumpTarget() == nil)
+
+        model.showWeek(starting: augustWeek.start)
+
+        let target = try #require(model.todayJumpTarget())
+        #expect(target == model.todayWeek.start)
+        #expect(model.topWeekStart == augustWeek.start)
+
+        model.showWeek(starting: target)
+
+        #expect(model.todayJumpTarget() == nil)
+    }
 }
 
 private func yearMonthDay(of date: Date, calendar: Calendar) -> [Int] {
