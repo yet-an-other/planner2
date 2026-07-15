@@ -5,5 +5,10 @@
 *.swp
 *.swo
 
+# Xcode local state
+**/xcuserdata/
+*.xcuserstate
+DerivedData/
+
 # Pi subagent session artifacts
 .pi-subagents/

@@ -9,7 +9,7 @@ The continuous date range bounded by the earliest and latest dates fetched from 
 _Avoid_: Fetched cache, loaded range, data window
 
 **Calendar Surface**:
-A Monday-first, bidirectionally scrollable seven-column calendar grid that presents dates in an Extended Calendar Range and overlays the user's Calendar Events.
+The browser presentation of the Calendar Grid, extended with the user's Calendar Events.
 _Avoid_: Planner app, full planner, schedule manager, infinite calendar
 
 **Calendar Header**:
@@ -35,26 +35,6 @@ _Avoid_: Settings modal, calendar dialog, preferences screen
 **Header Status**:
 A Calendar Header area for short connection information, progress messages, or errors related to the Calendar Surface.
 _Avoid_: Toast, alert, notification bar
-
-**Visible Month**:
-The month and year containing the first date in the topmost visible Week Row of the Calendar Surface.
-_Avoid_: Current month, active month, shown month
-
-**Week Row**:
-A Monday-through-Sunday row of seven consecutive Date Cells in the Calendar Surface.
-_Avoid_: Date row, calendar row
-
-**Date Cell**:
-A single date in the Calendar Surface.
-_Avoid_: Day card, calendar tile, date box
-
-**Month Marker**:
-The first Date Cell of a calendar month, labeled with that month's short name.
-_Avoid_: Month divider, month label, month start
-
-**Today Jump**:
-A Calendar Header action that returns the Calendar Surface to Today's Week Row.
-_Avoid_: Back to today, scroll home, month click
 
 **Calendar Event Refresh**:
 A replacement of Calendar Events for the visible dates and the one-month scroll-prefetch buffer with their current state from the Selected Source Calendars.
@@ -83,7 +63,3 @@ _Avoid_: More link, +x item, extra events, expand button, overflow menu
 **Day Events Popover**:
 A transient, read-only overlay that lists the Calendar Events for one Date Cell.
 _Avoid_: Day list, event popup, agenda, more-events modal, overflow menu
-
-**Extended Calendar Range**:
-The complete Monday-through-Sunday Week Rows from the week containing ten years before Today through the week containing ten years after Today.
-_Avoid_: Infinite range, endless dates, all dates
