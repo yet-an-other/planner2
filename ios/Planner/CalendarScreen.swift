@@ -3,16 +3,27 @@ import SwiftUI
 
 struct CalendarScreen: View {
     @State private var model: CalendarGridModel
+    @State private var topWeekStart: WeekRow.ID?
 
     init(environment: CalendarEnvironment) {
-        _model = State(initialValue: CalendarGridModel(environment: environment))
+        let model = CalendarGridModel(environment: environment)
+        _model = State(initialValue: model)
+        _topWeekStart = State(initialValue: model.todayWeek.id)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             CalendarShellHeader()
-            WeekRowView(weekRow: model.todayWeek)
-            Spacer(minLength: 0)
+
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(spacing: 0) {
+                    ForEach(model.weekRows) { weekRow in
+                        WeekRowView(weekRow: weekRow)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollPosition(id: $topWeekStart, anchor: .top)
         }
     }
 }

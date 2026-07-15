@@ -40,4 +40,123 @@ struct CalendarGridModelTests {
         #expect(localDates.map(\.weekday) == [2, 3, 4, 5, 6, 7, 1])
         #expect(model.todayWeek.dateCells.map(\.isToday) == [false, false, true, false, false, false, false])
     }
+
+    @Test("The Extended Calendar Range contains complete boundary Week Rows and Today")
+    func extendedCalendarRangeContainsBoundariesAndToday() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "en_US_POSIX")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(
+                    year: 2026,
+                    month: 7,
+                    day: 15,
+                    hour: 12
+                )
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+
+        #expect(model.weekRows.count == 1_045)
+        #expect(model.todayWeekIndex == 522)
+        #expect(yearMonthDay(of: try #require(model.weekRows.first?.start), calendar: calendar) == [2016, 7, 11])
+        #expect(yearMonthDay(of: try #require(model.weekRows.last?.start), calendar: calendar) == [2036, 7, 14])
+        #expect(yearMonthDay(of: model.todayWeek.start, calendar: calendar) == [2026, 7, 13])
+        #expect(model.weekRows[model.todayWeekIndex] == model.todayWeek)
+    }
+
+    @Test("February 29 clamps ten-year endpoints to February 28")
+    func leapDayClampsExtendedCalendarRangeEndpoints() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "en_US_POSIX")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(
+                    year: 2024,
+                    month: 2,
+                    day: 29,
+                    hour: 12
+                )
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+
+        #expect(yearMonthDay(of: try #require(model.weekRows.first?.start), calendar: calendar) == [2014, 2, 24])
+        #expect(yearMonthDay(of: try #require(model.weekRows.last?.start), calendar: calendar) == [2034, 2, 27])
+        #expect(
+            yearMonthDay(
+                of: try #require(model.weekRows.last?.dateCells.last?.date),
+                calendar: calendar
+            ) == [2034, 3, 5]
+        )
+    }
+
+    @Test("Date Cells remain consecutive across calendar and daylight-saving boundaries")
+    func dateCellsRemainConsecutiveAcrossBoundaries() throws {
+        let timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        let locale = Locale(identifier: "en_US_POSIX")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(
+                    year: 2026,
+                    month: 3,
+                    day: 8,
+                    hour: 12
+                )
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let dateCells = model.weekRows.flatMap(\.dateCells)
+        let localDates = dateCells.map { yearMonthDay(of: $0.date, calendar: calendar) }
+        let elapsedHours = zip(dateCells, dateCells.dropFirst()).map { earlier, later in
+            Int(later.date.timeIntervalSince(earlier.date) / 3_600)
+        }
+        let calendarDaySteps = zip(dateCells, dateCells.dropFirst()).map { earlier, later in
+            calendar.dateComponents([.day], from: earlier.date, to: later.date).day
+        }
+
+        #expect(model.weekRows.allSatisfy { $0.dateCells.count == 7 })
+        #expect(model.weekRows.allSatisfy {
+            calendar.component(.weekday, from: $0.start) == 2
+        })
+        #expect(Set(localDates.map { $0.map(String.init).joined(separator: "-") }).count == dateCells.count)
+        #expect(calendarDaySteps.allSatisfy { $0 == 1 })
+        #expect(elapsedHours.contains(23))
+        #expect(elapsedHours.contains(25))
+    }
+}
+
+private func yearMonthDay(of date: Date, calendar: Calendar) -> [Int] {
+    let components = calendar.dateComponents([.year, .month, .day], from: date)
+    return [components.year ?? -1, components.month ?? -1, components.day ?? -1]
 }
