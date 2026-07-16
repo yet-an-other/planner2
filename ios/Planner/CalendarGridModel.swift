@@ -1,12 +1,27 @@
 import Foundation
 import Observation
 
+enum CalendarLayoutDirection: Equatable, Sendable {
+    case leftToRight
+    case rightToLeft
+}
+
 struct DateCell: Identifiable, Equatable, Sendable {
     let date: Date
-    let dayNumber: Int
+    let dayText: String
+    let monthMarker: String?
     let isToday: Bool
+    let isWeekend: Bool
 
     var id: Date { date }
+}
+
+struct WeekdayLabel: Identifiable, Equatable, Sendable {
+    let weekday: Int
+    let text: String
+    let isWeekend: Bool
+
+    var id: Int { weekday }
 }
 
 struct WeekRow: Identifiable, Equatable, Sendable {
@@ -23,6 +38,8 @@ final class CalendarGridModel {
     let weekRows: [WeekRow]
     let todayWeekIndex: Int
     let todayWeek: WeekRow
+    let weekdayLabels: [WeekdayLabel]
+    let layoutDirection: CalendarLayoutDirection
     private(set) var topWeekStart: WeekRow.ID
 
     @ObservationIgnored
@@ -45,6 +62,18 @@ final class CalendarGridModel {
             calendar: calendar
         )
 
+        let dayFormatter = DateFormatter()
+        dayFormatter.calendar = calendar
+        dayFormatter.locale = environment.locale
+        dayFormatter.timeZone = environment.timeZone
+        dayFormatter.setLocalizedDateFormatFromTemplate("d")
+
+        let monthMarkerFormatter = DateFormatter()
+        monthMarkerFormatter.calendar = calendar
+        monthMarkerFormatter.locale = environment.locale
+        monthMarkerFormatter.timeZone = environment.timeZone
+        monthMarkerFormatter.setLocalizedDateFormatFromTemplate("MMM")
+
         var weekRows: [WeekRow] = []
         var cursor = rangeStart
         var todayWeekIndex: Int?
@@ -54,12 +83,36 @@ final class CalendarGridModel {
                 todayWeekIndex = weekRows.count
             }
 
-            weekRows.append(makeWeekRow(starting: cursor, today: today, calendar: calendar))
+            weekRows.append(
+                makeWeekRow(
+                    starting: cursor,
+                    today: today,
+                    calendar: calendar,
+                    locale: environment.locale,
+                    dayFormatter: dayFormatter,
+                    monthMarkerFormatter: monthMarkerFormatter
+                )
+            )
             cursor = addDays(7, to: cursor, calendar: calendar)
         }
 
         guard let todayWeekIndex else {
             preconditionFailure("The Extended Calendar Range must contain Today's Week Row")
+        }
+
+        let weekdayFormatter = DateFormatter()
+        weekdayFormatter.calendar = calendar
+        weekdayFormatter.locale = environment.locale
+        weekdayFormatter.timeZone = environment.timeZone
+        weekdayFormatter.setLocalizedDateFormatFromTemplate("EEE")
+        let weekdayLabels = weekRows[todayWeekIndex].dateCells.map { dateCell in
+            WeekdayLabel(
+                weekday: calendar.component(.weekday, from: dateCell.date),
+                text: weekdayFormatter
+                    .string(from: dateCell.date)
+                    .uppercased(with: environment.locale),
+                isWeekend: calendar.isDateInWeekend(dateCell.date)
+            )
         }
 
         let visibleMonthFormatter = DateFormatter()
@@ -72,6 +125,10 @@ final class CalendarGridModel {
         self.weekRows = weekRows
         self.todayWeekIndex = todayWeekIndex
         self.todayWeek = weekRows[todayWeekIndex]
+        self.weekdayLabels = weekdayLabels
+        self.layoutDirection = environment.locale.language.characterDirection == .rightToLeft
+            ? .rightToLeft
+            : .leftToRight
         self.topWeekStart = todayWeekStart
         self.visibleMonthFormatter = visibleMonthFormatter
     }
@@ -128,13 +185,25 @@ private func addYearsClamped(_ amount: Int, to date: Date, calendar: Calendar) -
     return result
 }
 
-private func makeWeekRow(starting weekStart: Date, today: Date, calendar: Calendar) -> WeekRow {
+private func makeWeekRow(
+    starting weekStart: Date,
+    today: Date,
+    calendar: Calendar,
+    locale: Locale,
+    dayFormatter: DateFormatter,
+    monthMarkerFormatter: DateFormatter
+) -> WeekRow {
     let dateCells = (0..<7).map { offset in
         let date = addDays(offset, to: weekStart, calendar: calendar)
+        let dayNumber = calendar.component(.day, from: date)
         return DateCell(
             date: date,
-            dayNumber: calendar.component(.day, from: date),
-            isToday: calendar.isDate(date, inSameDayAs: today)
+            dayText: dayFormatter.string(from: date),
+            monthMarker: dayNumber == 1
+                ? monthMarkerFormatter.string(from: date).uppercased(with: locale)
+                : nil,
+            isToday: calendar.isDate(date, inSameDayAs: today),
+            isWeekend: calendar.isDateInWeekend(date)
         )
     }
 

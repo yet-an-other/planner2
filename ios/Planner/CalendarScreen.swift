@@ -16,6 +16,7 @@ struct CalendarScreen: View {
         VStack(spacing: 0) {
             IOSCalendarHeader(
                 visibleMonth: model.visibleMonth,
+                weekdayLabels: model.weekdayLabels,
                 onJumpToToday: jumpToToday
             )
 
@@ -31,6 +32,10 @@ struct CalendarScreen: View {
             .scrollPosition(id: $scrollPosition, anchor: .top)
             .onPreferenceChange(WeekRowOffsetsKey.self, perform: updateTopWeek)
         }
+        .environment(
+            \.layoutDirection,
+            model.layoutDirection == .rightToLeft ? .rightToLeft : .leftToRight
+        )
     }
 
     private func jumpToToday() {
@@ -65,46 +70,63 @@ struct CalendarScreen: View {
 }
 
 private struct IOSCalendarHeader: View {
-    private let weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
     @FocusState private var visibleMonthFocused: Bool
     @State private var visibleMonthHovered = false
 
     let visibleMonth: String
+    let weekdayLabels: [WeekdayLabel]
     let onJumpToToday: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack {
-                Text("Planner")
-                    .font(.title.bold())
-                    .foregroundStyle(Color(red: 0.47, green: 0.49, blue: 0.38))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            GeometryReader { geometry in
+                ZStack {
+                    Text("Planner")
+                        .font(.title.bold())
+                        .foregroundStyle(Color(red: 0.47, green: 0.49, blue: 0.38))
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: .leading
+                        )
+                        .padding(.horizontal, 16)
 
-                Button(action: onJumpToToday) {
-                    Text(visibleMonth)
-                        .font(.headline.bold())
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(1)
-                }
-                .buttonStyle(
-                    VisibleMonthButtonStyle(
-                        emphasized: visibleMonthFocused || visibleMonthHovered
+                    Button(action: onJumpToToday) {
+                        Text(visibleMonth)
+                            .font(.headline.bold())
+                            .foregroundStyle(Color.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .truncationMode(.tail)
+                            .frame(
+                                maxWidth: max(24, geometry.size.width - 288)
+                            )
+                    }
+                    .buttonStyle(
+                        VisibleMonthButtonStyle(
+                            emphasized: visibleMonthFocused || visibleMonthHovered
+                        )
                     )
-                )
-                .focused($visibleMonthFocused)
-                .onHover { visibleMonthHovered = $0 }
+                    .focused($visibleMonthFocused)
+                    .onHover { visibleMonthHovered = $0 }
+                }
             }
-            .padding(.horizontal, 16)
             .frame(height: 64)
             .background(Color(red: 0.96, green: 0.95, blue: 0.90))
 
             HStack(spacing: 0) {
-                ForEach(weekdayLabels, id: \.self) { label in
-                    Text(label.uppercased())
+                ForEach(weekdayLabels) { label in
+                    Text(label.text)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(Color(red: 0.44, green: 0.45, blue: 0.35))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background {
+                            if label.isWeekend {
+                                Color(red: 0.88, green: 0.86, blue: 0.78)
+                            }
+                        }
                 }
             }
             .frame(height: 36)
@@ -178,7 +200,7 @@ private struct DateCellView: View {
     let dateCell: DateCell
 
     var body: some View {
-        Text(dateCell.dayNumber, format: .number)
+        Text(dateCell.dayText)
             .font(.body.weight(dateCell.isToday ? .bold : .regular))
             .monospacedDigit()
             .foregroundStyle(dateCell.isToday ? Color.white : Color.primary)
@@ -191,6 +213,23 @@ private struct DateCellView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .padding(6)
+            .background {
+                if dateCell.isWeekend {
+                    Color(red: 0.98, green: 0.97, blue: 0.93)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if let monthMarker = dateCell.monthMarker {
+                    Text(monthMarker)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color(red: 0.47, green: 0.49, blue: 0.38))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .padding(.horizontal, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 36)
+                }
+            }
             .overlay(alignment: .trailing) {
                 Rectangle()
                     .fill(Color(red: 0.85, green: 0.82, blue: 0.74))
@@ -201,22 +240,50 @@ private struct DateCellView: View {
 
 #if DEBUG
 #Preview("Today Week Row") {
-    CalendarScreen(environment: previewCalendarEnvironment)
+    CalendarScreen(
+        environment: previewCalendarEnvironment(
+            localeIdentifier: "en_US_POSIX",
+            month: 7
+        )
+    )
+}
+
+#Preview("Long Visible Month · Compact") {
+    CalendarScreen(
+        environment: previewCalendarEnvironment(
+            localeIdentifier: "es_ES",
+            month: 9
+        )
+    )
+    .frame(width: 320, height: 700)
+}
+
+#Preview("Right to Left · Compact iPad") {
+    CalendarScreen(
+        environment: previewCalendarEnvironment(
+            localeIdentifier: "ar_SA",
+            month: 9
+        )
+    )
+    .frame(width: 507, height: 700)
 }
 
 @MainActor
-private var previewCalendarEnvironment: CalendarEnvironment {
+private func previewCalendarEnvironment(
+    localeIdentifier: String,
+    month: Int
+) -> CalendarEnvironment {
     guard let timeZone = TimeZone(secondsFromGMT: 0) else {
         preconditionFailure("GMT must be available for the deterministic preview")
     }
 
-    let locale = Locale(identifier: "en_US_POSIX")
+    let locale = Locale(identifier: localeIdentifier)
     var calendar = Calendar(identifier: .gregorian)
     calendar.locale = locale
     calendar.timeZone = timeZone
 
     guard let now = calendar.date(
-        from: DateComponents(year: 2026, month: 7, day: 15, hour: 12)
+        from: DateComponents(year: 2026, month: month, day: 15, hour: 12)
     ) else {
         preconditionFailure("The Gregorian Calendar must create the preview date")
     }

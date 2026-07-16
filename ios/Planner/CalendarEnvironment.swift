@@ -8,11 +8,11 @@ struct CalendarEnvironment: Sendable {
 
     init(
         now: Date,
-        calendar: Calendar,
+        calendar _: Calendar,
         locale: Locale,
         timeZone: TimeZone
     ) {
-        var configuredCalendar = calendar
+        var configuredCalendar = Calendar(identifier: .gregorian)
         configuredCalendar.locale = locale
         configuredCalendar.timeZone = timeZone
         configuredCalendar.firstWeekday = 2
@@ -27,8 +27,20 @@ struct CalendarEnvironment: Sendable {
         CalendarEnvironment(
             now: now,
             calendar: Calendar(identifier: .gregorian),
-            locale: .autoupdatingCurrent,
+            locale: systemLocale,
             timeZone: .autoupdatingCurrent
         )
+    }
+
+    private static var systemLocale: Locale {
+        let regionalLocale = Locale.autoupdatingCurrent
+        let preferredLocale = Locale(
+            identifier: Locale.preferredLanguages.first ?? regionalLocale.identifier
+        )
+        var components = Locale.Components(locale: regionalLocale)
+        components.languageComponents.languageCode = preferredLocale.language.languageCode
+        components.languageComponents.script = preferredLocale.language.script
+
+        return Locale(components: components)
     }
 }

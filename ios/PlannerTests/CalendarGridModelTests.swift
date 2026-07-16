@@ -262,6 +262,110 @@ struct CalendarGridModelTests {
 
         #expect(model.todayJumpTarget() == nil)
     }
+
+    @Test("Calendar text follows the supplied locale")
+    func calendarTextFollowsSuppliedLocale() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "es_ES")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(
+                    year: 2026,
+                    month: 7,
+                    day: 15,
+                    hour: 12
+                )
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let firstOfJuly = try #require(model.weekRows.flatMap(\.dateCells).first {
+            yearMonthDay(of: $0.date, calendar: calendar) == [2026, 7, 1]
+        })
+
+        #expect(model.visibleMonth == "julio de 2026")
+        #expect(model.weekdayLabels.map(\.text) == ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"])
+        #expect(model.todayWeek.dateCells[2].dayText == "15")
+        #expect(firstOfJuly.monthMarker == "JUL")
+    }
+
+    @Test("Calendar semantics stay Gregorian when another calendar is preferred")
+    func calendarSemanticsStayGregorian() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "es_ES")
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.locale = locale
+        gregorian.timeZone = timeZone
+        let now = try #require(
+            gregorian.date(
+                from: DateComponents(
+                    year: 2026,
+                    month: 7,
+                    day: 15,
+                    hour: 12
+                )
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: Calendar(identifier: .buddhist),
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+
+        #expect(yearMonthDay(of: model.today, calendar: gregorian) == [2026, 7, 15])
+        #expect(model.visibleMonth == "julio de 2026")
+        #expect(model.todayWeek.dateCells.map {
+            gregorian.component(.weekday, from: $0.date)
+        } == [2, 3, 4, 5, 6, 7, 1])
+    }
+
+    @Test("Right-to-left locale keeps Monday first at the leading edge and classifies its weekend")
+    func rightToLeftLocaleKeepsMondayFirstAndClassifiesWeekend() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "ar_SA")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(
+                    year: 2026,
+                    month: 7,
+                    day: 15,
+                    hour: 12
+                )
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+
+        #expect(model.layoutDirection == .rightToLeft)
+        #expect(model.weekdayLabels.map(\.weekday) == [2, 3, 4, 5, 6, 7, 1])
+        #expect(model.weekdayLabels.map(\.text) == [
+            "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت", "أحد"
+        ])
+        #expect(model.weekdayLabels.map(\.isWeekend) == [false, false, false, false, true, true, false])
+        #expect(model.todayWeek.dateCells.map(\.isWeekend) == [false, false, false, false, true, true, false])
+        #expect(model.todayWeek.dateCells[2].dayText == "١٥")
+    }
 }
 
 private func yearMonthDay(of date: Date, calendar: Calendar) -> [Int] {
