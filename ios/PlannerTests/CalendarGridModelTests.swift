@@ -642,6 +642,39 @@ struct CalendarGridModelTests {
         #expect(upperEdgeModel.visibleMonth == "July 2034")
         #expect(upperEdgeModel.todayJumpTarget() == upperEdgeModel.todayWeek.start)
     }
+
+    @Test("The same date environment produces the same Calendar Grid")
+    func sameDateEnvironmentProducesSameCalendarGrid() throws {
+        let timeZone = try #require(TimeZone(identifier: "Europe/Paris"))
+        let locale = Locale(identifier: "fr_FR")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 10, day: 25, hour: 12)
+            )
+        )
+        let environment = CalendarEnvironment(
+            now: now,
+            calendar: calendar,
+            locale: locale,
+            timeZone: timeZone
+        )
+
+        let first = CalendarGridModel(environment: environment)
+        let second = CalendarGridModel(environment: environment)
+
+        #expect(first.today == second.today)
+        #expect(first.weekRows == second.weekRows)
+        #expect(first.todayWeekIndex == second.todayWeekIndex)
+        #expect(first.todayWeek == second.todayWeek)
+        #expect(first.weekdayLabels == second.weekdayLabels)
+        #expect(first.layoutDirection == second.layoutDirection)
+        #expect(first.topWeekStart == second.topWeekStart)
+        #expect(first.visibleMonth == second.visibleMonth)
+        #expect(first.todayJumpTarget() == second.todayJumpTarget())
+    }
 }
 
 private func yearMonthDay(of date: Date, calendar: Calendar) -> [Int] {

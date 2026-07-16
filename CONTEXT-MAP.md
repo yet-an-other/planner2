@@ -9,4 +9,4 @@
 ## Relationships
 
 - **Web Experience → Planning**: Web Experience presents the Calendar Grid and uses Planning's account, source-calendar, event, and local-date language while owning its event presentation, refresh, and offline-display concepts.
-- **iOS Experience → Planning**: iOS Experience presents the Calendar Grid and uses Planning's Product Name and Today while owning its event-free presentation concepts.
+- **iOS Experience → Planning**: iOS Experience presents Planning's Calendar Grid and uses its Product Name, Today, Week Row, Date Cell, Extended Calendar Range, Month Marker, Visible Month, and Today Jump language while owning the event-free iOS Calendar Surface and iOS Calendar Header presentation.
