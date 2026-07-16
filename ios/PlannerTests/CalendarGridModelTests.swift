@@ -366,6 +366,282 @@ struct CalendarGridModelTests {
         #expect(model.todayWeek.dateCells.map(\.isWeekend) == [false, false, false, false, true, true, false])
         #expect(model.todayWeek.dateCells[2].dayText == "١٥")
     }
+
+    @Test("Foreground and midnight refreshes preserve a browsed Week Row")
+    func foregroundAndMidnightRefreshesPreserveBrowsedWeekRow() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "en_US_POSIX")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let initialNow = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 7, day: 15, hour: 12)
+            )
+        )
+        let refreshedNow = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 7, day: 16, hour: 1)
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: initialNow,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let augustWeek = try #require(model.weekRows.first {
+            yearMonthDay(of: $0.start, calendar: calendar) == [2026, 8, 3]
+        })
+        model.showWeek(starting: augustWeek.start)
+        let initialEnvironment = CalendarEnvironment(
+            now: initialNow,
+            calendar: calendar,
+            locale: locale,
+            timeZone: timeZone
+        )
+
+        let foregroundScrollTarget = model.refresh(environment: initialEnvironment)
+
+        #expect(yearMonthDay(of: foregroundScrollTarget, calendar: calendar) == [2026, 8, 3])
+        #expect(yearMonthDay(of: model.today, calendar: calendar) == [2026, 7, 15])
+
+        let scrollTarget = model.refresh(
+            environment: CalendarEnvironment(
+                now: refreshedNow,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+
+        #expect(yearMonthDay(of: model.today, calendar: calendar) == [2026, 7, 16])
+        #expect(yearMonthDay(of: model.topWeekStart, calendar: calendar) == [2026, 8, 3])
+        #expect(yearMonthDay(of: scrollTarget, calendar: calendar) == [2026, 8, 3])
+        #expect(model.visibleMonth == "August 2026")
+        #expect(model.todayWeek.dateCells.map(\.isToday) == [false, false, false, true, false, false, false])
+        #expect(model.todayJumpTarget() == model.todayWeek.start)
+    }
+
+    @Test("Midnight into a new week updates Today without moving the topmost Week Row")
+    func midnightIntoNewWeekUpdatesTodayWithoutMovingTopmostWeekRow() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "en_US_POSIX")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let sunday = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 7, day: 19, hour: 23)
+            )
+        )
+        let monday = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 7, day: 20, hour: 1)
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: sunday,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let originalTopWeekStart = model.topWeekStart
+
+        let scrollTarget = model.refresh(
+            environment: CalendarEnvironment(
+                now: monday,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+
+        #expect(yearMonthDay(of: model.today, calendar: calendar) == [2026, 7, 20])
+        #expect(model.topWeekStart == originalTopWeekStart)
+        #expect(scrollTarget == originalTopWeekStart)
+        #expect(yearMonthDay(of: model.todayWeek.start, calendar: calendar) == [2026, 7, 20])
+        #expect(model.todayWeek.dateCells.map(\.isToday) == [true, false, false, false, false, false, false])
+        #expect(model.todayJumpTarget() == model.todayWeek.start)
+    }
+
+    @Test("Timezone and locale refreshes preserve the browsed civil Week Row")
+    func timezoneAndLocaleRefreshesPreserveBrowsedCivilWeekRow() throws {
+        let initialTimeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let refreshedTimeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        let initialLocale = Locale(identifier: "en_US_POSIX")
+        let refreshedLocale = Locale(identifier: "ar_SA")
+        var initialCalendar = Calendar(identifier: .gregorian)
+        initialCalendar.locale = initialLocale
+        initialCalendar.timeZone = initialTimeZone
+        let now = try #require(
+            initialCalendar.date(
+                from: DateComponents(year: 2026, month: 7, day: 15, hour: 1)
+            )
+        )
+        let model = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: initialCalendar,
+                locale: initialLocale,
+                timeZone: initialTimeZone
+            )
+        )
+        let augustWeek = try #require(model.weekRows.first {
+            yearMonthDay(of: $0.start, calendar: initialCalendar) == [2026, 8, 3]
+        })
+        model.showWeek(starting: augustWeek.start)
+
+        let scrollTarget = model.refresh(
+            environment: CalendarEnvironment(
+                now: now,
+                calendar: Calendar(identifier: .gregorian),
+                locale: refreshedLocale,
+                timeZone: refreshedTimeZone
+            )
+        )
+        var refreshedCalendar = Calendar(identifier: .gregorian)
+        refreshedCalendar.locale = refreshedLocale
+        refreshedCalendar.timeZone = refreshedTimeZone
+
+        #expect(yearMonthDay(of: model.today, calendar: refreshedCalendar) == [2026, 7, 14])
+        #expect(yearMonthDay(of: model.topWeekStart, calendar: refreshedCalendar) == [2026, 8, 3])
+        #expect(yearMonthDay(of: scrollTarget, calendar: refreshedCalendar) == [2026, 8, 3])
+        #expect(model.visibleMonth == "أغسطس، ٢٠٢٦ م")
+        #expect(model.layoutDirection == .rightToLeft)
+        #expect(model.weekdayLabels.map(\.isWeekend) == [false, false, false, false, true, true, false])
+        #expect(model.todayWeek.dateCells.map(\.isToday) == [false, true, false, false, false, false, false])
+        #expect(model.todayWeek.dateCells[1].dayText == "١٤")
+    }
+
+    @Test("Extended Calendar Range refreshes preserve browsing at both valid edges")
+    func extendedCalendarRangeRefreshesPreserveBrowsingAtValidEdges() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "en_US_POSIX")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let initialNow = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 7, day: 15, hour: 12)
+            )
+        )
+        let refreshedNow = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 7, day: 16, hour: 12)
+            )
+        )
+        let initialEnvironment = CalendarEnvironment(
+            now: initialNow,
+            calendar: calendar,
+            locale: locale,
+            timeZone: timeZone
+        )
+        let refreshedEnvironment = CalendarEnvironment(
+            now: refreshedNow,
+            calendar: calendar,
+            locale: locale,
+            timeZone: timeZone
+        )
+        let lowerEdgeModel = CalendarGridModel(environment: initialEnvironment)
+        let initialFirstWeek = try #require(lowerEdgeModel.weekRows.first)
+        lowerEdgeModel.showWeek(starting: initialFirstWeek.start)
+
+        let lowerScrollTarget = lowerEdgeModel.refresh(environment: refreshedEnvironment)
+
+        #expect(lowerScrollTarget == initialFirstWeek.start)
+        #expect(lowerEdgeModel.topWeekStart == initialFirstWeek.start)
+
+        let upperEdgeModel = CalendarGridModel(environment: initialEnvironment)
+        let initialLastWeek = try #require(upperEdgeModel.weekRows.last)
+        upperEdgeModel.showWeek(starting: initialLastWeek.start)
+
+        let upperScrollTarget = upperEdgeModel.refresh(environment: refreshedEnvironment)
+
+        #expect(upperScrollTarget == initialLastWeek.start)
+        #expect(upperEdgeModel.topWeekStart == initialLastWeek.start)
+    }
+
+    @Test("Extended Calendar Range shifts clamp browsing to the nearest edge")
+    func extendedCalendarRangeShiftsClampBrowsingToNearestEdge() throws {
+        let timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "en_US_POSIX")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let initialNow = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 7, day: 15, hour: 12)
+            )
+        )
+        let laterNow = try #require(
+            calendar.date(
+                from: DateComponents(year: 2028, month: 7, day: 15, hour: 12)
+            )
+        )
+        let earlierNow = try #require(
+            calendar.date(
+                from: DateComponents(year: 2024, month: 7, day: 15, hour: 12)
+            )
+        )
+        let lowerEdgeModel = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: initialNow,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let initialFirstWeek = try #require(lowerEdgeModel.weekRows.first)
+        lowerEdgeModel.showWeek(starting: initialFirstWeek.start)
+
+        let lowerScrollTarget = lowerEdgeModel.refresh(
+            environment: CalendarEnvironment(
+                now: laterNow,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let refreshedFirstWeek = try #require(lowerEdgeModel.weekRows.first)
+
+        #expect(lowerScrollTarget == refreshedFirstWeek.start)
+        #expect(lowerEdgeModel.topWeekStart == refreshedFirstWeek.start)
+        #expect(yearMonthDay(of: refreshedFirstWeek.start, calendar: calendar) == [2018, 7, 9])
+        #expect(lowerEdgeModel.visibleMonth == "July 2018")
+        #expect(lowerEdgeModel.todayJumpTarget() == lowerEdgeModel.todayWeek.start)
+
+        let upperEdgeModel = CalendarGridModel(
+            environment: CalendarEnvironment(
+                now: initialNow,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let initialLastWeek = try #require(upperEdgeModel.weekRows.last)
+        upperEdgeModel.showWeek(starting: initialLastWeek.start)
+
+        let upperScrollTarget = upperEdgeModel.refresh(
+            environment: CalendarEnvironment(
+                now: earlierNow,
+                calendar: calendar,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let refreshedLastWeek = try #require(upperEdgeModel.weekRows.last)
+
+        #expect(upperScrollTarget == refreshedLastWeek.start)
+        #expect(upperEdgeModel.topWeekStart == refreshedLastWeek.start)
+        #expect(yearMonthDay(of: refreshedLastWeek.start, calendar: calendar) == [2034, 7, 10])
+        #expect(upperEdgeModel.visibleMonth == "July 2034")
+        #expect(upperEdgeModel.todayJumpTarget() == upperEdgeModel.todayWeek.start)
+    }
 }
 
 private func yearMonthDay(of date: Date, calendar: Calendar) -> [Int] {

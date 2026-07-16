@@ -3,13 +3,21 @@ import SwiftUI
 
 struct CalendarScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var model: CalendarGridModel
     @State private var scrollPosition: WeekRow.ID?
+    @State private var midnightScheduleGeneration = 0
 
-    init(environment: CalendarEnvironment) {
+    private let currentEnvironment: @MainActor () -> CalendarEnvironment
+
+    init(
+        environment: CalendarEnvironment,
+        currentEnvironment: @escaping @MainActor () -> CalendarEnvironment
+    ) {
         let model = CalendarGridModel(environment: environment)
         _model = State(initialValue: model)
         _scrollPosition = State(initialValue: model.todayWeek.id)
+        self.currentEnvironment = currentEnvironment
     }
 
     var body: some View {
@@ -36,6 +44,80 @@ struct CalendarScreen: View {
             \.layoutDirection,
             model.layoutDirection == .rightToLeft ? .rightToLeft : .leftToRight
         )
+        .onChange(of: scenePhase) { _, nextScenePhase in
+            midnightScheduleGeneration += 1
+            if nextScenePhase == .active {
+                refreshCalendarGrid()
+            }
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .NSSystemClockDidChange)
+        ) { _ in
+            handleSystemChange()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)
+        ) { _ in
+            handleSystemChange()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: NSLocale.currentLocaleDidChangeNotification
+            )
+        ) { _ in
+            handleSystemChange()
+        }
+        .task(id: midnightScheduleGeneration) {
+            await refreshAtNextLocalMidnight()
+        }
+    }
+
+    private func refreshCalendarGrid() {
+        let target = model.refresh(environment: currentEnvironment())
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            scrollPosition = target
+        }
+    }
+
+    private func handleSystemChange() {
+        guard scenePhase == .active else {
+            return
+        }
+
+        refreshCalendarGrid()
+        midnightScheduleGeneration += 1
+    }
+
+    private func refreshAtNextLocalMidnight() async {
+        guard scenePhase == .active else {
+            return
+        }
+
+        let environment = currentEnvironment()
+        let startOfToday = environment.calendar.startOfDay(for: environment.now)
+        guard let nextMidnight = environment.calendar.date(
+            byAdding: .day,
+            value: 1,
+            to: startOfToday
+        ) else {
+            return
+        }
+        let delay = max(0, nextMidnight.timeIntervalSince(environment.now))
+
+        do {
+            try await Task.sleep(for: .seconds(delay))
+        } catch {
+            return
+        }
+
+        guard !Task.isCancelled, scenePhase == .active else {
+            return
+        }
+
+        refreshCalendarGrid()
+        midnightScheduleGeneration += 1
     }
 
     private func jumpToToday() {
@@ -240,30 +322,36 @@ private struct DateCellView: View {
 
 #if DEBUG
 #Preview("Today Week Row") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
     CalendarScreen(
-        environment: previewCalendarEnvironment(
-            localeIdentifier: "en_US_POSIX",
-            month: 7
-        )
+        environment: environment,
+        currentEnvironment: { environment }
     )
 }
 
 #Preview("Long Visible Month · Compact") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "es_ES",
+        month: 9
+    )
     CalendarScreen(
-        environment: previewCalendarEnvironment(
-            localeIdentifier: "es_ES",
-            month: 9
-        )
+        environment: environment,
+        currentEnvironment: { environment }
     )
     .frame(width: 320, height: 700)
 }
 
 #Preview("Right to Left · Compact iPad") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "ar_SA",
+        month: 9
+    )
     CalendarScreen(
-        environment: previewCalendarEnvironment(
-            localeIdentifier: "ar_SA",
-            month: 9
-        )
+        environment: environment,
+        currentEnvironment: { environment }
     )
     .frame(width: 507, height: 700)
 }

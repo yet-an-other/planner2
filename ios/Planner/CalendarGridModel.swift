@@ -34,16 +34,19 @@ struct WeekRow: Identifiable, Equatable, Sendable {
 @MainActor
 @Observable
 final class CalendarGridModel {
-    let today: Date
-    let weekRows: [WeekRow]
-    let todayWeekIndex: Int
-    let todayWeek: WeekRow
-    let weekdayLabels: [WeekdayLabel]
-    let layoutDirection: CalendarLayoutDirection
+    private(set) var today: Date
+    private(set) var weekRows: [WeekRow]
+    private(set) var todayWeekIndex: Int
+    private(set) var todayWeek: WeekRow
+    private(set) var weekdayLabels: [WeekdayLabel]
+    private(set) var layoutDirection: CalendarLayoutDirection
     private(set) var topWeekStart: WeekRow.ID
 
     @ObservationIgnored
-    private let visibleMonthFormatter: DateFormatter
+    private var calendar: Calendar
+
+    @ObservationIgnored
+    private var visibleMonthFormatter: DateFormatter
 
     var visibleMonth: String {
         visibleMonthFormatter.string(from: topWeekStart)
@@ -130,7 +133,44 @@ final class CalendarGridModel {
             ? .rightToLeft
             : .leftToRight
         self.topWeekStart = todayWeekStart
+        self.calendar = calendar
         self.visibleMonthFormatter = visibleMonthFormatter
+    }
+
+    @discardableResult
+    func refresh(environment: CalendarEnvironment) -> WeekRow.ID {
+        let browsedDateComponents = calendar.dateComponents(
+            [.era, .year, .month, .day],
+            from: topWeekStart
+        )
+        let refreshed = CalendarGridModel(environment: environment)
+        let preservedDate = refreshed.calendar.date(from: browsedDateComponents)
+            .map {
+                startOfMondayWeek(containing: $0, calendar: refreshed.calendar)
+            }
+            ?? refreshed.todayWeek.start
+        guard
+            let firstWeekStart = refreshed.weekRows.first?.start,
+            let lastWeekStart = refreshed.weekRows.last?.start
+        else {
+            preconditionFailure("The Extended Calendar Range must contain Week Rows")
+        }
+        let preservedTopWeekStart = min(
+            max(preservedDate, firstWeekStart),
+            lastWeekStart
+        )
+
+        today = refreshed.today
+        weekRows = refreshed.weekRows
+        todayWeekIndex = refreshed.todayWeekIndex
+        todayWeek = refreshed.todayWeek
+        weekdayLabels = refreshed.weekdayLabels
+        layoutDirection = refreshed.layoutDirection
+        calendar = refreshed.calendar
+        visibleMonthFormatter = refreshed.visibleMonthFormatter
+        topWeekStart = preservedTopWeekStart
+
+        return preservedTopWeekStart
     }
 
     func showWeek(starting weekStart: WeekRow.ID) {
