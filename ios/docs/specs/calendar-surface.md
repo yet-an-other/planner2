@@ -43,10 +43,10 @@ The iOS delivery stack is independent from the Web Experience. It shares vocabul
 
 ### Date Cell presentation
 
-- An ordinary Date Cell contains only its localized day number, aligned top-trailing with monospaced system digits.
-- Today uses a filled olive circle around the number. It has no whole-cell Today tint or textual label.
+- An ordinary Date Cell contains only its compact localized day number, aligned top-trailing with monospaced system digits.
+- Today uses a compact filled olive circle around the number. It has no whole-cell Today tint or textual label.
 - Locale-defined weekend Date Cells and weekday labels use a subtle warm tint.
-- The first Date Cell of each month adds an uppercase localized short Month Marker and a three-point olive rule on the cell's leading edge.
+- The first Date Cell of each month adds an uppercase localized short Month Marker at the leading side of the same top row as the equally sized day number, plus a three-point olive rule on the cell's leading edge.
 - Thin beige separators divide Date Cells and Week Rows. There is no outer card, shadow, rounded Calendar Grid container, or grid margin.
 - Date Cells are inert: no selection, navigation, menu, gesture, haptic, or placeholder action.
 

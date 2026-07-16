@@ -1,5 +1,7 @@
 import Foundation
+import SwiftUI
 import Testing
+import UIKit
 @testable import Planner
 
 @Suite("Calendar Grid")
@@ -643,6 +645,61 @@ struct CalendarGridModelTests {
         #expect(upperEdgeModel.todayJumpTarget() == upperEdgeModel.todayWeek.start)
     }
 
+    @Test("Month Marker and compact date numeral share one Date Cell row")
+    func monthMarkerAndCompactDateNumeralShareOneRow() throws {
+        let renderer = ImageRenderer(
+            content: DateCellView(
+                dateCell: DateCell(
+                    date: Date(timeIntervalSince1970: 0),
+                    dayText: "1",
+                    monthMarker: "AUG",
+                    isToday: false,
+                    isWeekend: false
+                )
+            )
+            .frame(width: 53, height: 96)
+            .environment(\.layoutDirection, .leftToRight)
+        )
+        renderer.scale = 3
+        let image = try #require(renderer.uiImage?.cgImage)
+        let dayBounds = try #require(
+            pixelBounds(in: image, matching: (29, 33, 18))
+        )
+        let monthBounds = try #require(
+            pixelBounds(in: image, matching: (111, 114, 90))
+        )
+
+        #expect(abs(dayBounds.midY - monthBounds.midY) <= 12)
+        #expect(dayBounds.height <= monthBounds.height + 3)
+        #expect(monthBounds.width >= 40)
+
+        let compactRTLRenderer = ImageRenderer(
+            content: DateCellView(
+                dateCell: DateCell(
+                    date: Date(timeIntervalSince1970: 0),
+                    dayText: "١",
+                    monthMarker: "أغسطس",
+                    isToday: false,
+                    isWeekend: false
+                )
+            )
+            .frame(width: 45, height: 96)
+            .environment(\.layoutDirection, .rightToLeft)
+        )
+        compactRTLRenderer.scale = 3
+        let compactRTLImage = try #require(compactRTLRenderer.uiImage?.cgImage)
+        let compactRTLDayBounds = try #require(
+            pixelBounds(in: compactRTLImage, matching: (29, 33, 18))
+        )
+        let compactRTLMonthBounds = try #require(
+            pixelBounds(in: compactRTLImage, matching: (111, 114, 90))
+        )
+
+        #expect(abs(compactRTLDayBounds.midY - compactRTLMonthBounds.midY) <= 12)
+        #expect(compactRTLDayBounds.height <= compactRTLMonthBounds.height + 3)
+        #expect(compactRTLMonthBounds.width >= 40)
+    }
+
     @Test("The same date environment produces the same Calendar Grid")
     func sameDateEnvironmentProducesSameCalendarGrid() throws {
         let timeZone = try #require(TimeZone(identifier: "Europe/Paris"))
@@ -675,6 +732,61 @@ struct CalendarGridModelTests {
         #expect(first.visibleMonth == second.visibleMonth)
         #expect(first.todayJumpTarget() == second.todayJumpTarget())
     }
+}
+
+private func pixelBounds(
+    in image: CGImage,
+    matching target: (red: UInt8, green: UInt8, blue: UInt8)
+) -> CGRect? {
+    let width = image.width
+    let height = image.height
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    guard let context = CGContext(
+        data: &pixels,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: width * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else {
+        return nil
+    }
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+    var minX = width
+    var minY = height
+    var maxX = -1
+    var maxY = -1
+    let tolerance = 12
+
+    for y in 0..<height {
+        for x in 0..<width {
+            let offset = (y * width + x) * 4
+            let red = Int(pixels[offset])
+            let green = Int(pixels[offset + 1])
+            let blue = Int(pixels[offset + 2])
+            guard abs(red - Int(target.red)) <= tolerance,
+                  abs(green - Int(target.green)) <= tolerance,
+                  abs(blue - Int(target.blue)) <= tolerance else {
+                continue
+            }
+            minX = min(minX, x)
+            minY = min(minY, y)
+            maxX = max(maxX, x)
+            maxY = max(maxY, y)
+        }
+    }
+
+    guard maxX >= minX, maxY >= minY else {
+        return nil
+    }
+    return CGRect(
+        x: minX,
+        y: minY,
+        width: maxX - minX + 1,
+        height: maxY - minY + 1
+    )
 }
 
 private func yearMonthDay(of date: Date, calendar: Calendar) -> [Int] {

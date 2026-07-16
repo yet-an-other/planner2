@@ -295,50 +295,60 @@ private struct WeekRowOffsetsKey: PreferenceKey {
     }
 }
 
-private struct DateCellView: View {
+struct DateCellView: View {
+    private static let labelFontSize: CGFloat = 10
+
     let dateCell: DateCell
 
     var body: some View {
-        Text(dateCell.dayText)
-            .font(.body.weight(dateCell.isToday ? .bold : .regular))
-            .monospacedDigit()
-            .foregroundStyle(dateCell.isToday ? Color.white : PlannerPalette.ink)
-            .frame(width: 32, height: 32)
-            .background {
-                if dateCell.isToday {
-                    Circle()
-                        .fill(PlannerPalette.olive)
-                }
+        HStack(spacing: 1) {
+            if let monthMarker = dateCell.monthMarker {
+                Text(monthMarker)
+                    .font(.system(size: Self.labelFontSize, weight: .semibold))
+                    .foregroundStyle(PlannerPalette.monthText)
+                    .lineLimit(1)
+                    .allowsTightening(true)
+                    .layoutPriority(1)
+                    .padding(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 0))
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            .padding(6)
-            .background(
-                dateCell.isWeekend ? PlannerPalette.weekendCell : PlannerPalette.grid
-            )
-            .overlay(alignment: .topLeading) {
-                if let monthMarker = dateCell.monthMarker {
-                    Text(monthMarker)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(PlannerPalette.monthText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .padding(.horizontal, 6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 36)
+
+            Spacer(minLength: 0)
+
+            Text(dateCell.dayText)
+                .font(
+                    .system(
+                        size: Self.labelFontSize,
+                        weight: dateCell.isToday ? .bold : .medium
+                    )
+                )
+                .monospacedDigit()
+                .foregroundStyle(dateCell.isToday ? Color.white : PlannerPalette.ink)
+                .frame(width: 18, height: 18)
+                .background {
+                    if dateCell.isToday {
+                        Circle()
+                            .fill(PlannerPalette.olive)
+                    }
                 }
-            }
-            .overlay(alignment: .leading) {
-                if dateCell.monthMarker != nil {
-                    Rectangle()
-                        .fill(PlannerPalette.monthRule)
-                        .frame(width: 3)
-                }
-            }
-            .overlay(alignment: .trailing) {
+        }
+        .padding(.horizontal, 3)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(
+            dateCell.isWeekend ? PlannerPalette.weekendCell : PlannerPalette.grid
+        )
+        .overlay(alignment: .leading) {
+            if dateCell.monthMarker != nil {
                 Rectangle()
-                    .fill(PlannerPalette.separator)
-                    .frame(width: 1)
+                    .fill(PlannerPalette.monthRule)
+                    .frame(width: 3)
             }
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(PlannerPalette.separator)
+                .frame(width: 1)
+        }
     }
 }
 
