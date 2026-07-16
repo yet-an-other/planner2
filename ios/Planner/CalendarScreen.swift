@@ -1,6 +1,20 @@
 import Foundation
 import SwiftUI
 
+private enum PlannerPalette {
+    static let canvas = Color(red: 0.961, green: 0.945, blue: 0.902)
+    static let grid = Color.white
+    static let ink = Color(red: 0.114, green: 0.129, blue: 0.071)
+    static let olive = Color(red: 0.471, green: 0.490, blue: 0.380)
+    static let monthText = Color(red: 0.435, green: 0.447, blue: 0.353)
+    static let monthRule = Color(red: 0.545, green: 0.561, blue: 0.447)
+    static let weekdayStrip = Color(red: 0.910, green: 0.890, blue: 0.820)
+    static let weekendStrip = Color(red: 0.878, green: 0.859, blue: 0.780)
+    static let weekendCell = Color(red: 0.980, green: 0.969, blue: 0.929)
+    static let separator = Color(red: 0.851, green: 0.820, blue: 0.741)
+    static let emphasizedControl = Color(red: 0.922, green: 0.890, blue: 0.820)
+}
+
 struct CalendarScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -39,7 +53,10 @@ struct CalendarScreen: View {
             .coordinateSpace(name: CalendarSurfaceCoordinateSpace.name)
             .scrollPosition(id: $scrollPosition, anchor: .top)
             .onPreferenceChange(WeekRowOffsetsKey.self, perform: updateTopWeek)
+            .background(PlannerPalette.grid)
         }
+        .background(PlannerPalette.canvas)
+        .preferredColorScheme(.light)
         .environment(
             \.layoutDirection,
             model.layoutDirection == .rightToLeft ? .rightToLeft : .leftToRight
@@ -165,7 +182,7 @@ private struct IOSCalendarHeader: View {
                 ZStack {
                     Text("Planner")
                         .font(.title.bold())
-                        .foregroundStyle(Color(red: 0.47, green: 0.49, blue: 0.38))
+                        .foregroundStyle(PlannerPalette.olive)
                         .frame(
                             maxWidth: .infinity,
                             maxHeight: .infinity,
@@ -176,7 +193,7 @@ private struct IOSCalendarHeader: View {
                     Button(action: onJumpToToday) {
                         Text(visibleMonth)
                             .font(.headline.bold())
-                            .foregroundStyle(Color.primary)
+                            .foregroundStyle(PlannerPalette.ink)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .truncationMode(.tail)
@@ -194,25 +211,25 @@ private struct IOSCalendarHeader: View {
                 }
             }
             .frame(height: 64)
-            .background(Color(red: 0.96, green: 0.95, blue: 0.90))
+            .background(PlannerPalette.canvas)
 
             HStack(spacing: 0) {
                 ForEach(weekdayLabels) { label in
                     Text(label.text)
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color(red: 0.44, green: 0.45, blue: 0.35))
+                        .foregroundStyle(PlannerPalette.monthText)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background {
                             if label.isWeekend {
-                                Color(red: 0.88, green: 0.86, blue: 0.78)
+                                PlannerPalette.weekendStrip
                             }
                         }
                 }
             }
             .frame(height: 36)
-            .background(Color(red: 0.91, green: 0.89, blue: 0.82))
+            .background(PlannerPalette.weekdayStrip)
         }
     }
 }
@@ -226,7 +243,7 @@ private struct VisibleMonthButtonStyle: ButtonStyle {
             .frame(height: 44)
             .background {
                 Capsule()
-                    .fill(Color(red: 0.92, green: 0.89, blue: 0.82))
+                    .fill(PlannerPalette.emphasizedControl)
                     .opacity(configuration.isPressed || emphasized ? 1 : 0)
             }
             .contentShape(Capsule())
@@ -257,7 +274,7 @@ private struct WeekRowView: View {
         }
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color(red: 0.85, green: 0.82, blue: 0.74))
+                .fill(PlannerPalette.separator)
                 .frame(height: 1)
         }
     }
@@ -285,26 +302,24 @@ private struct DateCellView: View {
         Text(dateCell.dayText)
             .font(.body.weight(dateCell.isToday ? .bold : .regular))
             .monospacedDigit()
-            .foregroundStyle(dateCell.isToday ? Color.white : Color.primary)
+            .foregroundStyle(dateCell.isToday ? Color.white : PlannerPalette.ink)
             .frame(width: 32, height: 32)
             .background {
                 if dateCell.isToday {
                     Circle()
-                        .fill(Color(red: 0.47, green: 0.49, blue: 0.38))
+                        .fill(PlannerPalette.olive)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .padding(6)
-            .background {
-                if dateCell.isWeekend {
-                    Color(red: 0.98, green: 0.97, blue: 0.93)
-                }
-            }
+            .background(
+                dateCell.isWeekend ? PlannerPalette.weekendCell : PlannerPalette.grid
+            )
             .overlay(alignment: .topLeading) {
                 if let monthMarker = dateCell.monthMarker {
                     Text(monthMarker)
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color(red: 0.47, green: 0.49, blue: 0.38))
+                        .foregroundStyle(PlannerPalette.monthText)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .padding(.horizontal, 6)
@@ -312,16 +327,23 @@ private struct DateCellView: View {
                         .padding(.top, 36)
                 }
             }
+            .overlay(alignment: .leading) {
+                if dateCell.monthMarker != nil {
+                    Rectangle()
+                        .fill(PlannerPalette.monthRule)
+                        .frame(width: 3)
+                }
+            }
             .overlay(alignment: .trailing) {
                 Rectangle()
-                    .fill(Color(red: 0.85, green: 0.82, blue: 0.74))
+                    .fill(PlannerPalette.separator)
                     .frame(width: 1)
             }
     }
 }
 
 #if DEBUG
-#Preview("Today Week Row") {
+#Preview("iPhone · Light") {
     let environment = previewCalendarEnvironment(
         localeIdentifier: "en_US_POSIX",
         month: 7
@@ -330,6 +352,19 @@ private struct DateCellView: View {
         environment: environment,
         currentEnvironment: { environment }
     )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("11-inch iPad · Light") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment }
+    )
+    .frame(width: 834, height: 1_194)
 }
 
 #Preview("Long Visible Month · Compact") {

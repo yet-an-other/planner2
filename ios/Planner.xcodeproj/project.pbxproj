@@ -12,6 +12,7 @@
 		A00000000000000000000023 /* CalendarEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000014 /* CalendarEnvironment.swift */; };
 		A00000000000000000000024 /* CalendarGridModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000015 /* CalendarGridModel.swift */; };
 		A00000000000000000000025 /* CalendarScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000016 /* CalendarScreen.swift */; };
+		A00000000000000000000026 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000018 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,6 +34,7 @@
 		A00000000000000000000015 /* CalendarGridModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarGridModel.swift; sourceTree = "<group>"; };
 		A00000000000000000000016 /* CalendarScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarScreen.swift; sourceTree = "<group>"; };
 		A00000000000000000000017 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A00000000000000000000018 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -78,6 +80,7 @@
 				A00000000000000000000014 /* CalendarEnvironment.swift */,
 				A00000000000000000000015 /* CalendarGridModel.swift */,
 				A00000000000000000000016 /* CalendarScreen.swift */,
+				A00000000000000000000018 /* Assets.xcassets */,
 				A00000000000000000000017 /* Info.plist */,
 			);
 			path = Planner;
@@ -171,6 +174,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A00000000000000000000026 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -324,6 +328,7 @@
 		A00000000000000000000062 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
@@ -349,6 +354,7 @@
 		A00000000000000000000063 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
