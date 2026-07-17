@@ -21,7 +21,7 @@ The public version identifier displayed with the Product Name.
 _Avoid_: Build number, package version, release tag
 
 **Account Control**:
-The Calendar Header control that displays the Google Account Connection state and lets the user connect or manage the connected account.
+The Calendar Header control that displays the Google Account Connection state and lets the user connect or Disconnect on This Device.
 _Avoid_: Login button, profile button, auth widget
 
 **Source Calendar Control**:

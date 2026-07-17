@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Supersedes the "no backend" stance recorded in ADR 0003.
+Accepted. Supersedes the "no backend" stance recorded in ADR 0003. The revoke-on-logout behavior is superseded by system ADR [`0002-keep-google-account-connections-local`](../../../docs/adr/0002-keep-google-account-connections-local.md).
 
 ## Context
 

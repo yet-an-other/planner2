@@ -36,9 +36,17 @@ _Avoid_: Current month, active month, shown month
 An action that returns the Calendar Grid to the Week Row containing Today.
 _Avoid_: Back to today, scroll home, month click
 
+**Google Authorization Grant**:
+Google's project-wide permission for Planner's OAuth clients to identify a user and read their Google Calendar. One grant can support Google Account Connections in multiple app installations and browser profiles.
+_Avoid_: Google Account Connection, session, credentials
+
 **Google Account Connection**:
-The user's authorization for Planner to identify them with Google and read their Google Calendar.
+The local association between one Planner app installation or browser profile and one Google account, through which that client can identify the user and read their Google Calendar under a Google Authorization Grant.
 _Avoid_: Login, Google auth, OAuth token
+
+**Disconnect on This Device**:
+An action that removes the Google Account Connection from the current app installation or browser profile without revoking the Google Authorization Grant or affecting connections elsewhere.
+_Avoid_: Disconnect, logout, sign out everywhere, revoke access
 
 **Source Calendar**:
 A Google Calendar in the user's account that Planner is permitted to read. It has a stable Google id, a display summary, and a background color.
