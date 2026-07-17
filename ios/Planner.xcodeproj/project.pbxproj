@@ -12,6 +12,8 @@
 		A00000000000000000000023 /* CalendarEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000014 /* CalendarEnvironment.swift */; };
 		A00000000000000000000024 /* CalendarGridModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000015 /* CalendarGridModel.swift */; };
 		A00000000000000000000025 /* CalendarScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000016 /* CalendarScreen.swift */; };
+		A00000000000000000000090 /* PlannerPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000092 /* PlannerPalette.swift */; };
+		A00000000000000000000093 /* IOSCalendarHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000094 /* IOSCalendarHeader.swift */; };
 		A00000000000000000000026 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000018 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -33,6 +35,8 @@
 		A00000000000000000000014 /* CalendarEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEnvironment.swift; sourceTree = "<group>"; };
 		A00000000000000000000015 /* CalendarGridModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarGridModel.swift; sourceTree = "<group>"; };
 		A00000000000000000000016 /* CalendarScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarScreen.swift; sourceTree = "<group>"; };
+		A00000000000000000000092 /* PlannerPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannerPalette.swift; sourceTree = "<group>"; };
+		A00000000000000000000094 /* IOSCalendarHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSCalendarHeader.swift; sourceTree = "<group>"; };
 		A00000000000000000000017 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A00000000000000000000018 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -80,6 +84,8 @@
 				A00000000000000000000014 /* CalendarEnvironment.swift */,
 				A00000000000000000000015 /* CalendarGridModel.swift */,
 				A00000000000000000000016 /* CalendarScreen.swift */,
+				A00000000000000000000092 /* PlannerPalette.swift */,
+				A00000000000000000000094 /* IOSCalendarHeader.swift */,
 				A00000000000000000000018 /* Assets.xcassets */,
 				A00000000000000000000017 /* Info.plist */,
 			);
@@ -189,6 +195,8 @@
 				A00000000000000000000023 /* CalendarEnvironment.swift in Sources */,
 				A00000000000000000000024 /* CalendarGridModel.swift in Sources */,
 				A00000000000000000000025 /* CalendarScreen.swift in Sources */,
+				A00000000000000000000090 /* PlannerPalette.swift in Sources */,
+				A00000000000000000000093 /* IOSCalendarHeader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
