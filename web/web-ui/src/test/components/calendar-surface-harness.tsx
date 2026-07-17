@@ -42,7 +42,7 @@ export function mountWithEvents(
     requestCode.mockImplementation(() => callback({ code: 'the-code' }))
     return { requestCode }
   })
-  vi.stubGlobal('google', { accounts: { oauth2: { initCodeClient, revoke: vi.fn((_accessToken: string, done: () => void) => done()) } } })
+  vi.stubGlobal('google', { accounts: { oauth2: { initCodeClient } } })
   vi.stubGlobal(
     'fetch',
     vi.fn((input: RequestInfo | URL) => {
@@ -51,6 +51,8 @@ export function mountWithEvents(
         return Promise.resolve({ ok: true, json: async () => ({ accessToken: 'access-token', profile: { email: 'ada@example.com', displayName: 'Ada', initials: 'A', pictureUrl: 'x' } }) })
       if (url === '/api/token')
         return Promise.resolve({ ok: false, status: 401, json: async () => ({}) })
+      if (url === '/api/connection')
+        return Promise.resolve({ ok: true, json: async () => ({ ok: true }) })
       if (url.includes('calendarList'))
         return Promise.resolve({
           ok: true,

@@ -25,7 +25,7 @@ type CalendarHeaderProps = {
   onJumpToToday: () => void
   /** Begin the Google OAuth connect flow. */
   onConnect: () => void
-  /** Disconnect via the backend (revoke refresh token + clear cookie). */
+  /** Disconnect this browser profile's Google Account Connection. */
   onDisconnect: () => void
   /** Open the Source Calendar Picker. */
   onOpenSourceCalendars: () => void
@@ -140,7 +140,7 @@ function AccountControl({
 }: AccountControlProps) {
   const displayText = connected && profile ? profile.displayName : 'Connect Google'
   const actionLabel = connected
-    ? `Disconnect Google account for ${displayText}`
+    ? `Disconnect on This Device for ${displayText}`
     : 'Connect Google account'
   const ActionIcon = connected ? LogOut : LogIn
 

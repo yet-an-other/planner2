@@ -41,7 +41,7 @@ describe('GET /healthz', () => {
     const operations = createOperationalState()
     const app = createApp(
       { ...config, operations },
-      { postToGoogle: vi.fn(), postToRevoke: vi.fn() },
+      { postToGoogle: vi.fn() },
     )
 
     const response = await app.request('/healthz')
@@ -55,7 +55,7 @@ describe('GET /healthz', () => {
 
   it('reports process health and Product Version without calling Google', async () => {
     const postToGoogle = vi.fn()
-    const app = createApp(config, { postToGoogle, postToRevoke: vi.fn() })
+    const app = createApp(config, { postToGoogle })
 
     const response = await app.request('/healthz')
 
@@ -71,7 +71,7 @@ describe('GET /healthz', () => {
     const operations = createOperationalState()
     const app = createApp(
       { ...config, operations },
-      { postToGoogle: vi.fn(), postToRevoke: vi.fn() },
+      { postToGoogle: vi.fn() },
     )
     operations.markReady()
     operations.beginShutdown()
@@ -88,7 +88,7 @@ describe('GET /healthz', () => {
 
 describe('GET /runtime-config.js', () => {
   it('serves the precomputed public runtime configuration from memory', async () => {
-    const app = createApp(config, { postToGoogle: vi.fn(), postToRevoke: vi.fn() })
+    const app = createApp(config, { postToGoogle: vi.fn() })
 
     const response = await app.request('/runtime-config.js')
 
@@ -106,7 +106,7 @@ describe('POST /api/auth/callback', () => {
       refresh_token: 'refresh',
       id_token: makeIdToken({ email: 'user@example.com', name: 'User Example' }),
     }))
-    const app = createApp(config, { postToGoogle, postToRevoke: vi.fn() })
+    const app = createApp(config, { postToGoogle })
 
     const res = await app.request('/api/auth/callback', {
       method: 'POST',
@@ -138,7 +138,7 @@ describe('GET /api/token', () => {
     const postToGoogle = vi.fn()
     const freshSession = { ...session, accessTokenExpiresAt: Date.now() + 3_600_000 }
     const cookie = `${SESSION_COOKIE_NAME}=${serializeSession(freshSession, KEY)}`
-    const app = createApp(config, { postToGoogle, postToRevoke: vi.fn() })
+    const app = createApp(config, { postToGoogle })
 
     const res = await app.request('/api/token', { headers: { Cookie: cookie } })
 
@@ -161,7 +161,7 @@ describe('GET /api/token', () => {
     }))
     const staleSession = { ...session, accessTokenExpiresAt: 0 }
     const cookie = `${SESSION_COOKIE_NAME}=${serializeSession(staleSession, KEY)}`
-    const app = createApp(config, { postToGoogle, postToRevoke: vi.fn() })
+    const app = createApp(config, { postToGoogle })
 
     const res = await app.request('/api/token', { headers: { Cookie: cookie } })
 
@@ -178,7 +178,7 @@ describe('GET /api/token', () => {
     })
     const staleSession = { ...session, accessTokenExpiresAt: 0 }
     const cookie = `${SESSION_COOKIE_NAME}=${serializeSession(staleSession, KEY)}`
-    const app = createApp(config, { postToGoogle, postToRevoke: vi.fn() })
+    const app = createApp(config, { postToGoogle })
 
     const res = await app.request('/api/token', { headers: { Cookie: cookie } })
 
@@ -187,7 +187,7 @@ describe('GET /api/token', () => {
   })
 
   it('returns 401 when there is no session cookie', async () => {
-    const app = createApp(config, { postToGoogle: vi.fn(), postToRevoke: vi.fn() })
+    const app = createApp(config, { postToGoogle: vi.fn() })
 
     const res = await app.request('/api/token')
 
@@ -195,35 +195,29 @@ describe('GET /api/token', () => {
   })
 })
 
-describe('POST /api/logout', () => {
-  it('revokes the refresh token at Google and clears the session cookie', async () => {
-    const postToRevoke = vi.fn(async (_body: URLSearchParams) => {})
-    const cookie = `${SESSION_COOKIE_NAME}=${serializeSession(session, KEY)}`
-    const app = createApp(config, { postToGoogle: vi.fn(), postToRevoke })
+describe('DELETE /api/connection', () => {
+  it.each([
+    ['valid', `${SESSION_COOKIE_NAME}=${serializeSession(session, KEY)}`],
+    ['invalid', `${SESSION_COOKIE_NAME}=not-a-valid-session`],
+    ['absent', undefined],
+  ])('clears the local session for a %s cookie without calling Google', async (_kind, cookie) => {
+    const postToGoogle = vi.fn()
+    const app = createApp(config, { postToGoogle })
 
-    const res = await app.request('/api/logout', {
-      method: 'POST',
-      headers: { Cookie: cookie },
+    const res = await app.request('/api/connection', {
+      method: 'DELETE',
+      headers: cookie ? { Cookie: cookie } : undefined,
     })
 
     expect(res.status).toBe(200)
-    expect(postToRevoke).toHaveBeenCalledWith(expect.any(URLSearchParams))
-    const body = postToRevoke.mock.calls[0]![0] as URLSearchParams
-    expect(body.get('token')).toBe('refresh')
-    expect(body.get('token_type_hint')).toBe('refresh_token')
+    expect(await res.json()).toEqual({ ok: true })
+    expect(postToGoogle).not.toHaveBeenCalled()
     const setCookie = res.headers.get('set-cookie') ?? ''
     expect(setCookie).toContain(`${SESSION_COOKIE_NAME}=`)
+    expect(setCookie).toContain('HttpOnly')
+    expect(setCookie).toContain('Secure')
+    expect(setCookie).toContain('SameSite=Lax')
+    expect(setCookie).toContain('Path=/')
     expect(setCookie).toContain('Max-Age=0')
-  })
-
-  it('clears the cookie even when there is no session (idempotent)', async () => {
-    const postToRevoke = vi.fn()
-    const app = createApp(config, { postToGoogle: vi.fn(), postToRevoke })
-
-    const res = await app.request('/api/logout', { method: 'POST' })
-
-    expect(res.status).toBe(200)
-    expect(postToRevoke).not.toHaveBeenCalled()
-    expect(res.headers.get('set-cookie')).toContain('Max-Age=0')
   })
 })

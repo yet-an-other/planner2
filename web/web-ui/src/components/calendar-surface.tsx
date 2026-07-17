@@ -245,10 +245,17 @@ export function CalendarSurface() {
         onJumpToToday={jumpToToday}
         onConnect={googleAccountConnection.connect}
         onDisconnect={() => {
-          cancelPendingReconciliation()
-          cancelCalendarEventWork()
-          clearSavedBusyBlocks()
-          void googleAccountConnection.disconnect().finally(clearSavedBusyBlocks)
+          void googleAccountConnection
+            .disconnect()
+            .then(() => {
+              cancelPendingReconciliation()
+              cancelCalendarEventWork()
+              clearSavedBusyBlocks()
+            })
+            .catch(() => {
+              // The connection module keeps the connected state and reports the
+              // actionable Header Status error.
+            })
         }}
         onOpenSourceCalendars={sourceCalendars.openPicker}
         sourceCalendarsLoading={sourceCalendars.isLoadingList}

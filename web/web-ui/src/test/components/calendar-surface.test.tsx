@@ -115,27 +115,74 @@ describe('Google Account Connection', () => {
     expect(screen.getByRole('checkbox', { name: /primary/i })).toBeChecked()
   })
 
-  it('disconnects a Google Account and returns to the connect state', async () => {
+  it('disconnects on this device only after local deletion succeeds', async () => {
     setRuntimeConfig({ googleClientId: 'test-client-id' })
     const user = userEvent.setup()
-    stubSuccessfulGoogleConnection()
+    const fetchMock = stubSuccessfulGoogleConnection()
 
     render(<CalendarSurface />)
 
     await user.click(screen.getByRole('button', { name: /connect google/i }))
     await screen.findByText('Ada Lovelace')
-    await user.click(
-      screen.getByRole('button', {
-        name: /disconnect google account for ada lovelace/i,
-      }),
-    )
+    const disconnectButton = screen.getByRole('button', {
+      name: /disconnect on this device for ada lovelace/i,
+    })
+    await user.click(screen.getByRole('button', { name: /choose calendars/i }))
+    await screen.findByRole('dialog')
+    localStorage.setItem('planner.savedBusyBlocks', 'saved-shape')
+
+    fireEvent.click(disconnectButton)
 
     expect(
-      screen.getByRole('button', { name: /connect google account/i }),
+      await screen.findByRole('button', { name: /connect google account/i }),
     ).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent(
-      'Google account disconnected',
+      'Google account disconnected on this device',
     )
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/connection',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+    expect(screen.queryByRole('button', { name: /choose calendars/i })).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(localStorage.getItem('planner.savedBusyBlocks')).toBeNull()
+  })
+
+  it('stays visibly connected when local deletion fails', async () => {
+    setRuntimeConfig({ googleClientId: 'test-client-id' })
+    const user = userEvent.setup()
+    stubSuccessfulGoogleConnection({ connectionDeleteSucceeds: false })
+
+    render(<CalendarSurface />)
+
+    await user.click(screen.getByRole('button', { name: /connect google/i }))
+    await screen.findByText('Ada Lovelace')
+    const disconnectButton = screen.getByRole('button', {
+      name: /disconnect on this device for ada lovelace/i,
+    })
+    await user.click(screen.getByRole('button', { name: /choose calendars/i }))
+    const picker = await screen.findByRole('dialog')
+    localStorage.setItem('planner.savedBusyBlocks', 'saved-shape')
+
+    fireEvent.click(disconnectButton)
+
+    await waitFor(() =>
+      expect(document.querySelector('[role="status"]')).toHaveTextContent(
+        'Could not disconnect Google account on this device. Try again',
+      ),
+    )
+    expect(picker).toBeInTheDocument()
+    await user.click(within(picker).getByRole('button', { name: 'Cancel' }))
+    expect(
+      screen.getByRole('button', {
+        name: /disconnect on this device for ada lovelace/i,
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /choose calendars/i })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Could not disconnect Google account on this device. Try again',
+    )
+    expect(localStorage.getItem('planner.savedBusyBlocks')).toBe('saved-shape')
   })
 })
 
@@ -339,6 +386,8 @@ describe('Account lifecycle and error recovery', () => {
     const user = userEvent.setup()
     const mockFetch = stubSuccessfulGoogleConnectionWithEvents()
     const today = toLocalDate(new Date(2026, 5, 19))
+    const selectionKey = 'planner.sourceCalendars.ada@example.com'
+    localStorage.removeItem(selectionKey)
 
     render(<CalendarSurface />)
 
@@ -347,14 +396,16 @@ describe('Account lifecycle and error recovery', () => {
     await vi.waitFor(() => {
       expect(eventsFetchCount(mockFetch)).toBeGreaterThanOrEqual(1)
     })
+    localStorage.setItem(selectionKey, '["primary"]')
 
     // Disconnecting clears the event array and resets the Fetched Window: a
     // subsequent scroll must not fire any slab fetch.
     await user.click(
       screen.getByRole('button', {
-        name: /disconnect google account for ada lovelace/i,
+        name: /disconnect on this device for ada lovelace/i,
       }),
     )
+    expect(localStorage.getItem(selectionKey)).toBe('["primary"]')
     mockFetch.mockClear()
 
     const { scrollIntoFutureTrigger } = mountScrollSurface(today)
@@ -576,7 +627,7 @@ describe('Event Detail Popover', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: /disconnect google account for ada/i,
+        name: /disconnect on this device for ada/i,
       }),
     )
 
@@ -642,11 +693,10 @@ function mountScrollSurface(today: Date) {
   return { surface, scrollIntoFutureTrigger }
 }
 
-function stubSuccessfulGoogleConnection() {
+function stubSuccessfulGoogleConnection(
+  { connectionDeleteSucceeds = true }: { connectionDeleteSucceeds?: boolean } = {},
+) {
   const requestCode = vi.fn()
-  const revoke = vi.fn((_accessToken: string, done: () => void) => {
-    done()
-  })
   const initCodeClient = vi.fn(({ callback }) => {
     requestCode.mockImplementation(() => {
       callback({ code: 'the-code' })
@@ -656,44 +706,40 @@ function stubSuccessfulGoogleConnection() {
   })
 
   vi.stubGlobal('google', {
-    accounts: {
-      oauth2: {
-        initCodeClient,
-        revoke,
-      },
-    },
+    accounts: { oauth2: { initCodeClient } },
   })
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString()
-      if (url === '/api/auth/callback')
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            accessToken: 'access-token',
-            profile: {
-              email: 'ada@example.com',
-              displayName: 'Ada Lovelace',
-              initials: 'AL',
-              pictureUrl: 'https://example.com/ada.png',
-            },
-          }),
-        })
-      if (url === '/api/token')
-        return Promise.resolve({ ok: false, status: 401, json: async () => ({}) })
-      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) })
-    }),
-  )
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString()
+    if (url === '/api/auth/callback')
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          accessToken: 'access-token',
+          profile: {
+            email: 'ada@example.com',
+            displayName: 'Ada Lovelace',
+            initials: 'AL',
+            pictureUrl: 'https://example.com/ada.png',
+          },
+        }),
+      })
+    if (url === '/api/token')
+      return Promise.resolve({ ok: false, status: 401, json: async () => ({}) })
+    if (url === '/api/connection')
+      return Promise.resolve({
+        ok: connectionDeleteSucceeds,
+        status: connectionDeleteSucceeds ? 200 : 503,
+        json: async () => ({ ok: connectionDeleteSucceeds }),
+      })
+    return Promise.resolve({ ok: true, json: async () => ({ items: [] }) })
+  })
+  vi.stubGlobal('fetch', fetchMock)
 
-  return { revoke }
+  return fetchMock
 }
 
 function stubSuccessfulGoogleConnectionWithEvents() {
   const requestCode = vi.fn()
-  const revoke = vi.fn((_accessToken: string, done: () => void) => {
-    done()
-  })
   const initCodeClient = vi.fn(({ callback }) => {
     requestCode.mockImplementation(() => {
       callback({ code: 'the-code' })
@@ -703,12 +749,7 @@ function stubSuccessfulGoogleConnectionWithEvents() {
   })
 
   vi.stubGlobal('google', {
-    accounts: {
-      oauth2: {
-        initCodeClient,
-        revoke,
-      },
-    },
+    accounts: { oauth2: { initCodeClient } },
   })
 
   const mockFetch = vi.fn((input: RequestInfo | URL) => {
@@ -779,6 +820,10 @@ function stubSuccessfulGoogleConnectionWithEvents() {
       })
     }
 
+    if (url === '/api/connection') {
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true }) })
+    }
+
     return Promise.resolve({ ok: false })
   })
 
@@ -789,9 +834,6 @@ function stubSuccessfulGoogleConnectionWithEvents() {
 
 function stubSuccessfulGoogleConnectionWithDeferredEvents() {
   const requestCode = vi.fn()
-  const revoke = vi.fn((_accessToken: string, done: () => void) => {
-    done()
-  })
   const initCodeClient = vi.fn(({ callback }) => {
     requestCode.mockImplementation(() => {
       callback({ code: 'the-code' })
@@ -801,12 +843,7 @@ function stubSuccessfulGoogleConnectionWithDeferredEvents() {
   })
 
   vi.stubGlobal('google', {
-    accounts: {
-      oauth2: {
-        initCodeClient,
-        revoke,
-      },
-    },
+    accounts: { oauth2: { initCodeClient } },
   })
 
   const pendingSlabResolvers: Array<{
@@ -879,6 +916,10 @@ function stubSuccessfulGoogleConnectionWithDeferredEvents() {
         ok: true,
         json: async () => ({ items: [] }),
       })
+    }
+
+    if (url === '/api/connection') {
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true }) })
     }
 
     return Promise.resolve({ ok: false })

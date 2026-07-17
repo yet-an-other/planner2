@@ -12,7 +12,7 @@ Behavioral material extracted from the former single-context glossary during the
 - A **Calendar Header** contains one **Header Status**.
 - An **Account Control** displays the **Google Account Connection** state.
 - A **Google Account Connection** is either connected or disconnected.
-- A **Google Account Connection** persists across browser sessions until explicit disconnect or ~30 days of inactivity (ADR 0005).
+- A **Google Account Connection** persists across browser sessions until Disconnect on This Device or ~30 days of inactivity (ADR 0005).
 - A **Source Calendar** belongs to a connected **Google Account Connection**.
 - **Selected Source Calendars** is the subset of **Source Calendars** the user has chosen; Planner fetches **Calendar Events** only from these.
 - A **Calendar Event** belongs to exactly one **Source Calendar**.
@@ -59,7 +59,7 @@ Behavioral material extracted from the former single-context glossary during the
 > **Dev:** "Should the first version of the planner include tasks or events?"
 > **Domain expert:** "No — the first version is only the **Calendar Surface**, anchored on **Today** in the viewer's local timezone."
 >
-> **Dev:** "What happens to Calendar Events when the user disconnects their Google Account Connection?"
+> **Dev:** "What happens to Calendar Events after Disconnect on This Device?"
 > **Domain expert:** "The Calendar Surface falls back to **Saved Busy Blocks** — placeholders that keep the shape of the calendar without exposing the original event titles."
 >
 > **Dev:** "If a **Calendar Event** changes in Google Calendar while Planner is open, when does it update?"

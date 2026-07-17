@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  deleteGoogleAccountConnection,
   fetchAccessToken,
   postAuthCallback,
-  postLogout,
   requestGoogleAuthorizationCode,
   type GoogleAccountProfile,
 } from './google-account-connection'
@@ -38,8 +38,9 @@ export type GoogleAccountConnection = {
   status: HeaderStatus | null
   /** Begin the Google OAuth connect flow. No-op when not configured. */
   connect: () => void
-  /** Disconnect via the backend — `/api/logout` revokes the refresh token at
-   * Google and clears the session cookie. No-op when already disconnected. */
+  /** Disconnect on This Device by deleting only this browser profile's
+   * backend session. Rejects without changing connection state when deletion
+   * fails. No-op when already disconnected. */
   disconnect: () => Promise<void>
   /**
    * Refreshes the access token from the backend (which refreshes server-side if
@@ -100,7 +101,7 @@ export function useGoogleAccountConnection(
       } catch {
         // No session (401) or a transient network error: leave the default
         // disconnected state. Restore is silent so it never clobbers a status
-        // set by an explicit connect/disconnect.
+        // set by an explicit Connect or Disconnect on This Device.
       }
     })()
     return () => {
@@ -178,14 +179,21 @@ export function useGoogleAccountConnection(
       return
     }
 
-    setStatus({ message: 'Disconnecting…', tone: 'info' })
+    setStatus({ message: 'Disconnecting on this device…', tone: 'info' })
     try {
-      await postLogout()
-    } catch {
-      // Best-effort: clear the local connection even if the server revoke failed.
+      await deleteGoogleAccountConnection()
+    } catch (error) {
+      setStatus({
+        message: 'Could not disconnect Google account on this device. Try again',
+        tone: 'error',
+      })
+      throw error
     }
     setConnection({ status: 'disconnected' })
-    setStatus({ message: 'Google account disconnected', tone: 'info' })
+    setStatus({
+      message: 'Google account disconnected on this device',
+      tone: 'info',
+    })
   }, [connection])
 
   const statusWithFallback = status ?? (isConfigured ? null : NOT_CONFIGURED_STATUS)

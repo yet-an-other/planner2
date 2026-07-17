@@ -49,16 +49,6 @@ const app = createApp(
       }
       return (await response.json()) as GoogleTokensResponse
     },
-    postToRevoke: async (body) => {
-      const response = await fetch('https://oauth2.googleapis.com/revoke', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body.toString(),
-      })
-      if (!response.ok) {
-        throw new Error('Google token revocation failed')
-      }
-    },
   },
 )
 

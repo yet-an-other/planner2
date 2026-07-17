@@ -10,8 +10,8 @@ The Planner was a backend-less browser SPA (ADR 0003). Its Google Account
 Connection used Google Identity Services' token client with `prompt: 'consent'`,
 keeping only a short-lived access token (1 hour) in React state — so every page
 reload disconnected the user and every connect re-showed the consent screen. The
-product needs the connection to persist for about a month, or until explicit
-disconnect, without re-consent.
+product needs the connection to persist for about a month, or until Disconnect
+on This Device, without re-consent.
 
 That is impossible client-side: GIS access tokens expire in 1 hour, the
 token-client flow issues no refresh token, and only the authorization-code flow
@@ -29,7 +29,7 @@ The backend is a single Node.js + TypeScript server (Hono), hosted in the
 project's self-hosted k8s cluster, that serves the built SPA at `/` and the API
 at `/api/*` on one origin — making the session cookie strictly first-party by
 construction. Node + TypeScript is chosen to share one toolchain and types with
-the SPA; the deep token-exchange/refresh/encrypt/revoke logic is kept as a
+the SPA; the deep token-exchange/refresh/encrypt logic is kept as a
 runtime-agnostic core so the runtime can change without rewriting it.
 
 - **Connect** — the SPA uses the GIS *code client* (popup) to obtain a one-time
@@ -39,13 +39,13 @@ runtime-agnostic core so the runtime can change without rewriting it.
 - **Token** — `/api/token` decrypts the cookie, returns the cached access token
   if still valid, otherwise refreshes via Google and re-encrypts/re-sets the
   cookie. The SPA calls this on load and retries once on any `401`.
-- **Logout** — `/api/logout` revokes the refresh token at Google and clears the
-  cookie.
+- **Disconnect on This Device** — `DELETE /api/connection` clears the encrypted
+  session cookie without revoking the Google Authorization Grant.
 
 The SPA keeps calling the Google Calendar API directly (the existing
 fetch/normalization layer is unchanged); the backend never proxies calendar
 data. Sessions slide: each refresh re-sets the cookie's 30-day `Max-Age`, so the
-connection survives until explicit disconnect or ~30 days of inactivity.
+connection survives until Disconnect on This Device or ~30 days of inactivity.
 
 ## Consequences
 
@@ -57,8 +57,9 @@ connection survives until explicit disconnect or ~30 days of inactivity.
 - **Refresh tokens never reach the browser.** The cookie is `HttpOnly`; the only
   credential exposed to the page is the 1-hour access token — same exposure as
   today, but now refreshable without a popup.
-- **Per-device sessions.** Each browser gets its own cookie + refresh token, with
-  no cross-device session list and no "logout everywhere" without a future store.
+- **Browser-profile connections.** Each browser profile gets its own cookie and
+  refresh token, with no cross-device connection list and no Disconnect
+  Everywhere capability without a future store.
 - **Refresh failure is non-fatal.** If Google revokes the grant, `/api/token`
   returns disconnected and the Calendar Surface falls back to Saved Busy Blocks
   (ADR 0001), prompting a normal reconnect.
@@ -73,7 +74,7 @@ connection survives until explicit disconnect or ~30 days of inactivity.
   backend and rewrites a thick, tested fetch/normalization layer for a marginal
   access-token-privacy gain.
 - **Stateful store (DB/KV) for refresh tokens.** Rejected for v1: adds infra for
-  "logout everywhere"/reuse-detection the product doesn't need.
+  Disconnect Everywhere and reuse detection that the product doesn't need.
 - **Managed auth (Supabase/Firebase Auth).** Rejected: doesn't cleanly manage
   Google Calendar-scope token refresh and adds platform lock-in for three
   endpoints' worth of work.

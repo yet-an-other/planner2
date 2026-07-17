@@ -15,7 +15,6 @@ const config: AppConfig = {
 function makeApp() {
   return createApp(config, {
     postToGoogle: vi.fn(),
-    postToRevoke: vi.fn(),
   })
 }
 

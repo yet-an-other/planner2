@@ -18,7 +18,6 @@ describe('privacy-safe access logging', () => {
     const now = vi.fn().mockReturnValueOnce(100).mockReturnValueOnce(112)
     const app = createApp(config, {
       postToGoogle: vi.fn(),
-      postToRevoke: vi.fn(),
       writeAccessLog: write,
       now,
     })
@@ -39,12 +38,11 @@ describe('privacy-safe access logging', () => {
     const write = vi.fn<(line: string) => void>()
     const app = createApp(config, {
       postToGoogle: vi.fn(),
-      postToRevoke: vi.fn(),
       writeAccessLog: write,
     })
 
-    await app.request('/api/logout?token=query-secret', {
-      method: 'POST',
+    await app.request('/api/connection?token=query-secret', {
+      method: 'DELETE',
       headers: {
         Authorization: 'Bearer header-secret',
         Cookie: 'planner_session=cookie-secret',
@@ -58,14 +56,13 @@ describe('privacy-safe access logging', () => {
     expect(line).not.toContain('header-secret')
     expect(line).not.toContain('cookie-secret')
     expect(line).not.toContain('body-secret')
-    expect(JSON.parse(line).path).toBe('/api/logout')
+    expect(JSON.parse(line).path).toBe('/api/connection')
   })
 
   it('omits health-probe requests', async () => {
     const write = vi.fn<(line: string) => void>()
     const app = createApp(config, {
       postToGoogle: vi.fn(),
-      postToRevoke: vi.fn(),
       writeAccessLog: write,
     })
 

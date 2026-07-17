@@ -35,7 +35,6 @@ type GoogleIdentityServices = {
         prompt: string
         callback: (response: GoogleCodeResponse) => void
       }) => GoogleCodeClient
-      revoke: (accessToken: string, done: () => void) => void
     }
   }
 }
@@ -100,13 +99,12 @@ export async function fetchAccessToken(): Promise<TokenResponse> {
   return (await response.json()) as TokenResponse
 }
 
-/** POSTs to the backend to revoke the Google grant and clear the session
- * cookie. Best-effort on the client: the caller clears the local connection
- * regardless, so a transient server failure still logs the user out here. */
-export async function postLogout(): Promise<void> {
-  const response = await fetch('/api/logout', { method: 'POST' })
+/** Removes this browser profile's Google Account Connection by asking the
+ * same-origin backend to clear its HttpOnly session cookie. */
+export async function deleteGoogleAccountConnection(): Promise<void> {
+  const response = await fetch('/api/connection', { method: 'DELETE' })
 
   if (!response.ok) {
-    throw new Error('Google disconnect failed')
+    throw new Error('Google connection could not be removed from this device')
   }
 }

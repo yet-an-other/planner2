@@ -3,7 +3,6 @@ import {
   exchangeAuthCode,
   decodeIdToken,
   refreshIfNeeded,
-  revokeRefreshToken,
   GoogleTokenError,
   type GoogleTokensResponse,
   type TokenExchangeConfig,
@@ -126,31 +125,6 @@ describe('refreshIfNeeded', () => {
 
     expect(fresh.status).toBe('fresh')
     expect(stale.status).toBe('refreshed')
-  })
-})
-
-describe('revokeRefreshToken', () => {
-  it('posts the refresh token to the revocation endpoint', async () => {
-    const postToRevoke = vi.fn(async (_body: URLSearchParams) => {})
-    const session: Session = {
-      accessToken: 'a',
-      accessTokenExpiresAt: 0,
-      refreshToken: 'the-refresh',
-      profile: {
-        email: 'u@example.com',
-        displayName: 'U',
-        initials: 'U',
-        pictureUrl: null,
-      },
-    }
-
-    await revokeRefreshToken(session, { postToRevoke })
-
-    expect(postToRevoke).toHaveBeenCalledTimes(1)
-    expect(postToRevoke).toHaveBeenCalledWith(expect.any(URLSearchParams))
-    const body = postToRevoke.mock.calls[0]![0] as URLSearchParams
-    expect(body.get('token')).toBe('the-refresh')
-    expect(body.get('token_type_hint')).toBe('refresh_token')
   })
 })
 

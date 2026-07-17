@@ -89,7 +89,7 @@ describe('useGoogleAccountConnection', () => {
     expect(result.current.connection.status).toBe('disconnected')
   })
 
-  it('disconnects via POST /api/logout and reports the disconnected status', async () => {
+  it('disconnects via DELETE /api/connection only after the request succeeds', async () => {
     stubCodeIdentity({ code: 'the-code' })
     const fetchMock = stubBackend({
       profile: PROFILE,
@@ -109,12 +109,42 @@ describe('useGoogleAccountConnection', () => {
     await waitFor(() => expect(result.current.connection.status).toBe('disconnected'))
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/logout',
-      expect.objectContaining({ method: 'POST' }),
+      '/api/connection',
+      expect.objectContaining({ method: 'DELETE' }),
     )
     expect(result.current.status).toEqual({
-      message: 'Google account disconnected',
+      message: 'Google account disconnected on this device',
       tone: 'info',
+    })
+  })
+
+  it('stays connected and reports an actionable error when local deletion fails', async () => {
+    stubCodeIdentity({ code: 'the-code' })
+    stubBackend({
+      profile: PROFILE,
+      accessToken: 'access-token',
+      hasSession: false,
+      connectionDeleteSucceeds: false,
+    })
+    const { result } = renderHook(() =>
+      useGoogleAccountConnection('test-client-id'),
+    )
+
+    await act(async () => {
+      result.current.connect()
+    })
+    await waitFor(() => expect(result.current.connection.status).toBe('connected'))
+
+    await act(async () => {
+      await expect(result.current.disconnect()).rejects.toThrow(
+        'Google connection could not be removed from this device',
+      )
+    })
+
+    expect(result.current.connection.status).toBe('connected')
+    expect(result.current.status).toEqual({
+      message: 'Could not disconnect Google account on this device. Try again',
+      tone: 'error',
     })
   })
 
@@ -217,9 +247,6 @@ type CodeResponse = {
 }
 
 function stubCodeIdentity(codeResponse: CodeResponse) {
-  const revoke = vi.fn((_token: string, done: () => void) => {
-    done()
-  })
   let codeClientConfig: Record<string, unknown> = {}
   const requestCode = vi.fn()
   const initCodeClient = vi.fn((config: Record<string, unknown>) => {
@@ -230,27 +257,33 @@ function stubCodeIdentity(codeResponse: CodeResponse) {
   })
 
   vi.stubGlobal('google', {
-    accounts: { oauth2: { initCodeClient, revoke } },
+    accounts: { oauth2: { initCodeClient } },
   })
 
-  return { revoke, requestCode, getCodeClientConfig: () => codeClientConfig }
+  return { requestCode, getCodeClientConfig: () => codeClientConfig }
 }
 
 function stubBackend({
   profile,
   accessToken,
   hasSession,
+  connectionDeleteSucceeds = true,
 }: {
   profile: GoogleAccountProfile
   accessToken: string
   hasSession: boolean
+  connectionDeleteSucceeds?: boolean
 }) {
   const fetchMock = vi.fn(async (url: string) => {
     if (url === '/api/auth/callback') {
       return { ok: true, json: async () => ({ accessToken, profile }) }
     }
-    if (url === '/api/logout') {
-      return { ok: true, json: async () => ({ ok: true }) }
+    if (url === '/api/connection') {
+      return {
+        ok: connectionDeleteSucceeds,
+        status: connectionDeleteSucceeds ? 200 : 503,
+        json: async () => ({ ok: connectionDeleteSucceeds }),
+      }
     }
     if (url === '/api/token') {
       return hasSession

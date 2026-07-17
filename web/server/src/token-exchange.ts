@@ -120,27 +120,6 @@ export async function refreshIfNeeded(
   }
 }
 
-/** Injectable Google revocation call, so logout is unit-testable offline. */
-export type RevokeDeps = {
-  postToRevoke: (body: URLSearchParams) => Promise<void>
-}
-
-/**
- * Revokes the session's refresh token at Google (which also invalidates any
- * derived access token), severing the grant on explicit disconnect. No config
- * is needed — the revocation endpoint takes only the token.
- */
-export async function revokeRefreshToken(
-  session: Session,
-  deps: RevokeDeps,
-): Promise<void> {
-  const body = new URLSearchParams({
-    token: session.refreshToken,
-    token_type_hint: 'refresh_token',
-  })
-  await deps.postToRevoke(body)
-}
-
 /**
  * Decodes the profile from a Google `id_token` (a JWT) without verifying its
  * signature — the token arrives server-to-server over TLS from Google's own

@@ -14,8 +14,6 @@ import { httpPolicy } from './http-policy'
 import {
   exchangeAuthCode,
   refreshIfNeeded,
-  revokeRefreshToken,
-  type RevokeDeps,
   type TokenExchangeConfig,
   type TokenExchangeDeps,
 } from './token-exchange'
@@ -29,11 +27,10 @@ export type AppConfig = TokenExchangeConfig & {
 }
 
 /** Injectable Google HTTP collaborators plus operational logging seams. */
-export type AppDeps = TokenExchangeDeps &
-  RevokeDeps & {
-    writeAccessLog?: (line: string) => void
-    now?: () => number
-  }
+export type AppDeps = TokenExchangeDeps & {
+  writeAccessLog?: (line: string) => void
+  now?: () => number
+}
 
 /**
  * Builds the API Hono app. Config and the Google HTTP dependency are injected
@@ -103,16 +100,9 @@ export function createApp(config: AppConfig, deps: AppDeps): Hono {
     })
   })
 
-  app.post('/api/logout', async (c) => {
-    const session = parseSession(getCookie(c, SESSION_COOKIE_NAME), config.cookieKey)
-    if (session) {
-      try {
-        await revokeRefreshToken(session, deps)
-      } catch {
-        // Best-effort: clear the local session even if Google revocation failed
-        // (e.g. a transient network error) so the user is still logged out here.
-      }
-    }
+  app.delete('/api/connection', (c) => {
+    // Disconnect on This Device is deliberately local and idempotent. Clearing
+    // the cookie is sufficient even when it is absent, invalid, or expired.
     c.header('Set-Cookie', clearedSessionCookieHeader())
     return c.json({ ok: true })
   })
