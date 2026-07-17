@@ -240,6 +240,93 @@ describe('useGoogleAccountConnection', () => {
   })
 })
 
+describe('tab independence (no cross-tab synchronization)', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  it('does not affect a sibling tab when one tab disconnects', async () => {
+    const backend = stubSharedBackend({ profile: PROFILE, initiallyConnected: true })
+
+    const tabA = renderHook(() => useGoogleAccountConnection('test-client-id'))
+    const tabB = renderHook(() => useGoogleAccountConnection('test-client-id'))
+    await waitFor(() => expect(tabA.result.current.connection.status).toBe('connected'))
+    await waitFor(() => expect(tabB.result.current.connection.status).toBe('connected'))
+
+    await act(async () => {
+      await tabA.result.current.disconnect()
+    })
+
+    expect(tabA.result.current.connection.status).toBe('disconnected')
+    // Tab B has made no request of its own since Tab A's disconnect, so it
+    // keeps showing connected from its own in-memory state — there is no
+    // broadcast that reaches it.
+    expect(tabB.result.current.connection.status).toBe('connected')
+    expect(backend.hasSession()).toBe(false)
+
+    // Only once Tab B makes its own request does it discover the cleared
+    // session, via the same ordinary 401 path used for a revoked grant.
+    await act(async () => {
+      await expect(tabB.result.current.refreshAccessToken()).rejects.toBeDefined()
+    })
+    expect(tabB.result.current.connection.status).toBe('disconnected')
+  })
+
+  it('does not affect a sibling tab when one tab connects', async () => {
+    const backend = stubSharedBackend({ profile: PROFILE, initiallyConnected: false })
+    stubCodeIdentity({ code: 'the-code' })
+
+    const tabA = renderHook(() => useGoogleAccountConnection('test-client-id'))
+    const tabB = renderHook(() => useGoogleAccountConnection('test-client-id'))
+    await waitFor(() => expect(tabA.result.current.connection.status).toBe('disconnected'))
+    await waitFor(() => expect(tabB.result.current.connection.status).toBe('disconnected'))
+
+    await act(async () => {
+      tabA.result.current.connect()
+    })
+    await waitFor(() => expect(tabA.result.current.connection.status).toBe('connected'))
+
+    // Tab B never called connect and never restored again, so it remains
+    // disconnected in its own state — there is no broadcast that reaches it.
+    expect(tabB.result.current.connection.status).toBe('disconnected')
+    expect(backend.hasSession()).toBe(true)
+  })
+
+  it('keeps two simulated browser profiles fully isolated', async () => {
+    stubProfileFetch({ profile: PROFILE, hasSession: true })
+    const { result: tabInProfileOne } = renderHook(() =>
+      useGoogleAccountConnection('test-client-id'),
+    )
+    await waitFor(() =>
+      expect(tabInProfileOne.current.connection.status).toBe('connected'),
+    )
+    await act(async () => {
+      await tabInProfileOne.current.disconnect()
+    })
+    expect(tabInProfileOne.current.connection.status).toBe('disconnected')
+
+    // A second, independent browser profile (its own mocked backend/cookie
+    // jar) is entirely unaffected by the first profile's disconnect.
+    const otherProfile = {
+      email: 'grace@example.com',
+      displayName: 'Grace Hopper',
+      initials: 'GH',
+      pictureUrl: 'https://example.com/grace.png',
+    }
+    stubProfileFetch({ profile: otherProfile, hasSession: true })
+    const { result: tabInProfileTwo } = renderHook(() =>
+      useGoogleAccountConnection('test-client-id'),
+    )
+    await waitFor(() =>
+      expect(tabInProfileTwo.current.connection.status).toBe('connected'),
+    )
+    expect(tabInProfileTwo.current.connection).toMatchObject({
+      profile: { displayName: 'Grace Hopper' },
+    })
+  })
+})
+
 type CodeResponse = {
   code?: string
   error?: string
@@ -288,6 +375,69 @@ function stubBackend({
     if (url === '/api/token') {
       return hasSession
         ? { ok: true, json: async () => ({ accessToken, profile }) }
+        : { ok: false, status: 401, json: async () => ({}) }
+    }
+    return { ok: false, json: async () => ({}) }
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+/**
+ * A single mocked backend shared by two independent hook instances — the
+ * shape of one real browser profile's cookie jar, observed from multiple
+ * tabs. Session state lives in one place so a real `DELETE /api/connection`
+ * or successful `/api/auth/callback` call from either tab changes what the
+ * *other* tab would see on its own next request, without any direct channel
+ * between them.
+ */
+function stubSharedBackend({
+  profile,
+  initiallyConnected,
+}: {
+  profile: GoogleAccountProfile
+  initiallyConnected: boolean
+}) {
+  let hasSession = initiallyConnected
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url === '/api/auth/callback') {
+      hasSession = true
+      return { ok: true, json: async () => ({ accessToken: 'access-token', profile }) }
+    }
+    if (url === '/api/connection') {
+      hasSession = false
+      return { ok: true, json: async () => ({ ok: true }) }
+    }
+    if (url === '/api/token') {
+      return hasSession
+        ? { ok: true, json: async () => ({ accessToken: 'access-token', profile }) }
+        : { ok: false, status: 401, json: async () => ({}) }
+    }
+    return { ok: false, json: async () => ({}) }
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return { fetchMock, hasSession: () => hasSession }
+}
+
+/**
+ * Stubs `fetch` for exactly one hook mount's worth of restore, standing in
+ * for one independent browser profile with its own backend/cookie jar. Used
+ * to prove that two separately mocked profiles never interact.
+ */
+function stubProfileFetch({
+  profile,
+  hasSession,
+}: {
+  profile: GoogleAccountProfile
+  hasSession: boolean
+}) {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url === '/api/connection') {
+      return { ok: true, json: async () => ({ ok: true }) }
+    }
+    if (url === '/api/token') {
+      return hasSession
+        ? { ok: true, json: async () => ({ accessToken: 'access-token', profile }) }
         : { ok: false, status: 401, json: async () => ({}) }
     }
     return { ok: false, json: async () => ({}) }
