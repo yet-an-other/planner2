@@ -64,7 +64,7 @@ describe('CI workflow policy', () => {
       'helm template planner deploy/charts/planner-bootstrap',
       'bash -n deploy/bootstrap.sh deploy/test/container-smoke.sh',
       'shellcheck deploy/bootstrap.sh deploy/test/container-smoke.sh',
-      'rhysd/actionlint:1.7.7',
+      'rhysd/actionlint:1.7.12',
       'docker build --tag planner:pr web',
       'bash web/deploy/test/container-smoke.sh planner:pr',
     ]) assert.ok(text.includes(command), `missing CI command: ${command}`)
