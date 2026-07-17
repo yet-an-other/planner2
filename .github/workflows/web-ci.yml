@@ -62,7 +62,7 @@ jobs:
           sudo apt-get install --yes shellcheck
           shellcheck deploy/bootstrap.sh deploy/test/container-smoke.sh
       - name: Validate workflows
-        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
 
   container-smoke:
     if: github.event_name == 'pull_request'
