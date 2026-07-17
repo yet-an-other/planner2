@@ -1,0 +1,19 @@
+// Build-time release gate and environment-specific inputs for the iOS
+// Google Account Connection.
+//
+// The committed defaults keep the gate OFF: the app initializes no
+// connection behavior, the iOS Calendar Header keeps its accepted 100-point
+// form, and CI and ordinary builds need no Google credentials.
+//
+// To enable the gate in a development build, copy
+// GoogleConnection.local.xcconfig.example to GoogleConnection.local.xcconfig
+// (git-ignored) and fill in the environment-specific values. The local file
+// is included after these defaults so it wins.
+
+PLANNER_GOOGLE_CONNECTION_ENABLED = NO
+PLANNER_GOOGLE_CLIENT_ID =
+PLANNER_GOOGLE_REVERSED_CLIENT_ID =
+PLANNER_PRIVACY_POLICY_URL =
+PLANNER_GOOGLE_CONNECTION_INFOPLIST_DEFINITIONS =
+
+#include? "GoogleConnection.local.xcconfig"

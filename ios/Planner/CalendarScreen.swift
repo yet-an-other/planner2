@@ -9,15 +9,18 @@ struct CalendarScreen: View {
     @State private var midnightScheduleGeneration = 0
 
     private let currentEnvironment: @MainActor () -> CalendarEnvironment
+    private let accountConnection: GoogleAccountConnectionConfiguration
 
     init(
         environment: CalendarEnvironment,
-        currentEnvironment: @escaping @MainActor () -> CalendarEnvironment
+        currentEnvironment: @escaping @MainActor () -> CalendarEnvironment,
+        accountConnection: GoogleAccountConnectionConfiguration = .gatedOff
     ) {
         let model = CalendarGridModel(environment: environment)
         _model = State(initialValue: model)
         _scrollPosition = State(initialValue: model.todayWeek.id)
         self.currentEnvironment = currentEnvironment
+        self.accountConnection = accountConnection
     }
 
     var body: some View {
@@ -25,7 +28,9 @@ struct CalendarScreen: View {
             IOSCalendarHeader(
                 visibleMonth: model.visibleMonth,
                 weekdayLabels: model.weekdayLabels,
-                onJumpToToday: jumpToToday
+                onJumpToToday: jumpToToday,
+                accountControl: { accountControl },
+                headerStatus: { headerStatus }
             )
 
             ScrollView(.vertical, showsIndicators: true) {
@@ -72,6 +77,42 @@ struct CalendarScreen: View {
         }
         .task(id: midnightScheduleGeneration) {
             await refreshAtNextLocalMidnight()
+        }
+    }
+
+    /// The iOS Account Control mounted through the header's trailing seam.
+    /// While the build-time release gate is off, no connection behavior is
+    /// initialized and the seam stays empty. An enabled build with missing
+    /// or invalid configuration disables Connect through Google's supplied
+    /// disabled state.
+    @ViewBuilder
+    private var accountControl: some View {
+        switch accountConnection {
+        case .gatedOff:
+            EmptyView()
+        case .unconfigured:
+            IOSAccountControl(connectEnabled: false)
+        case .configured:
+            IOSAccountControl(connectEnabled: true)
+        }
+    }
+
+    /// The iOS Header Status mounted through the header's status seam. While
+    /// the gate is on, the row always reserves its 20 points so messages
+    /// never move the Calendar Grid; an unconfigured build reports that
+    /// Connect is unavailable.
+    @ViewBuilder
+    private var headerStatus: some View {
+        switch accountConnection {
+        case .gatedOff:
+            EmptyView()
+        case .unconfigured:
+            IOSHeaderStatus(
+                message: GoogleAccountConnectionCopy.unconfigured,
+                tone: .warning
+            )
+        case .configured:
+            IOSHeaderStatus(message: nil, tone: .info)
         }
     }
 
@@ -303,6 +344,89 @@ struct DateCellView: View {
         currentEnvironment: { environment }
     )
     .frame(width: 507, height: 700)
+}
+
+#Preview("Account Control · Compact") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        accountConnection: previewConfiguredConnection()
+    )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Wide") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        accountConnection: previewConfiguredConnection()
+    )
+    .frame(width: 834, height: 1_194)
+}
+
+#Preview("Account Control · Unconfigured") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        accountConnection: .unconfigured
+    )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Long Visible Month · Compact") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "es_ES",
+        month: 9
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        accountConnection: previewConfiguredConnection()
+    )
+    .frame(width: 320, height: 700)
+}
+
+#Preview("Account Control · Right to Left") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "ar_SA",
+        month: 9
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        accountConnection: previewConfiguredConnection()
+    )
+    .frame(width: 507, height: 700)
+}
+
+/// A complete, valid connection configuration for deterministic shell
+/// previews. The values are placeholders, not real OAuth credentials.
+@MainActor
+private func previewConfiguredConnection() -> GoogleAccountConnectionConfiguration {
+    guard let privacyPolicyURL = URL(string: "https://planner.example/privacy")
+    else {
+        preconditionFailure("The preview Privacy Policy URL must be valid")
+    }
+
+    return .configured(
+        GoogleAccountConnectionConfiguration.Configured(
+            clientID: "1050123456789-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com",
+            reversedClientID: "com.googleusercontent.apps.1050123456789-abcdefghijklmnopqrstuvwxyz012345",
+            privacyPolicyURL: privacyPolicyURL
+        )
+    )
 }
 
 @MainActor

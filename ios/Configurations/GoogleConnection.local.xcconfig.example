@@ -1,0 +1,27 @@
+// Development-local Google Account Connection inputs. Copy this file to
+// GoogleConnection.local.xcconfig and supply the values for your Google
+// Cloud environment. The local file is git-ignored; never commit real OAuth
+// client configuration.
+//
+// Enabling the gate:
+// - mounts the iOS Account Control and the fixed iOS Header Status row, and
+// - registers the reversed client ID as the OAuth callback URL scheme.
+//
+// Planner accepts no Google client secret: an installed app cannot keep
+// one, so no such setting exists.
+
+PLANNER_GOOGLE_CONNECTION_ENABLED = YES
+
+// The iOS OAuth client ID from the Google Cloud project, and its reversed
+// form (the client ID's dotted components in reverse order), which Google
+// uses as the authorization callback URL scheme. The values below are
+// placeholders shaped like real ones.
+PLANNER_GOOGLE_CLIENT_ID = 1050123456789-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com
+PLANNER_GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.1050123456789-abcdefghijklmnopqrstuvwxyz012345
+
+// The public HTTPS Privacy Policy presented before the first Connect. The
+// empty substitution $() keeps the // in the URL from starting a comment.
+PLANNER_PRIVACY_POLICY_URL = https:/$()/planner.example/privacy
+
+// Registers the callback URL scheme in the app bundle's Info.plist.
+PLANNER_GOOGLE_CONNECTION_INFOPLIST_DEFINITIONS = PLANNER_GOOGLE_CONNECTION

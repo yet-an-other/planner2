@@ -16,4 +16,6 @@ enum PlannerPalette {
     static let weekendCell = Color(red: 0.980, green: 0.969, blue: 0.929)
     static let separator = Color(red: 0.851, green: 0.820, blue: 0.741)
     static let emphasizedControl = Color(red: 0.922, green: 0.890, blue: 0.820)
+    static let statusWarning = Color(red: 0.541, green: 0.353, blue: 0.0)
+    static let statusError = Color(red: 0.639, green: 0.176, blue: 0.129)
 }

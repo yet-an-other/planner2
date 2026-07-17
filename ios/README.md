@@ -6,7 +6,7 @@ This directory is Planner's self-contained native delivery stack. It builds a un
 
 - macOS with the full Xcode 26.6 application installed at `/Applications/Xcode.app`
 - The iOS 18.5 Simulator runtime for the documented test destination
-- No package manager, project generator, or third-party dependency
+- No package manager or project generator. The single reviewed third-party package, Google Sign-In for iOS 9.2.0, resolves through Swift Package Manager with the exact version and dependency graph pinned in [`Planner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`](Planner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved); the SDK's privacy manifests ship with the package. No Google credentials are needed to build, test, or run
 
 The application deployment target remains iOS/iPadOS 17.0. The locally installed runtimes do not include iOS 17, so execution on an actual iOS 17 runtime remains a required pre-release check.
 
@@ -21,6 +21,12 @@ open ios/Planner.xcodeproj
 Select the shared **Planner** scheme and an iPhone or iPad Simulator. A new process opens Today's Week Row at the top. The app supports iPhone portrait and landscape, all iPad orientations, Split View, and Stage Manager in one non-persistent scene.
 
 Simulator builds and tests do not require a development team. To run on a physical device, choose a personal team in your local Xcode settings; do not commit that team to the project.
+
+## Google connection release gate
+
+The iOS Account Control shell and iOS Header Status sit behind a build-time release gate that stays **off** in every committed configuration: the app then initializes no connection behavior and the iOS Calendar Header keeps its accepted 100-point form. The gate remains off for production until a Calendar-data feature provides visible value for the sensitive scope.
+
+To enable the shell in a development build, copy [`Configurations/GoogleConnection.local.xcconfig.example`](Configurations/GoogleConnection.local.xcconfig.example) to `Configurations/GoogleConnection.local.xcconfig` (git-ignored) and supply the environment-specific inputs: the iOS OAuth client ID, its reversed form (the OAuth callback URL scheme), and the public HTTPS Privacy Policy URL. With the gate on, missing or invalid values leave the iOS Calendar Surface usable, disable Connect, and report “Google connection is not configured” in the iOS Header Status. Planner accepts no Google client secret: an installed app cannot keep one, so no such setting exists.
 
 ## Command-line validation
 
@@ -79,6 +85,6 @@ The accepted behavior and manual validation matrix are recorded in [`docs/specs/
 
 ## Deliberate exclusions
 
-This delivery stack has no Calendar Events, date selection, navigation, Google Account Connection, Source Calendar, persistence, networking, permissions, analytics, settings, extensions, background-processing entitlement, or distribution automation. Scrolling and the Today Jump are the only product interactions.
+This delivery stack has no Calendar Events, date selection, navigation, Source Calendar, persistence, networking, permissions, analytics, settings, extensions, background-processing entitlement, or distribution automation. Scrolling and the Today Jump are the only product interactions. The Google Account Connection exists only as the gated shell above: the Connect flow, restoration, and disconnection behavior arrive in later slices, and the release gate keeps the addition inactive in default builds.
 
 Custom accessibility descriptions, accessibility-size layout tuning, formal accessibility automation, App Store submission, TestFlight, signing management, archiving, and iOS 17 runtime execution are deliberately deferred.

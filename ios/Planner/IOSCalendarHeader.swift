@@ -9,6 +9,12 @@ import SwiftUI
 /// Header Status through the header rather than accumulating authentication
 /// or status behavior inside the Calendar Screen.
 ///
+/// A mounted account control stays clear of the centered Visible Month: the
+/// header bounds the control so it collapses before the month is forced
+/// below its accepted minimum behavior, measures the mounted control, and
+/// shrinks the month's width cap symmetrically when the control needs more
+/// than the default side reservation.
+///
 /// When both seams are left at their default, the header renders neither and
 /// keeps its accepted 64-point title row plus 36-point weekday row: the
 /// account-control overlay and the header-status row contribute nothing when
@@ -16,6 +22,7 @@ import SwiftUI
 struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
     @FocusState private var visibleMonthFocused: Bool
     @State private var visibleMonthHovered = false
+    @State private var accountControlWidth = HeaderLayout.minimumSideReservation
 
     let visibleMonth: String
     let weekdayLabels: [WeekdayLabel]
@@ -40,10 +47,6 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             titleRow
-                .overlay(alignment: .trailing) {
-                    accountControl
-                        .padding(.horizontal, 16)
-                }
 
             headerStatus
 
@@ -72,7 +75,9 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
                         .minimumScaleFactor(0.8)
                         .truncationMode(.tail)
                         .frame(
-                            maxWidth: max(24, geometry.size.width - 288)
+                            maxWidth: visibleMonthMaxWidth(
+                                in: geometry.size.width
+                            )
                         )
                 }
                 .buttonStyle(
@@ -83,9 +88,48 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
                 .focused($visibleMonthFocused)
                 .onHover { visibleMonthHovered = $0 }
             }
+            .overlay(alignment: .trailing) {
+                accountControl
+                    .frame(
+                        maxWidth: accountControlBudget(in: geometry.size.width),
+                        alignment: .trailing
+                    )
+                    .padding(.horizontal, 16)
+                    .background {
+                        GeometryReader { controlGeometry in
+                            Color.clear.preference(
+                                key: AccountControlWidthKey.self,
+                                value: controlGeometry.size.width
+                            )
+                        }
+                    }
+            }
         }
         .frame(height: 64)
         .background(PlannerPalette.canvas)
+        .onPreferenceChange(AccountControlWidthKey.self) { width in
+            accountControlWidth = width
+        }
+    }
+
+    /// The Visible Month keeps its accepted minimum behavior while leading
+    /// and trailing controls stay clear: the reservation grows symmetrically
+    /// only when the mounted account control needs more than the default
+    /// side reservation, so the month remains centered and never overlaps.
+    private func visibleMonthMaxWidth(in width: CGFloat) -> CGFloat {
+        max(
+            24,
+            width - 2 * max(HeaderLayout.minimumSideReservation, accountControlWidth)
+        )
+    }
+
+    /// The account control may use up to half the row beyond the Visible
+    /// Month's minimum footprint and the trailing margin, so it collapses to
+    /// its compact form before the month is forced below its minimum
+    /// behavior. The cap keeps Google's expanding wide form from crowding
+    /// the center on wide layouts.
+    private func accountControlBudget(in width: CGFloat) -> CGFloat {
+        max(44, min(width / 2 - 28, 280))
     }
 
     private var weekdayRow: some View {
@@ -106,6 +150,22 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
         }
         .frame(height: 36)
         .background(PlannerPalette.weekdayStrip)
+    }
+}
+
+/// Layout constants for the iOS Calendar Header.
+private enum HeaderLayout {
+    /// The width each side of the title row reserves by default for the
+    /// Product Name and an optional account control, keeping the Visible
+    /// Month geometrically centered and clear of both.
+    static let minimumSideReservation: CGFloat = 144
+}
+
+private struct AccountControlWidthKey: PreferenceKey {
+    static let defaultValue = HeaderLayout.minimumSideReservation
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

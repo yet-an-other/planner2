@@ -10,5 +10,8 @@
 *.xcuserstate
 DerivedData/
 
+# Local Google OAuth build inputs (never commit real values)
+ios/Configurations/GoogleConnection.local.xcconfig
+
 # Pi subagent session artifacts
 .pi-subagents/
