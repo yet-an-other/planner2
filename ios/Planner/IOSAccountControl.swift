@@ -11,13 +11,15 @@ import SwiftUI
 /// the supplied disabled state prevents a false Connect and repeated
 /// activations.
 ///
-/// The connected presentation is a compact Planner-styled capsule with the
-/// account avatar — profile image when it loads, initials otherwise — and a
-/// Disconnect on This Device affordance. One activation disconnects
-/// immediately, without confirmation.
+/// The connected presentation is a Planner-styled capsule with the account
+/// avatar — profile image when it loads, initials otherwise — a Disconnect
+/// on This Device affordance, and the display name only when the measured
+/// width fits it. One activation disconnects immediately, without
+/// confirmation.
 ///
-/// Every form provides at least a 44-point activation target and announces
-/// its action to VoiceOver.
+/// Every form provides at least a 44-point activation target, keeps focus,
+/// pointer, and hover behavior native, and announces its action and the
+/// connected account identity to VoiceOver.
 struct IOSAccountControl: View {
     /// The connection module's current control presentation.
     let presentation: GoogleAccountConnection.ControlPresentation
@@ -62,7 +64,12 @@ struct IOSAccountControl: View {
         }
         .frame(minWidth: 44, minHeight: 44)
         .contentShape(Rectangle())
-        .accessibilityLabel("Connect Google account")
+        .hoverEffect()
+        // The label leads with Google's visible button text so VoiceOver
+        // and Voice Control match what sighted users see; the hint names
+        // Planner's action.
+        .accessibilityLabel("Sign in with Google")
+        .accessibilityHint("Connects your Google account")
     }
 
     private func googleButton(
@@ -78,46 +85,98 @@ struct IOSAccountControl: View {
     }
 }
 
-/// The compact connected form: the account avatar beside a Disconnect on
-/// This Device affordance in a Planner-styled capsule. One activation
-/// disconnects immediately; there is no confirmation step.
+/// The connected form: the account avatar and the Disconnect on This
+/// Device affordance in a Planner-styled capsule, with the display name
+/// only when the measured width fits it — the compact form takes over
+/// before the capsule could crowd the centered Visible Month. One
+/// activation disconnects immediately; there is no confirmation step.
 private struct ConnectedAccountControl: View {
     let profile: GoogleAccountConnection.GoogleConnectedProfile
     let disconnectOnThisDevice: () -> Void
 
+    @FocusState private var focused: Bool
+    @State private var hovered = false
+
     var body: some View {
         Button(action: disconnectOnThisDevice) {
-            HStack(spacing: 6) {
-                ConnectedAccountAvatar(profile: profile)
-                    .frame(width: 28, height: 28)
-
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(PlannerPalette.ink)
+            ViewThatFits(in: .horizontal) {
+                connectedContent(showDisplayName: true)
+                    .fixedSize()
+                connectedContent(showDisplayName: false)
             }
-            .padding(.leading, 4)
-            .padding(.trailing, 10)
-            .frame(height: 36)
         }
-        .buttonStyle(.plain)
-        .background {
-            Capsule()
-                .fill(Color.white.opacity(0.8))
-                .overlay {
-                    Capsule().strokeBorder(PlannerPalette.separator, lineWidth: 1)
-                }
-        }
+        .buttonStyle(
+            ConnectedAccountButtonStyle(emphasized: focused || hovered)
+        )
+        .focused($focused)
+        .onHover { hovered = $0 }
         .frame(minWidth: 44, minHeight: 44)
         .contentShape(Rectangle())
-        .accessibilityLabel(accessibilityLabel)
+        .hoverEffect()
+        .accessibilityLabel(accessibilityName)
+        .accessibilityHint("Disconnects on this device")
     }
 
-    /// VoiceOver announces the action and the connected account identity.
-    private var accessibilityLabel: String {
-        if let displayName = profile.displayName, !displayName.isEmpty {
-            return "Disconnect \(displayName) on this device"
+    private func connectedContent(showDisplayName: Bool) -> some View {
+        HStack(spacing: 6) {
+            ConnectedAccountAvatar(profile: profile)
+                .frame(width: 28, height: 28)
+
+            if showDisplayName,
+               let displayName = profile.displayName,
+               !displayName.isEmpty
+            {
+                Text(displayName)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(PlannerPalette.ink)
+                    .lineLimit(1)
+            }
+
+            Image(systemName: "rectangle.portrait.and.arrow.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(PlannerPalette.ink)
         }
-        return "Disconnect Google account on this device"
+        .padding(.leading, 4)
+        .padding(.trailing, 10)
+        .frame(height: 36)
+    }
+
+    /// VoiceOver announces the connected account identity; the hint names
+    /// the local action.
+    private var accessibilityName: String {
+        if let displayName = profile.displayName, !displayName.isEmpty {
+            return displayName
+        }
+        return "Google account"
+    }
+}
+
+/// The connected capsule's appearance: the Planner shell with a visible
+/// focus ring, and emphasis on keyboard focus, pointer hover, or press.
+private struct ConnectedAccountButtonStyle: ButtonStyle {
+    let emphasized: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                Capsule()
+                    .fill(Color.white.opacity(0.8))
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(PlannerPalette.separator, lineWidth: 1)
+                    }
+            }
+            .background {
+                Capsule()
+                    .fill(PlannerPalette.emphasizedControl)
+                    .opacity(configuration.isPressed || emphasized ? 1 : 0)
+            }
+            .overlay {
+                if emphasized {
+                    Capsule()
+                        .strokeBorder(PlannerPalette.olive, lineWidth: 2)
+                }
+            }
     }
 }
 

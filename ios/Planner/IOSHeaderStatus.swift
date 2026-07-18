@@ -28,6 +28,9 @@ struct IOSHeaderStatus: View {
     var body: some View {
         Text(message ?? "")
             .font(.footnote)
+            // The row height is fixed, so the text size is bounded; the
+            // complete message always reaches VoiceOver regardless.
+            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
             .foregroundStyle(foregroundColor)
             .lineLimit(1)
             .truncationMode(.tail)

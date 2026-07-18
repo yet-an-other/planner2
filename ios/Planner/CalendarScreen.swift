@@ -487,7 +487,7 @@ struct DateCellView: View {
     CalendarScreen(
         environment: environment,
         currentEnvironment: { environment },
-        connection: GoogleAccountConnection(
+        connection: previewConnection(
             control: .connected(
                 GoogleAccountConnection.GoogleConnectedProfile(
                     displayName: "Rua Did",
@@ -501,6 +501,138 @@ struct DateCellView: View {
         )
     )
     .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Connected · Long Name") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnection(
+            control: .connected(
+                GoogleAccountConnection.GoogleConnectedProfile(
+                    displayName: "Maximilian Alexander Montgomery-Fitzgerald",
+                    imageURL: nil
+                )
+            ),
+            status: GoogleAccountConnection.Status(
+                message: GoogleAccountConnectionCopy.connected,
+                tone: .info
+            )
+        )
+    )
+    .frame(width: 834, height: 1_194)
+}
+
+#Preview("Account Control · Connected · No Name") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnection(
+            control: .connected(
+                GoogleAccountConnection.GoogleConnectedProfile(
+                    displayName: nil,
+                    imageURL: nil
+                )
+            ),
+            status: GoogleAccountConnection.Status(
+                message: GoogleAccountConnectionCopy.connected,
+                tone: .info
+            )
+        )
+    )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Cancelled") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnection(
+            control: .disconnected(connectEnabled: true),
+            status: GoogleAccountConnection.Status(
+                message: GoogleAccountConnectionCopy.cancelled,
+                tone: .info
+            )
+        )
+    )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Failed") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnection(
+            control: .disconnected(connectEnabled: true),
+            status: GoogleAccountConnection.Status(
+                message: GoogleAccountConnectionCopy.failed,
+                tone: .error
+            )
+        )
+    )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Expired") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnection(
+            control: .disconnected(connectEnabled: true),
+            status: GoogleAccountConnection.Status(
+                message: GoogleAccountConnectionCopy.expired,
+                tone: .error
+            )
+        )
+    )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Connected · Dynamic Type") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnectedConnection()
+    )
+    .dynamicTypeSize(.xxxLarge)
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Connected · Landscape") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnectedConnection()
+    )
+    .frame(width: 852, height: 393)
 }
 
 #Preview("Account Control · Long Visible Month · Compact") {
@@ -529,11 +661,21 @@ struct DateCellView: View {
     .frame(width: 507, height: 700)
 }
 
+/// A connection module fixed in a given presentation for deterministic
+/// shell previews.
+@MainActor
+private func previewConnection(
+    control: GoogleAccountConnection.ControlPresentation,
+    status: GoogleAccountConnection.Status
+) -> GoogleAccountConnection {
+    GoogleAccountConnection(control: control, status: status)
+}
+
 /// A connection module fixed in the disconnected, Connect-enabled
 /// presentation for deterministic shell previews.
 @MainActor
 private func previewConnection() -> GoogleAccountConnection {
-    GoogleAccountConnection(
+    previewConnection(
         control: .disconnected(connectEnabled: true),
         status: GoogleAccountConnection.Status(message: nil, tone: .info)
     )

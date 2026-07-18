@@ -20,26 +20,29 @@ struct IOSConnectionExplanation: View {
     let onCancel: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(GoogleAccountConnectionCopy.explanationTitle)
-                .font(.title3.bold())
-                .foregroundStyle(PlannerPalette.ink)
+        VStack(spacing: 16) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(GoogleAccountConnectionCopy.explanationTitle)
+                        .font(.title3.bold())
+                        .foregroundStyle(PlannerPalette.ink)
 
-            Text(GoogleAccountConnectionCopy.explanationBody)
-                .font(.subheadline)
-                .foregroundStyle(PlannerPalette.ink)
-                .fixedSize(horizontal: false, vertical: true)
+                    Text(GoogleAccountConnectionCopy.explanationBody)
+                        .font(.subheadline)
+                        .foregroundStyle(PlannerPalette.ink)
+                        .fixedSize(horizontal: false, vertical: true)
 
-            Link(destination: privacyPolicyURL) {
-                Label(
-                    GoogleAccountConnectionCopy.privacyPolicyAction,
-                    systemImage: "safari"
-                )
-                .font(.subheadline.weight(.medium))
+                    Link(destination: privacyPolicyURL) {
+                        Label(
+                            GoogleAccountConnectionCopy.privacyPolicyAction,
+                            systemImage: "safari"
+                        )
+                        .font(.subheadline.weight(.medium))
+                    }
+                    .tint(PlannerPalette.olive)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .tint(PlannerPalette.olive)
-
-            Spacer(minLength: 0)
 
             HStack(spacing: 12) {
                 Button(
