@@ -2,20 +2,37 @@ import SwiftUI
 
 @main
 struct PlannerApp: App {
-    /// The build-time release gate and environment-specific inputs for the
-    /// Google Account Connection, fixed for this build. While the gate is
-    /// off, the Calendar Screen mounts no connection behavior at all.
-    private let accountConnection = GoogleAccountConnectionConfiguration.load(
-        from: .main
-    )
+    /// The Google Account Connection module, created only when the
+    /// build-time release gate is on. While the gate is off, no connection
+    /// behavior is initialized and the Calendar Screen renders the accepted
+    /// 100-point iOS Calendar Header with neither connection seam mounted.
+    private let accountConnection: GoogleAccountConnection?
+
+    init() {
+        switch GoogleAccountConnectionConfiguration.load(from: .main) {
+        case .gatedOff:
+            accountConnection = nil
+        case let configuration:
+            accountConnection = GoogleAccountConnection(
+                configuration: configuration
+            ) { configured in
+                GoogleSignInSDKAdapter(configuration: configured)
+            }
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
             CalendarScreen(
                 environment: .current(),
                 currentEnvironment: { .current() },
-                accountConnection: accountConnection
+                connection: accountConnection
             )
+            .onOpenURL { url in
+                // The reversed-client-ID scheme routes Google's OAuth
+                // callback here; the module decides whether it is ours.
+                _ = accountConnection?.handleCallbackURL(url)
+            }
         }
     }
 }

@@ -9,18 +9,18 @@ struct CalendarScreen: View {
     @State private var midnightScheduleGeneration = 0
 
     private let currentEnvironment: @MainActor () -> CalendarEnvironment
-    private let accountConnection: GoogleAccountConnectionConfiguration
+    private let connection: GoogleAccountConnection?
 
     init(
         environment: CalendarEnvironment,
         currentEnvironment: @escaping @MainActor () -> CalendarEnvironment,
-        accountConnection: GoogleAccountConnectionConfiguration = .gatedOff
+        connection: GoogleAccountConnection? = nil
     ) {
         let model = CalendarGridModel(environment: environment)
         _model = State(initialValue: model)
         _scrollPosition = State(initialValue: model.todayWeek.id)
         self.currentEnvironment = currentEnvironment
-        self.accountConnection = accountConnection
+        self.connection = connection
     }
 
     var body: some View {
@@ -81,38 +81,31 @@ struct CalendarScreen: View {
     }
 
     /// The iOS Account Control mounted through the header's trailing seam.
-    /// While the build-time release gate is off, no connection behavior is
-    /// initialized and the seam stays empty. An enabled build with missing
-    /// or invalid configuration disables Connect through Google's supplied
-    /// disabled state.
+    /// While the build-time release gate is off, no connection module exists
+    /// and the seam stays empty; the module publishes the presentation for
+    /// every other case, including the disabled unconfigured build.
     @ViewBuilder
     private var accountControl: some View {
-        switch accountConnection {
-        case .gatedOff:
-            EmptyView()
-        case .unconfigured:
-            IOSAccountControl(connectEnabled: false)
-        case .configured:
-            IOSAccountControl(connectEnabled: true)
+        if let connection {
+            IOSAccountControl(
+                presentation: connection.control,
+                connect: connection.connect,
+                disconnectOnThisDevice: connection.disconnectOnThisDevice
+            )
         }
     }
 
     /// The iOS Header Status mounted through the header's status seam. While
     /// the gate is on, the row always reserves its 20 points so messages
-    /// never move the Calendar Grid; an unconfigured build reports that
-    /// Connect is unavailable.
+    /// never move the Calendar Grid; the module owns the latest message and
+    /// its tone.
     @ViewBuilder
     private var headerStatus: some View {
-        switch accountConnection {
-        case .gatedOff:
-            EmptyView()
-        case .unconfigured:
+        if let connection {
             IOSHeaderStatus(
-                message: GoogleAccountConnectionCopy.unconfigured,
-                tone: .warning
+                message: connection.status.message,
+                tone: IOSHeaderStatus.Tone(connection.status.tone)
             )
-        case .configured:
-            IOSHeaderStatus(message: nil, tone: .info)
         }
     }
 
@@ -354,7 +347,7 @@ struct DateCellView: View {
     CalendarScreen(
         environment: environment,
         currentEnvironment: { environment },
-        accountConnection: previewConfiguredConnection()
+        connection: previewConnection()
     )
     .frame(width: 393, height: 852)
 }
@@ -367,7 +360,7 @@ struct DateCellView: View {
     CalendarScreen(
         environment: environment,
         currentEnvironment: { environment },
-        accountConnection: previewConfiguredConnection()
+        connection: previewConnection()
     )
     .frame(width: 834, height: 1_194)
 }
@@ -380,9 +373,54 @@ struct DateCellView: View {
     CalendarScreen(
         environment: environment,
         currentEnvironment: { environment },
-        accountConnection: .unconfigured
+        connection: previewConnection(configuration: .unconfigured)
     )
     .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Connecting") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: GoogleAccountConnection(
+            control: .connecting,
+            status: GoogleAccountConnection.Status(
+                message: GoogleAccountConnectionCopy.connecting,
+                tone: .info
+            )
+        )
+    )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Connected") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnectedConnection()
+    )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Connected · Wide") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnectedConnection()
+    )
+    .frame(width: 834, height: 1_194)
 }
 
 #Preview("Account Control · Long Visible Month · Compact") {
@@ -393,7 +431,7 @@ struct DateCellView: View {
     CalendarScreen(
         environment: environment,
         currentEnvironment: { environment },
-        accountConnection: previewConfiguredConnection()
+        connection: previewConnection()
     )
     .frame(width: 320, height: 700)
 }
@@ -406,9 +444,57 @@ struct DateCellView: View {
     CalendarScreen(
         environment: environment,
         currentEnvironment: { environment },
-        accountConnection: previewConfiguredConnection()
+        connection: previewConnection()
     )
     .frame(width: 507, height: 700)
+}
+
+/// A connection module for deterministic shell previews: disconnected and
+/// Connect-enabled, backed by a stub adapter that never reaches Google.
+@MainActor
+private func previewConnection(
+    configuration: GoogleAccountConnectionConfiguration? = nil
+) -> GoogleAccountConnection {
+    GoogleAccountConnection(
+        configuration: configuration ?? previewConfiguredConnection(),
+        makeAdapter: { _ in PreviewGoogleSignInAdapter() }
+    )
+}
+
+/// A connection module fixed in the connected presentation. The preview
+/// profile deliberately has no image URL, so previews never touch the
+/// network and exercise the initials fallback; image presentation belongs
+/// to manual acceptance.
+@MainActor
+private func previewConnectedConnection() -> GoogleAccountConnection {
+    GoogleAccountConnection(
+        control: .connected(
+            GoogleAccountConnection.GoogleConnectedProfile(
+                displayName: "Rua Did",
+                imageURL: nil
+            )
+        ),
+        status: GoogleAccountConnection.Status(
+            message: GoogleAccountConnectionCopy.connected,
+            tone: .info
+        )
+    )
+}
+
+/// The stub Google Sign-In adapter for previews: cancellation for Connect,
+/// no-op sign-out, and no callback handling.
+private struct PreviewGoogleSignInAdapter: GoogleSignInAdapting {
+    func signIn(
+        requestingScopes scopes: [String]
+    ) async -> GoogleAuthorizationOutcome {
+        .cancelled
+    }
+
+    func signOut() {}
+
+    func handleCallbackURL(_ url: URL) -> Bool {
+        false
+    }
 }
 
 /// A complete, valid connection configuration for deterministic shell

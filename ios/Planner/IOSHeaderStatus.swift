@@ -50,3 +50,18 @@ struct IOSHeaderStatus: View {
         }
     }
 }
+
+extension IOSHeaderStatus.Tone {
+    /// Maps the connection module's status tone onto the status row's
+    /// presentation tone; the view layer owns the palette mapping.
+    init(_ tone: GoogleAccountConnection.Status.Tone) {
+        switch tone {
+        case .info:
+            self = .info
+        case .warning:
+            self = .warning
+        case .error:
+            self = .error
+        }
+    }
+}
