@@ -12,7 +12,10 @@ Behavioral material extracted from the former single-context glossary during the
 - A **Calendar Header** contains one **Header Status**.
 - An **Account Control** displays the **Google Account Connection** state.
 - A **Google Account Connection** is either connected or disconnected.
+- A **Google Account Connection** belongs to one browser profile on one device; it never revokes the project-wide **Google Authorization Grant** (system ADR 0002).
 - A **Google Account Connection** persists across browser sessions until Disconnect on This Device or ~30 days of inactivity (ADR 0005).
+- Disconnect on This Device issues `DELETE /api/connection`, which clears the profile's encrypted `HttpOnly` session cookie without contacting Google; the browser tab discards its in-memory connection state only after the request succeeds, because JavaScript cannot clear the cookie itself. A failed request leaves the connection visibly intact and reports an error.
+- Each browser tab owns its **Google Account Connection** state independently: there is no cross-tab broadcast or synchronization mechanism. Disconnect on This Device in one tab takes effect immediately in that tab and clears the shared cookie; a sibling tab already showing connected keeps working from its own in-memory access token until it reloads or its own `/api/token` refresh discovers the cleared cookie (an ordinary 401, handled by existing restore behavior).
 - A **Source Calendar** belongs to a connected **Google Account Connection**.
 - **Selected Source Calendars** is the subset of **Source Calendars** the user has chosen; Planner fetches **Calendar Events** only from these.
 - A **Calendar Event** belongs to exactly one **Source Calendar**.

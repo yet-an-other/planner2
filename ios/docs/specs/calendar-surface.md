@@ -28,7 +28,7 @@ The iOS delivery stack is independent from the Web Experience. It shares vocabul
 - Use a 64-point title row and 36-point weekday row beneath the top safe area. _Superseded for builds with the Google connection release gate enabled (development only): the enabled iOS Calendar Header uses a 64-point title/control row with a trailing iOS Account Control, a fixed 20-point iOS Header Status row, and the 36-point weekday row. The gate stays off in all committed and production configurations, where the dimensions and behavior here remain in force._
 - Place the Product Name on the leading side and the Visible Month at the geometric center.
 - Derive Visible Month from the Monday of the topmost Week Row and update it while scrolling, not only after deceleration.
-- Make Visible Month the only semantic product control. Activating it scrolls Today's Week Row to the top.
+- Make Visible Month the only semantic product control. Activating it scrolls Today's Week Row to the top. _Superseded for builds with the Google connection release gate enabled (development only): the iOS Account Control is a second semantic product control. The gate stays off in all committed and production configurations, where this statement remains in force._
 - Show its subtle warm capsule only while the control is pressed, focused, or hovered; keep no persistent border.
 - Animate the Today Jump unless Reduce Motion is enabled. Do nothing when Today's Week Row is already topmost.
 
@@ -66,12 +66,12 @@ The iOS delivery stack is independent from the Web Experience. It shares vocabul
 
 ## Interaction and product exclusions
 
-Scrolling and Today Jump are the only product interactions. This slice contains no:
+Scrolling and Today Jump are the only product interactions. _Superseded for builds with the Google connection release gate enabled (development only): Connect, Disconnect on This Device, and the first-connect explanation actions are additional product interactions; the gate keeps them inactive in committed and production builds._ This slice contains no:
 
 - Calendar Event type, event renderer, event placeholder, busy block, or overflow control
 - Google Account Connection or Source Calendar. _Superseded only for development builds with the Google connection release gate enabled, which present the gated iOS Account Control and iOS Header Status with launch restoration, the first-connect explanation, Connect, offline recovery, the installation boundary, and Disconnect on This Device._
-- Date selection, detail view, navigation route, tab, sheet, toolbar, menu, onboarding, or settings
-- Persistence, restoration state, networking, permission, analytics, user notification, or extension
+- Date selection, detail view, navigation route, tab, sheet, toolbar, menu, onboarding, or settings. _Superseded only for the gated first-connect explanation: builds with the Google connection release gate enabled present one compact native sheet explaining read-only Calendar access before the first Connect; every other listed exclusion remains in force._
+- Persistence, restoration state, networking, permission, analytics, user notification, or extension. _Superseded only as needed by the gated Google Account Connection: enabled builds persist the non-identifying disclosure acknowledgement and installation markers, reach Google for authorization and the profile image, and request Calendar read authorization; no other persistence, networking, permission, analytics, notification, or extension exists, and the gate keeps the addition inactive in committed and production builds._
 - Background-processing entitlement, continuously running timer, widget, or alternate scene
 - Web font, project generator, or executable dependency on `web/`
 - Third-party packages, with one reviewed exception: the pinned Google Sign-In for iOS SDK (including its supplied SwiftUI button and Roboto brand font) behind the build-time Google connection release gate. _Superseded only as recorded in the native-authentication ADR; the gate keeps the addition inactive in committed and production builds._

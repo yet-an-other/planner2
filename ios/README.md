@@ -30,6 +30,18 @@ To enable the connection in a development build, copy [`Configurations/GoogleCon
 
 A configured development build restores a saved connection silently at launch — entering a restoring presentation instead of flashing a false Connect, refreshing expired credentials through Google Sign-In, and clearing confirmed-invalid authorization with reconnect guidance — and runs one Connect flow for Google identity and read-only Calendar access through the official Google Sign-In SDK. The first Connect in an installation opens a compact native explanation of the read-only access (stating that this build downloads no Calendar data) with Continue, Cancel, and Privacy Policy actions; acknowledging it suppresses the sheet until the disclosure version increments. A connected session survives offline periods with a recoverable warning and revalidates when connectivity returns or the app becomes active; only confirmed invalidation disconnects. An installation boundary correlates an install-local marker with a non-migrating Keychain device marker, so a reinstall or a backup restored to new hardware clears stale sign-in state locally and starts disconnected, while ordinary relaunches, updates, and device restarts keep a valid connection. The connected control shows the account avatar — profile image once loaded, initials otherwise — with the display name only when the measured width fits, and one activation disconnects on this device through local SDK sign-out only, never SDK disconnect or Google revocation, so sibling Planner connections stay intact. Planner persists no tokens or account profile data itself; Google Sign-In owns credential storage.
 
+### Real-OAuth prerequisites (external, not committed)
+
+The committed configuration contains no Google credentials and the repository never will: exercising a real Connect requires external setup in the shared Google Cloud project, documented as release gates rather than completed work:
+
+1. Enable the **Google Calendar API** in the project.
+2. Create an **iOS OAuth client** bound to Planner's bundle identifier; note its client ID and reversed client ID (the callback scheme).
+3. Configure the OAuth consent screen; production use with the sensitive `calendar.readonly` scope requires Google's verification as applicable.
+4. Publish a public **HTTPS Privacy Policy URL** covering current and intended Calendar-data handling.
+5. Supply the three values plus `PLANNER_GOOGLE_CONNECTION_ENABLED = YES` in `Configurations/GoogleConnection.local.xcconfig` (git-ignored) and rebuild.
+
+App Privacy answers must cover Planner's and the SDK's account and Calendar data behavior before distribution. The production gate stays off until a Calendar-data feature provides visible value; enabling it then also updates the explanation's data-behavior copy and disclosure version. The package graph, privacy manifests, and acceptance matrix live in [`docs/specs/google-account-connection.md`](docs/specs/google-account-connection.md).
+
 ## Command-line validation
 
 Every command selects the full Xcode explicitly through `DEVELOPER_DIR`; it does not change the machine-wide `xcode-select` setting.

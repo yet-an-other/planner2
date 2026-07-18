@@ -29,5 +29,6 @@ _Avoid_: Toast, banner, notification bar, status bar
 
 - [`README.md`](README.md) — standalone contributor setup and validation
 - [`docs/specs/calendar-surface.md`](docs/specs/calendar-surface.md) — accepted iOS Calendar Surface behavior, exclusions, and manual acceptance
+- [`docs/specs/google-account-connection.md`](docs/specs/google-account-connection.md) — accepted iOS Google Account Connection behavior, exclusions, compliance validation, and manual acceptance
 - [`docs/adr/0001-use-google-sign-in-for-native-account-connection.md`](docs/adr/0001-use-google-sign-in-for-native-account-connection.md) — accepted native authentication boundary
 - [`docs/research/google-account-connection-authentication.md`](docs/research/google-account-connection-authentication.md) — supporting primary-source authentication research

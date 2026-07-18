@@ -116,6 +116,20 @@ request returns 401 with no visible error). Use `http://localhost:3000`.
 The server also prints the URL at boot: `planner server listening on
 http://localhost:3000`.
 
+### Connection behavior
+
+The Google Account Connection is local to one browser profile. **Disconnect
+on This Device** issues `DELETE /api/connection`, which clears only the
+profile's encrypted session cookie without contacting Google — it never
+revokes the project-wide Google Authorization Grant, so iOS and other
+browser profiles stay connected. Each browser tab owns its connection state
+independently: there is no cross-tab synchronization, and a sibling tab
+keeps working from its own in-memory access token until it reloads or its
+own token refresh discovers the cleared cookie. See
+[`docs/specs/calendar-surface.md`](docs/specs/calendar-surface.md) and ADR
+[`0005`](docs/adr/0005-persistent-google-account-connection-via-minimal-backend.md)
+with system ADR `0002-keep-google-account-connections-local`.
+
 ## Deployment
 
 GitOps bootstrap, secret rotation, image publication, staging advancement,
