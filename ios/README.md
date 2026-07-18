@@ -42,6 +42,8 @@ The committed configuration contains no Google credentials and the repository ne
 
 App Privacy answers must cover Planner's and the SDK's account and Calendar data behavior before distribution. The production gate stays off until a Calendar-data feature provides visible value; enabling it then also updates the explanation's data-behavior copy and disclosure version. The package graph, privacy manifests, and acceptance matrix live in [`docs/specs/google-account-connection.md`](docs/specs/google-account-connection.md).
 
+Behind a TLS-intercepting corporate proxy (for example Netskope), simulator HTTPS to Google fails with `NSURLErrorDomain -1200` until the proxy's root CA is trusted by the simulator, which has its own trust store separate from macOS. Export the proxy's current root from a live connection (`openssl s_client -showcerts -connect oauth2.googleapis.com:443 </dev/null`, last certificate) rather than from the Mac keychain, which may hold an expired earlier generation, and install it with `xcrun simctl keychain booted add-root-cert <cert.pem>`. Repeat per simulator and after erasing one.
+
 ## Command-line validation
 
 Every command selects the full Xcode explicitly through `DEVELOPER_DIR`; it does not change the machine-wide `xcode-select` setting.
