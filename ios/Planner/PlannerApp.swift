@@ -14,10 +14,12 @@ struct PlannerApp: App {
             accountConnection = nil
         case let configuration:
             accountConnection = GoogleAccountConnection(
-                configuration: configuration
-            ) { configured in
-                GoogleSignInSDKAdapter(configuration: configured)
-            }
+                configuration: configuration,
+                makeAdapter: { configured in
+                    GoogleSignInSDKAdapter(configuration: configured)
+                },
+                disclosureStore: UserDefaultsGoogleConnectionDisclosureStore()
+            )
         }
     }
 

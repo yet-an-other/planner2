@@ -63,6 +63,50 @@ struct GoogleAuthorizedAccount: Equatable, Sendable {
     let grantedScopes: Set<String>
 }
 
+/// The first-connect explanation the module asks the view to present.
+///
+/// The copy itself is stable Planner-owned text; the sheet only needs the
+/// configured HTTPS Privacy Policy URL. Presenting it is a connection
+/// decision, so it supersedes any silent validation still in flight.
+struct GoogleConnectionExplanation: Equatable, Sendable, Identifiable {
+    /// The configured HTTPS Privacy Policy URL opened by the sheet's
+    /// Privacy Policy action.
+    let privacyPolicyURL: URL
+
+    var id: URL { privacyPolicyURL }
+}
+
+/// The store for the versioned, non-identifying disclosure acknowledgement.
+///
+/// Only the acknowledged version number is persisted — install-local marker
+/// data, never account identity — so a later disclosure version presents the
+/// sheet again while an acknowledged one is suppressed.
+protocol GoogleConnectionDisclosureStoring {
+    /// The disclosure version this installation has acknowledged, if any.
+    func acknowledgedDisclosureVersion() -> Int?
+
+    /// Records acknowledgement of a disclosure version.
+    func recordAcknowledgedDisclosureVersion(_ version: Int)
+}
+
+/// The production disclosure store, backed by install-local user defaults.
+struct UserDefaultsGoogleConnectionDisclosureStore: GoogleConnectionDisclosureStoring {
+    private let defaults: UserDefaults
+    private let key = "PlannerGoogleConnectionDisclosureAcknowledgedVersion"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func acknowledgedDisclosureVersion() -> Int? {
+        defaults.object(forKey: key) as? Int
+    }
+
+    func recordAcknowledgedDisclosureVersion(_ version: Int) {
+        defaults.set(version, forKey: key)
+    }
+}
+
 /// The Google Sign-In seam: one product-oriented interface satisfied by the
 /// official SDK in production and by a fake adapter in deterministic tests.
 ///
@@ -144,6 +188,12 @@ final class GoogleAccountConnection {
         }
     }
 
+    /// The disclosure version describing this build's Calendar-data
+    /// behavior. Increment it when the copy's data-behavior claims change,
+    /// so installations that acknowledged an earlier version see the
+    /// revised sheet again.
+    static let currentDisclosureVersion = 1
+
     /// The scopes Connect requests in one authorization flow: Google identity
     /// plus read-only Calendar access.
     static let requiredScopes = [
@@ -158,6 +208,17 @@ final class GoogleAccountConnection {
 
     private let adapter: (any GoogleSignInAdapting)?
 
+    /// The configured HTTPS Privacy Policy URL, present in every configured
+    /// build.
+    private let privacyPolicyURL: URL?
+
+    /// The versioned acknowledgement store for the first-connect
+    /// explanation.
+    private let disclosureStore: any GoogleConnectionDisclosureStoring
+
+    /// The disclosure version this build presents.
+    private let disclosureVersion: Int
+
     /// Monotonic marker of the latest connection lifecycle decision, so a
     /// stale asynchronous completion can never overwrite a newer one.
     private var connectionDecision = 0
@@ -168,6 +229,10 @@ final class GoogleAccountConnection {
     /// The current iOS Header Status content.
     private(set) var status: Status
 
+    /// The first-connect explanation awaiting the user's choice, or `nil`
+    /// when no sheet should be presented.
+    private(set) var explanation: GoogleConnectionExplanation?
+
     /// Builds the module for a gate-on build. A configured build receives an
     /// adapter, enters the restoring presentation, and immediately validates
     /// the saved authorization; an unconfigured build disables Connect and
@@ -177,11 +242,16 @@ final class GoogleAccountConnection {
     init(
         configuration: GoogleAccountConnectionConfiguration,
         makeAdapter: (GoogleAccountConnectionConfiguration.Configured) ->
-            any GoogleSignInAdapting
+            any GoogleSignInAdapting,
+        disclosureStore: any GoogleConnectionDisclosureStoring,
+        disclosureVersion: Int = GoogleAccountConnection.currentDisclosureVersion
     ) {
+        self.disclosureStore = disclosureStore
+        self.disclosureVersion = disclosureVersion
         switch configuration {
         case .configured(let configured):
             adapter = makeAdapter(configured)
+            privacyPolicyURL = configured.privacyPolicyURL
             control = .restoring
             status = Status(
                 message: GoogleAccountConnectionCopy.restoring,
@@ -192,6 +262,7 @@ final class GoogleAccountConnection {
             // The composition root never passes a gated-off configuration;
             // defensively it behaves like any other unusable build.
             adapter = nil
+            privacyPolicyURL = nil
             control = .disconnected(connectEnabled: false)
             status = Status(
                 message: GoogleAccountConnectionCopy.unconfigured,
@@ -204,30 +275,90 @@ final class GoogleAccountConnection {
     /// Deterministic presentation seam for SwiftUI previews. Interactive
     /// transitions still work for Disconnect on This Device; Connect and
     /// restoration are no-ops without an adapter.
-    init(control: ControlPresentation, status: Status) {
+    init(
+        control: ControlPresentation,
+        status: Status,
+        explanation: GoogleConnectionExplanation? = nil
+    ) {
         adapter = nil
+        privacyPolicyURL = explanation?.privacyPolicyURL
+        disclosureStore = UserDefaultsGoogleConnectionDisclosureStore()
+        disclosureVersion = Self.currentDisclosureVersion
         self.control = control
         self.status = status
+        self.explanation = explanation
     }
     #endif
 
-    /// Requests Connect: account selection, identity, and Calendar read
-    /// authorization as one product flow.
+    /// Requests Connect. The current disclosure version must be acknowledged
+    /// first: an unacknowledged installation gets the first-connect
+    /// explanation before any Google authorization UI, and only Continuing
+    /// resumes into the one product flow of account selection, identity, and
+    /// Calendar read authorization.
     ///
     /// Duplicate activations are refused: Connect only starts from the
-    /// enabled disconnected presentation, so restoration, a connection
+    /// enabled disconnected presentation with no explanation already
+    /// showing, so restoration, a presented explanation, a connection
     /// already in flight, or an established connection can never launch a
     /// second authorization. Starting Connect supersedes any silent
     /// validation still in flight.
     func connect() {
         guard
             let adapter,
+            let privacyPolicyURL,
             case .disconnected(let connectEnabled) = control,
-            connectEnabled
+            connectEnabled,
+            explanation == nil
         else {
             return
         }
 
+        let acknowledgedVersion =
+            disclosureStore.acknowledgedDisclosureVersion() ?? 0
+        guard acknowledgedVersion >= disclosureVersion else {
+            connectionDecision += 1
+            explanation = GoogleConnectionExplanation(
+                privacyPolicyURL: privacyPolicyURL
+            )
+            return
+        }
+
+        beginInteractiveConnect(adapter: adapter)
+    }
+
+    /// Continues past the first-connect explanation: acknowledges the
+    /// current disclosure version for this installation and resumes the same
+    /// Connect flow the user requested.
+    func continueConnect() {
+        guard let adapter, explanation != nil else {
+            return
+        }
+
+        explanation = nil
+        disclosureStore.recordAcknowledgedDisclosureVersion(disclosureVersion)
+        beginInteractiveConnect(adapter: adapter)
+    }
+
+    /// Cancels the first-connect explanation — by Cancel or by dismissing
+    /// the sheet — so no Google authorization UI opens and the cancellation
+    /// is reported as ordinary information.
+    func cancelConnectExplanation() {
+        guard explanation != nil else {
+            return
+        }
+
+        explanation = nil
+        status = Status(
+            message: GoogleAccountConnectionCopy.cancelled,
+            tone: .info
+        )
+    }
+
+    /// The one interactive Connect flow: identity plus Calendar read
+    /// authorization in a single authorization request.
+    private func beginInteractiveConnect(
+        adapter: any GoogleSignInAdapting
+    ) {
         connectionDecision += 1
         let attempt = connectionDecision
         control = .connecting
@@ -277,13 +408,14 @@ final class GoogleAccountConnection {
 
     /// Revalidates the saved authorization when the app returns to the
     /// foreground. Silent validation never changes the presentation on
-    /// entry; only its confirmed outcomes do. An interactive Connect owns
-    /// the pipeline, so foreground refresh is refused while it is in flight;
-    /// a newer validation supersedes one still in flight.
+    /// entry; only its confirmed outcomes do. An interactive Connect or a
+    /// presented explanation owns the pipeline, so foreground refresh is
+    /// refused while either is in flight; a newer validation supersedes one
+    /// still in flight.
     ///
     /// The Calendar Screen requests this without ever seeing SDK details.
     func validateOnForeground() {
-        guard adapter != nil, !isInteractiveFlowInFlight else {
+        guard adapter != nil, !isInteractiveFlowInFlight, explanation == nil else {
             return
         }
         beginValidation()
@@ -440,4 +572,24 @@ extension GoogleAccountConnectionCopy {
 
     /// Shown for any authorization failure without more specific copy.
     static let failed = "Google connection failed. Try again"
+
+    /// The first-connect explanation title.
+    static let explanationTitle = "Connect Google Calendar"
+
+    /// The first-connect explanation: read-only purpose, no-write
+    /// assurance, and this build's actual Calendar-data behavior.
+    static let explanationBody =
+        "Planner requests read-only access to Google Calendar so future "
+        + "features can show your calendars and events. Planner cannot "
+        + "create, edit, or delete anything in your Google Calendar. "
+        + "This build downloads no Calendar data."
+
+    /// The explanation action that acknowledges and resumes Connect.
+    static let explanationContinue = "Continue"
+
+    /// The explanation action that cancels Connect.
+    static let explanationCancel = "Cancel"
+
+    /// The explanation action opening the configured Privacy Policy URL.
+    static let privacyPolicyAction = "Privacy Policy"
 }

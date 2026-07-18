@@ -48,6 +48,13 @@ struct CalendarScreen: View {
         }
         .background(PlannerPalette.canvas)
         .preferredColorScheme(.light)
+        .sheet(item: explanationItem) { explanation in
+            IOSConnectionExplanation(
+                privacyPolicyURL: explanation.privacyPolicyURL,
+                onContinue: { connection?.continueConnect() },
+                onCancel: { connection?.cancelConnectExplanation() }
+            )
+        }
         .environment(
             \.layoutDirection,
             model.layoutDirection == .rightToLeft ? .rightToLeft : .leftToRight
@@ -110,6 +117,20 @@ struct CalendarScreen: View {
                 tone: IOSHeaderStatus.Tone(connection.status.tone)
             )
         }
+    }
+
+    /// The sheet presentation binding for the first-connect explanation.
+    /// Interactive dismissal routes through the module's cancellation, so a
+    /// dismissed sheet never opens Google authorization UI.
+    private var explanationItem: Binding<GoogleConnectionExplanation?> {
+        Binding(
+            get: { connection?.explanation },
+            set: { presented in
+                if presented == nil {
+                    connection?.cancelConnectExplanation()
+                }
+            }
+        )
     }
 
     private func refreshCalendarGrid() {
@@ -394,6 +415,25 @@ struct DateCellView: View {
     .frame(width: 393, height: 852)
 }
 
+#Preview("Account Control · Explanation") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: GoogleAccountConnection(
+            control: .disconnected(connectEnabled: true),
+            status: GoogleAccountConnection.Status(message: nil, tone: .info),
+            explanation: GoogleConnectionExplanation(
+                privacyPolicyURL: URL(string: "https://planner.example/privacy")!
+            )
+        )
+    )
+    .frame(width: 393, height: 852)
+}
+
 #Preview("Account Control · Connecting") {
     let environment = previewCalendarEnvironment(
         localeIdentifier: "en_US_POSIX",
@@ -514,7 +554,8 @@ private func previewConnectedConnection() -> GoogleAccountConnection {
 private func previewUnconfiguredConnection() -> GoogleAccountConnection {
     GoogleAccountConnection(
         configuration: .unconfigured,
-        makeAdapter: { _ in PreviewGoogleSignInAdapter() }
+        makeAdapter: { _ in PreviewGoogleSignInAdapter() },
+        disclosureStore: UserDefaultsGoogleConnectionDisclosureStore()
     )
 }
 
