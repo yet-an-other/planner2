@@ -1,5 +1,56 @@
 import SwiftUI
 
+/// The header collision policy as pure layout math, separated for
+/// deterministic tests.
+///
+/// The trailing account control must collapse before the Visible Month is
+/// forced below its accepted minimum behavior, and the centered month must
+/// never overlap leading or trailing controls. The control's measured
+/// footprint — including its margins — reserves symmetric space around the
+/// center, so a wider control shrinks the month's width cap instead of
+/// colliding with it.
+enum HeaderCollisionLayout {
+    /// The width each side of the title row reserves by default for the
+    /// Product Name and an optional account control, keeping the Visible
+    /// Month geometrically centered and clear of both.
+    static let minimumSideReservation: CGFloat = 144
+
+    /// The Visible Month's accepted minimum footprint: the width it keeps
+    /// at its minimum scale across supported locales before truncation is
+    /// allowed to begin.
+    static let visibleMonthMinimumFootprint: CGFloat = 120
+
+    /// The widest control the header offers at a given total width.
+    ///
+    /// The control (plus its margins) may grow until the month would drop
+    /// below its minimum footprint; beyond that it must collapse to a
+    /// narrower form. The cap keeps even wide layouts from crowding the
+    /// center.
+    static func accountControlBudget(in width: CGFloat) -> CGFloat {
+        max(
+            44,
+            min(
+                (width - visibleMonthMinimumFootprint) / 2 - 32,
+                280
+            )
+        )
+    }
+
+    /// The Visible Month's width cap given the control's measured
+    /// footprint: symmetric reservation around the center, growing beyond
+    /// the default side reservation only when the control is wider, and
+    /// never below the floor where scaling and truncation take over.
+    static func visibleMonthMaxWidth(
+        in width: CGFloat,
+        controlFootprint: CGFloat
+    ) -> CGFloat {
+        max(
+            24,
+            width - 2 * max(minimumSideReservation, controlFootprint)
+        )
+    }
+}
+
 /// The non-scrolling area above the iOS Calendar Surface.
 ///
 /// The header owns the Product Name on the leading side, the geometrically
@@ -22,7 +73,7 @@ import SwiftUI
 struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
     @FocusState private var visibleMonthFocused: Bool
     @State private var visibleMonthHovered = false
-    @State private var accountControlWidth = HeaderLayout.minimumSideReservation
+    @State private var accountControlWidth = HeaderCollisionLayout.minimumSideReservation
 
     let visibleMonth: String
     let weekdayLabels: [WeekdayLabel]
@@ -91,25 +142,21 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
             .overlay(alignment: .trailing) {
                 accountControl
                     .frame(
-                        maxWidth: accountControlBudget(in: geometry.size.width),
+                        maxWidth: HeaderCollisionLayout.accountControlBudget(
+                            in: geometry.size.width
+                        ),
                         alignment: .trailing
                     )
                     .padding(.horizontal, 16)
-                    .background {
-                        GeometryReader { controlGeometry in
-                            Color.clear.preference(
-                                key: AccountControlWidthKey.self,
-                                value: controlGeometry.size.width
-                            )
-                        }
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.width
+                    } action: { measuredWidth in
+                        accountControlWidth = measuredWidth
                     }
             }
         }
         .frame(height: 64)
         .background(PlannerPalette.canvas)
-        .onPreferenceChange(AccountControlWidthKey.self) { width in
-            accountControlWidth = width
-        }
     }
 
     /// The Visible Month keeps its accepted minimum behavior while leading
@@ -117,19 +164,10 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
     /// only when the mounted account control needs more than the default
     /// side reservation, so the month remains centered and never overlaps.
     private func visibleMonthMaxWidth(in width: CGFloat) -> CGFloat {
-        max(
-            24,
-            width - 2 * max(HeaderLayout.minimumSideReservation, accountControlWidth)
+        HeaderCollisionLayout.visibleMonthMaxWidth(
+            in: width,
+            controlFootprint: accountControlWidth
         )
-    }
-
-    /// The account control may use up to half the row beyond the Visible
-    /// Month's minimum footprint and the trailing margin, so it collapses to
-    /// its compact form before the month is forced below its minimum
-    /// behavior. The cap keeps Google's expanding wide form from crowding
-    /// the center on wide layouts.
-    private func accountControlBudget(in width: CGFloat) -> CGFloat {
-        max(44, min(width / 2 - 28, 280))
     }
 
     private var weekdayRow: some View {
@@ -150,22 +188,6 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
         }
         .frame(height: 36)
         .background(PlannerPalette.weekdayStrip)
-    }
-}
-
-/// Layout constants for the iOS Calendar Header.
-private enum HeaderLayout {
-    /// The width each side of the title row reserves by default for the
-    /// Product Name and an optional account control, keeping the Visible
-    /// Month geometrically centered and clear of both.
-    static let minimumSideReservation: CGFloat = 144
-}
-
-private struct AccountControlWidthKey: PreferenceKey {
-    static let defaultValue = HeaderLayout.minimumSideReservation
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 

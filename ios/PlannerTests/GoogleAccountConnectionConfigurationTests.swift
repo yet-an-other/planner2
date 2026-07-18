@@ -42,9 +42,41 @@ struct GoogleAccountConnectionConfigurationTests {
         #expect(configuration == .gatedOff)
     }
 
-    @Test("The committed app bundle keeps the release gate off")
-    func committedBundleStaysOff() {
-        #expect(GoogleAccountConnectionConfiguration.load(from: .main) == .gatedOff)
+    @Test("The committed configuration keeps the release gate off")
+    func committedConfigurationStaysOff() throws {
+        // The committed file — not the current build's bundle, which a
+        // developer's git-ignored local override legitimately changes —
+        // must keep the gate off and carry no environment-specific values.
+        let configurations = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Configurations/GoogleConnection.xcconfig")
+        let contents = try String(contentsOf: configurations, encoding: .utf8)
+
+        #expect(committedValue(for: "PLANNER_GOOGLE_CONNECTION_ENABLED", in: contents) == "NO")
+        #expect(committedValue(for: "PLANNER_GOOGLE_CLIENT_ID", in: contents) == "")
+        #expect(committedValue(for: "PLANNER_GOOGLE_REVERSED_CLIENT_ID", in: contents) == "")
+        #expect(committedValue(for: "PLANNER_PRIVACY_POLICY_URL", in: contents) == "")
+    }
+
+    /// Reads one `KEY = value` assignment from an xcconfig, returning the
+    /// trimmed value (empty when the key carries none).
+    private func committedValue(for key: String, in contents: String) -> String? {
+        for line in contents.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard
+                !trimmed.hasPrefix("//"),
+                let equals = trimmed.firstIndex(of: "=")
+            else {
+                continue
+            }
+            let name = trimmed[..<equals].trimmingCharacters(in: .whitespaces)
+            if name == key {
+                return trimmed[trimmed.index(after: equals)...]
+                    .trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return nil
     }
 
     @Test("An enabled build with complete valid inputs is configured")

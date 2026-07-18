@@ -12,13 +12,15 @@
 		A00000000000000000000023 /* CalendarEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000014 /* CalendarEnvironment.swift */; };
 		A00000000000000000000024 /* CalendarGridModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000015 /* CalendarGridModel.swift */; };
 		A00000000000000000000025 /* CalendarScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000016 /* CalendarScreen.swift */; };
+		A00000000000000000000026 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000018 /* Assets.xcassets */; };
 		A00000000000000000000090 /* PlannerPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000092 /* PlannerPalette.swift */; };
 		A00000000000000000000093 /* IOSCalendarHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000094 /* IOSCalendarHeader.swift */; };
-		A00000000000000000000026 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000018 /* Assets.xcassets */; };
 		A00000000000000000000101 /* GoogleAccountConnectionConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000095 /* GoogleAccountConnectionConfiguration.swift */; };
 		A00000000000000000000102 /* IOSAccountControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000096 /* IOSAccountControl.swift */; };
 		A00000000000000000000103 /* IOSHeaderStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000097 /* IOSHeaderStatus.swift */; };
 		A00000000000000000000104 /* GoogleAccountConnectionConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000098 /* GoogleAccountConnectionConfigurationTests.swift */; };
+		A00000000000000000000109 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000107 /* GoogleSignIn */; };
+		A00000000000000000000110 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000108 /* GoogleSignInSwift */; };
 		A00000000000000000000113 /* GoogleAccountConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000111 /* GoogleAccountConnection.swift */; };
 		A00000000000000000000114 /* GoogleSignInSDKAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000112 /* GoogleSignInSDKAdapter.swift */; };
 		A00000000000000000000116 /* GoogleAccountConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000115 /* GoogleAccountConnectionTests.swift */; };
@@ -26,8 +28,7 @@
 		A00000000000000000000120 /* GoogleConnectionConnectivityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000119 /* GoogleConnectionConnectivityMonitor.swift */; };
 		A00000000000000000000122 /* GoogleConnectionInstallationBoundary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000121 /* GoogleConnectionInstallationBoundary.swift */; };
 		A00000000000000000000124 /* GoogleConnectionInstallationBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000123 /* GoogleConnectionInstallationBoundaryTests.swift */; };
-		A00000000000000000000109 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000107 /* GoogleSignIn */; };
-		A00000000000000000000110 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000108 /* GoogleSignInSwift */; };
+		A00000000000000000000126 /* HeaderCollisionLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000125 /* HeaderCollisionLayoutTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -48,14 +49,16 @@
 		A00000000000000000000014 /* CalendarEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEnvironment.swift; sourceTree = "<group>"; };
 		A00000000000000000000015 /* CalendarGridModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarGridModel.swift; sourceTree = "<group>"; };
 		A00000000000000000000016 /* CalendarScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarScreen.swift; sourceTree = "<group>"; };
-		A00000000000000000000092 /* PlannerPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannerPalette.swift; sourceTree = "<group>"; };
-		A00000000000000000000094 /* IOSCalendarHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSCalendarHeader.swift; sourceTree = "<group>"; };
 		A00000000000000000000017 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A00000000000000000000018 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A00000000000000000000092 /* PlannerPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannerPalette.swift; sourceTree = "<group>"; };
+		A00000000000000000000094 /* IOSCalendarHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSCalendarHeader.swift; sourceTree = "<group>"; };
 		A00000000000000000000095 /* GoogleAccountConnectionConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAccountConnectionConfiguration.swift; sourceTree = "<group>"; };
 		A00000000000000000000096 /* IOSAccountControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSAccountControl.swift; sourceTree = "<group>"; };
 		A00000000000000000000097 /* IOSHeaderStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSHeaderStatus.swift; sourceTree = "<group>"; };
 		A00000000000000000000098 /* GoogleAccountConnectionConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAccountConnectionConfigurationTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000099 /* GoogleConnection.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = GoogleConnection.xcconfig; sourceTree = "<group>"; };
+		A00000000000000000000100 /* GoogleConnection.local.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = GoogleConnection.local.xcconfig.example; sourceTree = "<group>"; };
 		A00000000000000000000111 /* GoogleAccountConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAccountConnection.swift; sourceTree = "<group>"; };
 		A00000000000000000000112 /* GoogleSignInSDKAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignInSDKAdapter.swift; sourceTree = "<group>"; };
 		A00000000000000000000115 /* GoogleAccountConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAccountConnectionTests.swift; sourceTree = "<group>"; };
@@ -63,8 +66,7 @@
 		A00000000000000000000119 /* GoogleConnectionConnectivityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleConnectionConnectivityMonitor.swift; sourceTree = "<group>"; };
 		A00000000000000000000121 /* GoogleConnectionInstallationBoundary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleConnectionInstallationBoundary.swift; sourceTree = "<group>"; };
 		A00000000000000000000123 /* GoogleConnectionInstallationBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleConnectionInstallationBoundaryTests.swift; sourceTree = "<group>"; };
-		A00000000000000000000099 /* GoogleConnection.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = GoogleConnection.xcconfig; sourceTree = "<group>"; };
-		A00000000000000000000100 /* GoogleConnection.local.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = GoogleConnection.local.xcconfig.example; sourceTree = "<group>"; };
+		A00000000000000000000125 /* HeaderCollisionLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderCollisionLayoutTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -136,6 +138,7 @@
 				A00000000000000000000098 /* GoogleAccountConnectionConfigurationTests.swift */,
 				A00000000000000000000115 /* GoogleAccountConnectionTests.swift */,
 				A00000000000000000000123 /* GoogleConnectionInstallationBoundaryTests.swift */,
+				A00000000000000000000125 /* HeaderCollisionLayoutTests.swift */,
 			);
 			path = PlannerTests;
 			sourceTree = "<group>";
@@ -272,6 +275,7 @@
 				A00000000000000000000104 /* GoogleAccountConnectionConfigurationTests.swift in Sources */,
 				A00000000000000000000116 /* GoogleAccountConnectionTests.swift in Sources */,
 				A00000000000000000000124 /* GoogleConnectionInstallationBoundaryTests.swift in Sources */,
+				A00000000000000000000126 /* HeaderCollisionLayoutTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -285,37 +289,11 @@
 		};
 /* End PBXTargetDependency section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		A00000000000000000000106 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
-			requirement = {
-				kind = exactVersion;
-				version = 9.2.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		A00000000000000000000107 /* GoogleSignIn */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A00000000000000000000106 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
-			productName = GoogleSignIn;
-		};
-		A00000000000000000000108 /* GoogleSignInSwift */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A00000000000000000000106 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
-			productName = GoogleSignInSwift;
-		};
-/* End XCSwiftPackageProductDependency section */
-
 /* Begin XCBuildConfiguration section */
 		A00000000000000000000060 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -356,6 +334,7 @@
 					"DEBUG=1",
 					"$(inherited)",
 				);
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
@@ -369,6 +348,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 			};
 			name = Debug;
 		};
@@ -376,8 +356,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -412,6 +390,7 @@
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
@@ -424,6 +403,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -435,6 +415,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XRR68Q4FN7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Planner/Info.plist;
@@ -464,6 +445,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XRR68Q4FN7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Planner/Info.plist;
@@ -565,6 +547,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A00000000000000000000106 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = exactVersion;
+				version = 9.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A00000000000000000000107 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A00000000000000000000106 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		A00000000000000000000108 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A00000000000000000000106 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A00000000000000000000001 /* Project object */;
 }
