@@ -24,6 +24,8 @@
 		A00000000000000000000116 /* GoogleAccountConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000115 /* GoogleAccountConnectionTests.swift */; };
 		A00000000000000000000118 /* IOSConnectionExplanation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000117 /* IOSConnectionExplanation.swift */; };
 		A00000000000000000000120 /* GoogleConnectionConnectivityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000119 /* GoogleConnectionConnectivityMonitor.swift */; };
+		A00000000000000000000122 /* GoogleConnectionInstallationBoundary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000121 /* GoogleConnectionInstallationBoundary.swift */; };
+		A00000000000000000000124 /* GoogleConnectionInstallationBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000123 /* GoogleConnectionInstallationBoundaryTests.swift */; };
 		A00000000000000000000109 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000107 /* GoogleSignIn */; };
 		A00000000000000000000110 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000108 /* GoogleSignInSwift */; };
 /* End PBXBuildFile section */
@@ -59,6 +61,8 @@
 		A00000000000000000000115 /* GoogleAccountConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAccountConnectionTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000117 /* IOSConnectionExplanation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSConnectionExplanation.swift; sourceTree = "<group>"; };
 		A00000000000000000000119 /* GoogleConnectionConnectivityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleConnectionConnectivityMonitor.swift; sourceTree = "<group>"; };
+		A00000000000000000000121 /* GoogleConnectionInstallationBoundary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleConnectionInstallationBoundary.swift; sourceTree = "<group>"; };
+		A00000000000000000000123 /* GoogleConnectionInstallationBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleConnectionInstallationBoundaryTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000099 /* GoogleConnection.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = GoogleConnection.xcconfig; sourceTree = "<group>"; };
 		A00000000000000000000100 /* GoogleConnection.local.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = GoogleConnection.local.xcconfig.example; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -118,6 +122,7 @@
 				A00000000000000000000112 /* GoogleSignInSDKAdapter.swift */,
 				A00000000000000000000117 /* IOSConnectionExplanation.swift */,
 				A00000000000000000000119 /* GoogleConnectionConnectivityMonitor.swift */,
+				A00000000000000000000121 /* GoogleConnectionInstallationBoundary.swift */,
 				A00000000000000000000018 /* Assets.xcassets */,
 				A00000000000000000000017 /* Info.plist */,
 			);
@@ -130,6 +135,7 @@
 				A00000000000000000000012 /* CalendarGridModelTests.swift */,
 				A00000000000000000000098 /* GoogleAccountConnectionConfigurationTests.swift */,
 				A00000000000000000000115 /* GoogleAccountConnectionTests.swift */,
+				A00000000000000000000123 /* GoogleConnectionInstallationBoundaryTests.swift */,
 			);
 			path = PlannerTests;
 			sourceTree = "<group>";
@@ -254,6 +260,7 @@
 				A00000000000000000000114 /* GoogleSignInSDKAdapter.swift in Sources */,
 				A00000000000000000000118 /* IOSConnectionExplanation.swift in Sources */,
 				A00000000000000000000120 /* GoogleConnectionConnectivityMonitor.swift in Sources */,
+				A00000000000000000000122 /* GoogleConnectionInstallationBoundary.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -264,6 +271,7 @@
 				A00000000000000000000022 /* CalendarGridModelTests.swift in Sources */,
 				A00000000000000000000104 /* GoogleAccountConnectionConfigurationTests.swift in Sources */,
 				A00000000000000000000116 /* GoogleAccountConnectionTests.swift in Sources */,
+				A00000000000000000000124 /* GoogleConnectionInstallationBoundaryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

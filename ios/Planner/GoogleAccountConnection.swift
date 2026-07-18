@@ -160,8 +160,9 @@ protocol GoogleSignInAdapting {
 /// settles into an ordinary blank disconnected state. Connectivity loss is
 /// not authorization loss: an established connection survives offline
 /// periods with a warning and recovers when connectivity returns or the app
-/// next becomes active. Installation identity arrives in a later slice; SDK
-/// error classification stays behind the ``GoogleSignInAdapting`` seam.
+/// next becomes active. The installation boundary keeps credentials bound
+/// to one installation on one physical device; SDK error classification
+/// stays behind the ``GoogleSignInAdapting`` seam.
 @MainActor
 @Observable
 final class GoogleAccountConnection {
@@ -256,18 +257,21 @@ final class GoogleAccountConnection {
     /// when no sheet should be presented.
     private(set) var explanation: GoogleConnectionExplanation?
 
-    /// Builds the module for a gate-on build. A configured build receives an
-    /// adapter, enters the restoring presentation, and immediately validates
-    /// the saved authorization; an unconfigured build disables Connect and
-    /// reports that the connection is not configured. The release gate
-    /// decision itself stays outside: when the gate is off, no module exists
-    /// at all.
+    /// Builds the module for a gate-on build. A configured build receives
+    /// an adapter, establishes the installation boundary — clearing stale
+    /// Google Sign-In state before restoration when this is not the same
+    /// installation — enters the restoring presentation, and immediately
+    /// validates the saved authorization; an unconfigured build disables
+    /// Connect and reports that the connection is not configured. The
+    /// release gate decision itself stays outside: when the gate is off, no
+    /// module exists at all.
     init(
         configuration: GoogleAccountConnectionConfiguration,
         makeAdapter: (GoogleAccountConnectionConfiguration.Configured) ->
             any GoogleSignInAdapting,
         disclosureStore: any GoogleConnectionDisclosureStoring,
         connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)? = nil,
+        installationBoundary: GoogleConnectionInstallationBoundary,
         disclosureVersion: Int = GoogleAccountConnection.currentDisclosureVersion
     ) {
         self.disclosureStore = disclosureStore
@@ -282,6 +286,13 @@ final class GoogleAccountConnection {
                 message: GoogleAccountConnectionCopy.restoring,
                 tone: .info
             )
+            // A fresh installation or a backup on new hardware must not
+            // inherit the previous installation's sign-in. Clearing is the
+            // SDK's local sign-out — never direct Keychain deletion and
+            // never revocation — and runs before any restoration.
+            if installationBoundary.establish() != .same {
+                adapter?.signOut()
+            }
             beginValidation()
             connectivityMonitor?.start { [weak self] in
                 self?.handleConnectivityReturn()

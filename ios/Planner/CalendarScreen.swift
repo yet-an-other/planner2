@@ -579,7 +579,11 @@ private func previewUnconfiguredConnection() -> GoogleAccountConnection {
     GoogleAccountConnection(
         configuration: .unconfigured,
         makeAdapter: { _ in PreviewGoogleSignInAdapter() },
-        disclosureStore: UserDefaultsGoogleConnectionDisclosureStore()
+        disclosureStore: UserDefaultsGoogleConnectionDisclosureStore(),
+        installationBoundary: GoogleConnectionInstallationBoundary(
+            defaults: .standard,
+            deviceMarkerStore: KeychainGoogleConnectionDeviceMarkerStore()
+        )
     )
 }
 

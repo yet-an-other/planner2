@@ -7,7 +7,7 @@ import Testing
 /// is asserted through the same product-oriented interface the production
 /// SDK adapter satisfies.
 @MainActor
-private final class FakeGoogleSignInAdapter: GoogleSignInAdapting {
+final class FakeGoogleSignInAdapter: GoogleSignInAdapting {
     var signInCallCount = 0
     var requestedScopes: [[String]] = []
     var restoreCallCount = 0
@@ -46,7 +46,7 @@ private final class FakeGoogleSignInAdapter: GoogleSignInAdapting {
 
 /// The deterministic disclosure store: an in-memory acknowledgement marker
 /// behind the same seam the production UserDefaults store satisfies.
-private final class FakeGoogleConnectionDisclosureStore: GoogleConnectionDisclosureStoring {
+final class FakeGoogleConnectionDisclosureStore: GoogleConnectionDisclosureStoring {
     var acknowledgedVersion: Int?
     var recordCallCount = 0
 
@@ -423,7 +423,8 @@ struct GoogleAccountConnectionTests {
             disclosureStore: FakeGoogleConnectionDisclosureStore(
                 acknowledgedVersion: GoogleAccountConnection.currentDisclosureVersion
             ),
-            connectivityMonitor: monitor
+            connectivityMonitor: monitor,
+            installationBoundary: Self.sameInstallationBoundary()
         )
 
         #expect(
@@ -605,7 +606,8 @@ struct GoogleAccountConnectionTests {
                 adapterCreated = true
                 return FakeGoogleSignInAdapter()
             },
-            disclosureStore: FakeGoogleConnectionDisclosureStore()
+            disclosureStore: FakeGoogleConnectionDisclosureStore(),
+            installationBoundary: Self.sameInstallationBoundary()
         )
 
         #expect(!adapterCreated)
@@ -628,7 +630,8 @@ struct GoogleAccountConnectionTests {
     @Test("The first Connect presents the explanation before any Google UI")
     func firstConnectPresentsExplanation() async {
         let (connection, adapter, _, _) = makeConnection(
-            disclosureStore: FakeGoogleConnectionDisclosureStore()
+            disclosureStore: FakeGoogleConnectionDisclosureStore(),
+            installationBoundary: Self.sameInstallationBoundary()
         )
         #expect(await settledDisconnected(connection))
 
@@ -647,7 +650,8 @@ struct GoogleAccountConnectionTests {
     @Test("Continue acknowledges the disclosure and resumes the same Connect")
     func continueResumesConnect() async {
         let (connection, adapter, store, _) = makeConnection(
-            disclosureStore: FakeGoogleConnectionDisclosureStore()
+            disclosureStore: FakeGoogleConnectionDisclosureStore(),
+            installationBoundary: Self.sameInstallationBoundary()
         )
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .connected(Self.authorizedAccount()) }
@@ -674,7 +678,8 @@ struct GoogleAccountConnectionTests {
     @Test("Cancelling the explanation opens no Google UI and reports cancellation")
     func cancelExplanationReportsCancellation() async {
         let (connection, adapter, _, _) = makeConnection(
-            disclosureStore: FakeGoogleConnectionDisclosureStore()
+            disclosureStore: FakeGoogleConnectionDisclosureStore(),
+            installationBoundary: Self.sameInstallationBoundary()
         )
         #expect(await settledDisconnected(connection))
 
@@ -730,7 +735,8 @@ struct GoogleAccountConnectionTests {
     @Test("A repeated Connect while explaining presents one sheet")
     func duplicateConnectWhileExplaining() async {
         let (connection, adapter, _, _) = makeConnection(
-            disclosureStore: FakeGoogleConnectionDisclosureStore()
+            disclosureStore: FakeGoogleConnectionDisclosureStore(),
+            installationBoundary: Self.sameInstallationBoundary()
         )
         #expect(await settledDisconnected(connection))
 
@@ -989,7 +995,8 @@ struct GoogleAccountConnectionTests {
         let connection = GoogleAccountConnection(
             configuration: .unconfigured,
             makeAdapter: { _ in FakeGoogleSignInAdapter() },
-            disclosureStore: FakeGoogleConnectionDisclosureStore()
+            disclosureStore: FakeGoogleConnectionDisclosureStore(),
+            installationBoundary: Self.sameInstallationBoundary()
         )
         let url = URL(string: "com.googleusercontent.apps.example:/oauth")!
 
@@ -1011,7 +1018,7 @@ struct GoogleAccountConnectionTests {
         )
     }
 
-    private static func configuredConnection() -> GoogleAccountConnectionConfiguration {
+    static func configuredConnection() -> GoogleAccountConnectionConfiguration {
         GoogleAccountConnectionConfiguration(
             infoDictionary: [
                 "PlannerGoogleConnectionEnabled": "YES",
@@ -1034,6 +1041,7 @@ struct GoogleAccountConnectionTests {
             acknowledgedVersion: GoogleAccountConnection.currentDisclosureVersion
         ),
         connectivityMonitor: FakeConnectivityMonitor = FakeConnectivityMonitor(),
+        installationBoundary: GoogleConnectionInstallationBoundary = Self.sameInstallationBoundary(),
         disclosureVersion: Int = GoogleAccountConnection.currentDisclosureVersion,
         configure: (FakeGoogleSignInAdapter) -> Void = { _ in }
     ) -> (
@@ -1049,9 +1057,30 @@ struct GoogleAccountConnectionTests {
             makeAdapter: { _ in adapter },
             disclosureStore: disclosureStore,
             connectivityMonitor: connectivityMonitor,
+            installationBoundary: installationBoundary,
             disclosureVersion: disclosureVersion
         )
         return (connection, adapter, disclosureStore, connectivityMonitor)
+    }
+
+    /// A boundary pre-seeded with matching markers, so ordinary module
+    /// tests observe an ordinary relaunch with no installation clearing.
+    static func sameInstallationBoundary() -> GoogleConnectionInstallationBoundary {
+        let defaults = ephemeralDefaults()
+        let store = FakeDeviceMarkerStore()
+        let marker = UUID().uuidString
+        defaults.set(marker, forKey: GoogleConnectionInstallationBoundary.installMarkerKey)
+        store.storedMarker = marker
+        return GoogleConnectionInstallationBoundary(
+            defaults: defaults,
+            deviceMarkerStore: store
+        )
+    }
+
+    /// Install-local defaults for one test, isolated from other tests and
+    /// the host app.
+    static func ephemeralDefaults() -> UserDefaults {
+        makeEphemeralUserDefaults()
     }
 
     // MARK: Eventual assertions

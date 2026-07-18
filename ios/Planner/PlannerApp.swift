@@ -19,7 +19,11 @@ struct PlannerApp: App {
                     GoogleSignInSDKAdapter(configuration: configured)
                 },
                 disclosureStore: UserDefaultsGoogleConnectionDisclosureStore(),
-                connectivityMonitor: NWPathConnectivityMonitor()
+                connectivityMonitor: NWPathConnectivityMonitor(),
+                installationBoundary: GoogleConnectionInstallationBoundary(
+                    defaults: .standard,
+                    deviceMarkerStore: KeychainGoogleConnectionDeviceMarkerStore()
+                )
             )
         }
     }

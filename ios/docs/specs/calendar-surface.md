@@ -69,7 +69,7 @@ The iOS delivery stack is independent from the Web Experience. It shares vocabul
 Scrolling and Today Jump are the only product interactions. This slice contains no:
 
 - Calendar Event type, event renderer, event placeholder, busy block, or overflow control
-- Google Account Connection or Source Calendar. _Superseded only for development builds with the Google connection release gate enabled, which present the gated iOS Account Control and iOS Header Status with launch restoration, the first-connect explanation, Connect, offline recovery, and Disconnect on This Device; the installation boundary remains excluded here and arrives in a later slice._
+- Google Account Connection or Source Calendar. _Superseded only for development builds with the Google connection release gate enabled, which present the gated iOS Account Control and iOS Header Status with launch restoration, the first-connect explanation, Connect, offline recovery, the installation boundary, and Disconnect on This Device._
 - Date selection, detail view, navigation route, tab, sheet, toolbar, menu, onboarding, or settings
 - Persistence, restoration state, networking, permission, analytics, user notification, or extension
 - Background-processing entitlement, continuously running timer, widget, or alternate scene
