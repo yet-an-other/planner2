@@ -18,7 +18,8 @@ struct PlannerApp: App {
                 makeAdapter: { configured in
                     GoogleSignInSDKAdapter(configuration: configured)
                 },
-                disclosureStore: UserDefaultsGoogleConnectionDisclosureStore()
+                disclosureStore: UserDefaultsGoogleConnectionDisclosureStore(),
+                connectivityMonitor: NWPathConnectivityMonitor()
             )
         }
     }

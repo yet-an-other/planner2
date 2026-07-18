@@ -479,6 +479,30 @@ struct DateCellView: View {
     .frame(width: 834, height: 1_194)
 }
 
+#Preview("Account Control · Connected · Offline") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: GoogleAccountConnection(
+            control: .connected(
+                GoogleAccountConnection.GoogleConnectedProfile(
+                    displayName: "Rua Did",
+                    imageURL: nil
+                )
+            ),
+            status: GoogleAccountConnection.Status(
+                message: GoogleAccountConnectionCopy.offline,
+                tone: .warning
+            )
+        )
+    )
+    .frame(width: 393, height: 852)
+}
+
 #Preview("Account Control · Long Visible Month · Compact") {
     let environment = previewCalendarEnvironment(
         localeIdentifier: "es_ES",

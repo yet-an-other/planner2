@@ -64,6 +64,30 @@ private final class FakeGoogleConnectionDisclosureStore: GoogleConnectionDisclos
     }
 }
 
+/// The deterministic connectivity monitor: tests drive offline/online
+/// transitions directly through the same seam the production NWPathMonitor
+/// wrapper satisfies.
+private final class FakeConnectivityMonitor: GoogleConnectionConnectivityMonitoring {
+    private var onConnectivityReturn: (@MainActor () -> Void)?
+    var startCallCount = 0
+    var stopCallCount = 0
+
+    func start(onConnectivityReturn: @escaping @MainActor () -> Void) {
+        startCallCount += 1
+        self.onConnectivityReturn = onConnectivityReturn
+    }
+
+    func stop() {
+        stopCallCount += 1
+        onConnectivityReturn = nil
+    }
+
+    @MainActor
+    func simulateConnectivityReturn() {
+        onConnectivityReturn?()
+    }
+}
+
 @Suite("Google Account Connection")
 @MainActor
 struct GoogleAccountConnectionTests {
@@ -74,7 +98,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("A configured build starts restoring, then settles disconnected")
     func startsRestoringThenBlankDisconnected() async {
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
 
         // The restoring presentation is decided synchronously at startup, so
         // a saved connection can never flash a false Connect control.
@@ -98,7 +122,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("A valid saved connection restores connected identity")
     func validRestoration() async {
-        let (connection, _, _) = makeConnection {
+        let (connection, _, _, _) = makeConnection {
             $0.restoreHandler = { .restored(Self.authorizedAccount()) }
         }
 
@@ -117,7 +141,7 @@ struct GoogleAccountConnectionTests {
         // The SDK refreshes expired access credentials as part of restore;
         // a refreshed account reaches the module as an ordinary restored
         // account.
-        let (connection, adapter, _) = makeConnection {
+        let (connection, adapter, _, _) = makeConnection {
             $0.restoreHandler = { .restored(Self.authorizedAccount()) }
         }
 
@@ -128,7 +152,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("A restored session missing the Calendar scope is cleared")
     func restoredWithoutCalendarScope() async {
-        let (connection, adapter, _) = makeConnection {
+        let (connection, adapter, _, _) = makeConnection {
             $0.restoreHandler = {
                 .restored(
                     GoogleAuthorizedAccount(
@@ -155,7 +179,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("Invalid saved authorization clears the connection with guidance")
     func invalidRestoration() async {
-        let (connection, adapter, _) = makeConnection {
+        let (connection, adapter, _, _) = makeConnection {
             $0.restoreHandler = { .invalidAuthorization }
         }
 
@@ -176,7 +200,7 @@ struct GoogleAccountConnectionTests {
     func staleRestorationCompletion() async {
         var firstRestore: CheckedContinuation<GoogleRestorationOutcome, Never>?
         var secondRestore: CheckedContinuation<GoogleRestorationOutcome, Never>?
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         adapter.restoreHandler = {
             await withCheckedContinuation { continuation in
                 if adapter.restoreCallCount == 1 {
@@ -210,7 +234,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("A foreground refresh silently keeps a healthy connection")
     func foregroundValidationKeepsConnection() async {
-        let (connection, adapter, _) = makeConnection {
+        let (connection, adapter, _, _) = makeConnection {
             $0.restoreHandler = { .restored(Self.authorizedAccount()) }
         }
         #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
@@ -231,7 +255,7 @@ struct GoogleAccountConnectionTests {
     @Test("A foreground refresh is refused while Connect is in flight")
     func foregroundValidationRefusedDuringConnect() async {
         var release: CheckedContinuation<GoogleAuthorizationOutcome, Never>?
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = {
             await withCheckedContinuation { release = $0 }
@@ -250,7 +274,7 @@ struct GoogleAccountConnectionTests {
     @Test("Connect supersedes a silent validation still in flight")
     func connectSupersedesSilentValidation() async {
         var releaseValidation: CheckedContinuation<GoogleRestorationOutcome, Never>?
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.restoreHandler = {
             await withCheckedContinuation { releaseValidation = $0 }
@@ -274,7 +298,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("A lost saved session during validation reports expiry")
     func validationDiscoversLostSession() async {
-        let (connection, adapter, _) = makeConnection {
+        let (connection, adapter, _, _) = makeConnection {
             $0.restoreHandler = { .restored(Self.authorizedAccount()) }
         }
         #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
@@ -292,6 +316,282 @@ struct GoogleAccountConnectionTests {
             )
         )
         #expect(connection.control == .disconnected(connectEnabled: true))
+    }
+
+    // MARK: Offline and recovery
+
+    @Test("An offline validation preserves the connected state with a warning")
+    func offlineValidationPreservesConnection() async {
+        let (connection, adapter, _, _) = makeConnection {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+        #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+
+        adapter.restoreHandler = { .unavailable(.offline) }
+        connection.validateOnForeground()
+
+        #expect(
+            await statusEventuallyEquals(
+                GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.offline,
+                    tone: .warning
+                ),
+                in: connection
+            )
+        )
+        #expect(connection.control == .connected(Self.profile))
+    }
+
+    @Test("Connectivity return retries the owed validation and recovers")
+    func connectivityReturnRecovers() async {
+        let (connection, adapter, _, monitor) = makeConnection {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+        #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+        adapter.restoreHandler = { .unavailable(.offline) }
+        connection.validateOnForeground()
+        #expect(
+            await statusEventuallyEquals(
+                GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.offline,
+                    tone: .warning
+                ),
+                in: connection
+            )
+        )
+        let callsBeforeRecovery = adapter.restoreCallCount
+
+        adapter.restoreHandler = { .restored(Self.authorizedAccount()) }
+        monitor.simulateConnectivityReturn()
+
+        #expect(await eventually { adapter.restoreCallCount > callsBeforeRecovery })
+        #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+        #expect(
+            connection.status
+                == GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.connected,
+                    tone: .info
+                )
+        )
+    }
+
+    @Test("Repeated network transitions keep the warning until recovery succeeds")
+    func repeatedNetworkTransitions() async {
+        let (connection, adapter, _, monitor) = makeConnection {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+        #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+        adapter.restoreHandler = { .unavailable(.offline) }
+        connection.validateOnForeground()
+        #expect(await eventually { adapter.restoreCallCount == 2 })
+
+        // The first return retries but connectivity flaps again: the
+        // warning and the connection both remain.
+        monitor.simulateConnectivityReturn()
+        #expect(await eventually { adapter.restoreCallCount == 3 })
+        #expect(
+            connection.status
+                == GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.offline,
+                    tone: .warning
+                )
+        )
+        #expect(connection.control == .connected(Self.profile))
+
+        // The next return retries again and recovers.
+        adapter.restoreHandler = { .restored(Self.authorizedAccount()) }
+        monitor.simulateConnectivityReturn()
+        #expect(
+            await statusEventuallyEquals(
+                GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.connected,
+                    tone: .info
+                ),
+                in: connection
+            )
+        )
+    }
+
+    @Test("An offline launch restoration warns and recovers when online")
+    func offlineLaunchRestoration() async {
+        let monitor = FakeConnectivityMonitor()
+        let adapter = FakeGoogleSignInAdapter()
+        adapter.restoreHandler = { .unavailable(.offline) }
+        let connection = GoogleAccountConnection(
+            configuration: Self.configuredConnection(),
+            makeAdapter: { _ in adapter },
+            disclosureStore: FakeGoogleConnectionDisclosureStore(
+                acknowledgedVersion: GoogleAccountConnection.currentDisclosureVersion
+            ),
+            connectivityMonitor: monitor
+        )
+
+        #expect(
+            await statusEventuallyEquals(
+                GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.offline,
+                    tone: .warning
+                ),
+                in: connection
+            )
+        )
+        #expect(connection.control == .disconnected(connectEnabled: true))
+
+        adapter.restoreHandler = { .restored(Self.authorizedAccount()) }
+        monitor.simulateConnectivityReturn()
+
+        #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+    }
+
+    @Test("Only confirmed invalidation transitions to disconnected")
+    func invalidationDuringOfflineWarning() async {
+        let (connection, adapter, _, _) = makeConnection {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+        #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+        adapter.restoreHandler = { .unavailable(.offline) }
+        connection.validateOnForeground()
+        #expect(
+            await statusEventuallyEquals(
+                GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.offline,
+                    tone: .warning
+                ),
+                in: connection
+            )
+        )
+
+        adapter.restoreHandler = { .invalidAuthorization }
+        connection.validateOnForeground()
+
+        #expect(
+            await statusEventuallyEquals(
+                GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.expired,
+                    tone: .error
+                ),
+                in: connection
+            )
+        )
+        #expect(connection.control == .disconnected(connectEnabled: true))
+    }
+
+    @Test("A generic validation failure preserves the connection silently")
+    func genericValidationFailurePreservesConnection() async {
+        let (connection, adapter, _, _) = makeConnection {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+        #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+
+        adapter.restoreHandler = { .unavailable(.failed) }
+        connection.validateOnForeground()
+
+        #expect(await eventually { adapter.restoreCallCount == 2 })
+        #expect(connection.control == .connected(Self.profile))
+        #expect(
+            connection.status
+                == GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.connected,
+                    tone: .info
+                )
+        )
+    }
+
+    @Test("Disconnect on This Device succeeds while offline")
+    func disconnectWhileOffline() async {
+        let (connection, adapter, _, _) = makeConnection {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+        #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+        adapter.restoreHandler = { .unavailable(.offline) }
+        connection.validateOnForeground()
+        #expect(
+            await statusEventuallyEquals(
+                GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.offline,
+                    tone: .warning
+                ),
+                in: connection
+            )
+        )
+
+        connection.disconnectOnThisDevice()
+
+        #expect(adapter.signOutCallCount == 1)
+        #expect(connection.control == .disconnected(connectEnabled: true))
+        #expect(
+            connection.status
+                == GoogleAccountConnection.Status(
+                    message: GoogleAccountConnectionCopy.disconnectedOnThisDevice,
+                    tone: .info
+                )
+        )
+    }
+
+    @Test("Disconnect wins the race against an in-flight validation")
+    func disconnectRacesValidation() async {
+        var release: CheckedContinuation<GoogleRestorationOutcome, Never>?
+        let (connection, adapter, _, _) = makeConnection {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+        #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+        adapter.restoreHandler = {
+            await withCheckedContinuation { release = $0 }
+        }
+
+        connection.validateOnForeground()
+        #expect(await eventually { adapter.restoreCallCount == 2 })
+
+        connection.disconnectOnThisDevice()
+        #expect(connection.control == .disconnected(connectEnabled: true))
+
+        release?.resume(returning: .restored(Self.authorizedAccount()))
+        #expect(
+            await neverHappens {
+                connection.control != .disconnected(connectEnabled: true)
+            }
+        )
+    }
+
+    @Test("Connectivity return without an owed validation does not revalidate")
+    func connectivityReturnWithoutOwedValidation() async {
+        let (connection, adapter, _, monitor) = makeConnection {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+        #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+        let calls = adapter.restoreCallCount
+
+        monitor.simulateConnectivityReturn()
+
+        #expect(
+            await neverHappens { adapter.restoreCallCount > calls }
+        )
+    }
+
+    @Test("Module lifetime end stops observation and ignores in-flight work")
+    func moduleLifetimeEnd() async {
+        var release: CheckedContinuation<GoogleRestorationOutcome, Never>?
+        let monitor = FakeConnectivityMonitor()
+        var fixture: (
+            connection: GoogleAccountConnection,
+            adapter: FakeGoogleSignInAdapter,
+            disclosureStore: FakeGoogleConnectionDisclosureStore,
+            connectivityMonitor: FakeConnectivityMonitor
+        )? = makeConnection(connectivityMonitor: monitor) {
+            $0.restoreHandler = {
+                await withCheckedContinuation { release = $0 }
+            }
+        }
+        #expect(await eventually { fixture?.adapter.restoreCallCount == 1 })
+
+        fixture = nil
+        #expect(monitor.stopCallCount == 1)
+
+        // Completing the in-flight validation after the module is gone is
+        // ignored: there is nothing left to overwrite and no crash.
+        release?.resume(returning: .restored(Self.authorizedAccount()))
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(monitor.stopCallCount == 1)
     }
 
     // MARK: Initial presentation
@@ -327,7 +627,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("The first Connect presents the explanation before any Google UI")
     func firstConnectPresentsExplanation() async {
-        let (connection, adapter, _) = makeConnection(
+        let (connection, adapter, _, _) = makeConnection(
             disclosureStore: FakeGoogleConnectionDisclosureStore()
         )
         #expect(await settledDisconnected(connection))
@@ -346,7 +646,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("Continue acknowledges the disclosure and resumes the same Connect")
     func continueResumesConnect() async {
-        let (connection, adapter, store) = makeConnection(
+        let (connection, adapter, store, _) = makeConnection(
             disclosureStore: FakeGoogleConnectionDisclosureStore()
         )
         #expect(await settledDisconnected(connection))
@@ -373,7 +673,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("Cancelling the explanation opens no Google UI and reports cancellation")
     func cancelExplanationReportsCancellation() async {
-        let (connection, adapter, _) = makeConnection(
+        let (connection, adapter, _, _) = makeConnection(
             disclosureStore: FakeGoogleConnectionDisclosureStore()
         )
         #expect(await settledDisconnected(connection))
@@ -397,7 +697,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("An acknowledged current version suppresses the explanation")
     func acknowledgedVersionSuppressesSheet() async {
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .cancelled }
 
@@ -411,7 +711,7 @@ struct GoogleAccountConnectionTests {
     func incrementedVersionPresentsSheetAgain() async {
         let store = FakeGoogleConnectionDisclosureStore(acknowledgedVersion: 1)
         let updatedVersion = GoogleAccountConnection.currentDisclosureVersion + 1
-        let (connection, adapter, _) = makeConnection(
+        let (connection, adapter, _, _) = makeConnection(
             disclosureStore: store,
             disclosureVersion: updatedVersion
         )
@@ -429,7 +729,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("A repeated Connect while explaining presents one sheet")
     func duplicateConnectWhileExplaining() async {
-        let (connection, adapter, _) = makeConnection(
+        let (connection, adapter, _, _) = makeConnection(
             disclosureStore: FakeGoogleConnectionDisclosureStore()
         )
         #expect(await settledDisconnected(connection))
@@ -446,7 +746,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("A successful Connect publishes the connected account")
     func successfulConnect() async {
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .connected(Self.authorizedAccount()) }
 
@@ -477,7 +777,7 @@ struct GoogleAccountConnectionTests {
         // When the project-wide grant already covers the Calendar scope, the
         // single authorization request returns it without a redundant prompt;
         // no incremental scope request follows.
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .connected(Self.authorizedAccount()) }
 
@@ -492,7 +792,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("A missing Calendar scope clears the partial local sign-in")
     func missingCalendarScope() async {
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = {
             .connected(
@@ -521,7 +821,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("User cancellation remains disconnected")
     func cancellation() async {
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .cancelled }
 
@@ -542,7 +842,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("A generic failure maps to stable Planner-owned copy")
     func genericFailure() async {
-        let (connection, _, _) = makeConnection()
+        let (connection, _, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         // The fake's default Connect outcome is a generic failure.
 
@@ -562,7 +862,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("A connectivity failure maps to stable Planner-owned copy")
     func connectivityFailure() async {
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .unavailable(.offline) }
 
@@ -583,7 +883,7 @@ struct GoogleAccountConnectionTests {
     @Test("Duplicate Connect activations launch one authorization")
     func duplicateConnectProtection() async {
         var release: CheckedContinuation<GoogleAuthorizationOutcome, Never>?
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = {
             await withCheckedContinuation { continuation in
@@ -608,7 +908,7 @@ struct GoogleAccountConnectionTests {
     @Test("Connect is unavailable while restoring")
     func connectUnavailableWhileRestoring() async {
         var release: CheckedContinuation<GoogleRestorationOutcome, Never>?
-        let (connection, adapter, _) = makeConnection {
+        let (connection, adapter, _, _) = makeConnection {
             $0.restoreHandler = {
                 await withCheckedContinuation { release = $0 }
             }
@@ -625,7 +925,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("Connect is unavailable while connected")
     func connectWhileConnected() async {
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .connected(Self.authorizedAccount()) }
         connection.connect()
@@ -640,7 +940,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("Disconnect on This Device signs out locally and immediately")
     func disconnectOnThisDevice() async {
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .connected(Self.authorizedAccount()) }
         connection.connect()
@@ -663,7 +963,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("Disconnect is unavailable without a connection")
     func disconnectWithoutConnection() async {
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
 
         connection.disconnectOnThisDevice()
@@ -677,7 +977,7 @@ struct GoogleAccountConnectionTests {
 
     @Test("The callback route forwards to the adapter")
     func callbackRoute() {
-        let (connection, adapter, _) = makeConnection()
+        let (connection, adapter, _, _) = makeConnection()
         let url = URL(string: "com.googleusercontent.apps.example:/oauth")!
 
         #expect(connection.handleCallbackURL(url))
@@ -733,12 +1033,14 @@ struct GoogleAccountConnectionTests {
         disclosureStore: FakeGoogleConnectionDisclosureStore = FakeGoogleConnectionDisclosureStore(
             acknowledgedVersion: GoogleAccountConnection.currentDisclosureVersion
         ),
+        connectivityMonitor: FakeConnectivityMonitor = FakeConnectivityMonitor(),
         disclosureVersion: Int = GoogleAccountConnection.currentDisclosureVersion,
         configure: (FakeGoogleSignInAdapter) -> Void = { _ in }
     ) -> (
         connection: GoogleAccountConnection,
         adapter: FakeGoogleSignInAdapter,
-        disclosureStore: FakeGoogleConnectionDisclosureStore
+        disclosureStore: FakeGoogleConnectionDisclosureStore,
+        connectivityMonitor: FakeConnectivityMonitor
     ) {
         let adapter = FakeGoogleSignInAdapter()
         configure(adapter)
@@ -746,9 +1048,10 @@ struct GoogleAccountConnectionTests {
             configuration: Self.configuredConnection(),
             makeAdapter: { _ in adapter },
             disclosureStore: disclosureStore,
+            connectivityMonitor: connectivityMonitor,
             disclosureVersion: disclosureVersion
         )
-        return (connection, adapter, disclosureStore)
+        return (connection, adapter, disclosureStore, connectivityMonitor)
     }
 
     // MARK: Eventual assertions

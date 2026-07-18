@@ -107,6 +107,21 @@ struct UserDefaultsGoogleConnectionDisclosureStore: GoogleConnectionDisclosureSt
     }
 }
 
+/// The connectivity seam behind offline recovery.
+///
+/// Production observes path changes event-driven (no polling, no timers,
+/// no background processing); tests drive transitions directly. The module
+/// only needs to know when connectivity returns after an offline period, so
+/// it can retry a validation it owes.
+protocol GoogleConnectionConnectivityMonitoring: AnyObject {
+    /// Starts observation. The handler runs on the main actor whenever
+    /// connectivity returns after an offline period.
+    func start(onConnectivityReturn: @escaping @MainActor () -> Void)
+
+    /// Stops observation permanently.
+    func stop()
+}
+
 /// The Google Sign-In seam: one product-oriented interface satisfied by the
 /// official SDK in production and by a fake adapter in deterministic tests.
 ///
@@ -142,10 +157,11 @@ protocol GoogleSignInAdapting {
 /// Exactly one connected account exists at any time. Startup enters a
 /// restoring presentation before deciding connected or disconnected, so a
 /// saved connection never flashes a false Connect control and a first launch
-/// settles into an ordinary blank disconnected state. Connectivity-aware
-/// recovery, the first-connect explanation, and installation identity arrive
-/// in later slices; SDK error classification stays behind the
-/// ``GoogleSignInAdapting`` seam.
+/// settles into an ordinary blank disconnected state. Connectivity loss is
+/// not authorization loss: an established connection survives offline
+/// periods with a warning and recovers when connectivity returns or the app
+/// next becomes active. Installation identity arrives in a later slice; SDK
+/// error classification stays behind the ``GoogleSignInAdapting`` seam.
 @MainActor
 @Observable
 final class GoogleAccountConnection {
@@ -208,6 +224,13 @@ final class GoogleAccountConnection {
 
     private let adapter: (any GoogleSignInAdapting)?
 
+    /// The connectivity observer for offline recovery, when configured.
+    private let connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)?
+
+    /// Whether a validation could not complete because connectivity was
+    /// lost and is owed a retry when connectivity returns.
+    private var owesOfflineValidation = false
+
     /// The configured HTTPS Privacy Policy URL, present in every configured
     /// build.
     private let privacyPolicyURL: URL?
@@ -244,6 +267,7 @@ final class GoogleAccountConnection {
         makeAdapter: (GoogleAccountConnectionConfiguration.Configured) ->
             any GoogleSignInAdapting,
         disclosureStore: any GoogleConnectionDisclosureStoring,
+        connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)? = nil,
         disclosureVersion: Int = GoogleAccountConnection.currentDisclosureVersion
     ) {
         self.disclosureStore = disclosureStore
@@ -251,6 +275,7 @@ final class GoogleAccountConnection {
         switch configuration {
         case .configured(let configured):
             adapter = makeAdapter(configured)
+            self.connectivityMonitor = connectivityMonitor
             privacyPolicyURL = configured.privacyPolicyURL
             control = .restoring
             status = Status(
@@ -258,10 +283,14 @@ final class GoogleAccountConnection {
                 tone: .info
             )
             beginValidation()
+            connectivityMonitor?.start { [weak self] in
+                self?.handleConnectivityReturn()
+            }
         case .unconfigured, .gatedOff:
             // The composition root never passes a gated-off configuration;
             // defensively it behaves like any other unusable build.
             adapter = nil
+            self.connectivityMonitor = nil
             privacyPolicyURL = nil
             control = .disconnected(connectEnabled: false)
             status = Status(
@@ -281,6 +310,7 @@ final class GoogleAccountConnection {
         explanation: GoogleConnectionExplanation? = nil
     ) {
         adapter = nil
+        self.connectivityMonitor = nil
         privacyPolicyURL = explanation?.privacyPolicyURL
         disclosureStore = UserDefaultsGoogleConnectionDisclosureStore()
         disclosureVersion = Self.currentDisclosureVersion
@@ -289,6 +319,14 @@ final class GoogleAccountConnection {
         self.explanation = explanation
     }
     #endif
+
+    /// The module's lifetime end stops connectivity observation; in-flight
+    /// asynchronous work captures the module weakly and is ignored once the
+    /// module is gone. (The build-time gate disables the module by never
+    /// creating it, so no gated work ever runs.)
+    isolated deinit {
+        connectivityMonitor?.stop()
+    }
 
     /// Requests Connect. The current disclosure version must be acknowledged
     /// first: an unacknowledged installation gets the first-connect
@@ -421,16 +459,32 @@ final class GoogleAccountConnection {
         beginValidation()
     }
 
+    /// Handles connectivity returning after an offline period: retry the
+    /// validation the module owes, unless newer user intent (an interactive
+    /// Connect or a presented explanation) owns the pipeline.
+    private func handleConnectivityReturn() {
+        guard
+            adapter != nil,
+            owesOfflineValidation,
+            !isInteractiveFlowInFlight,
+            explanation == nil
+        else {
+            return
+        }
+        beginValidation()
+    }
+
     /// Disconnect on This Device: one activation immediately removes the
-    /// local connection with no confirmation and no connectivity. The seam
-    /// can only express local sign-out, so SDK disconnect and Google
-    /// revocation are unreachable here.
+    /// local connection with no confirmation and no connectivity — including
+    /// while offline. The seam can only express local sign-out, so SDK
+    /// disconnect and Google revocation are unreachable here.
     func disconnectOnThisDevice() {
         guard case .connected = control else {
             return
         }
 
         connectionDecision += 1
+        owesOfflineValidation = false
         adapter?.signOut()
         control = .disconnected(connectEnabled: true)
         status = Status(
@@ -466,13 +520,18 @@ final class GoogleAccountConnection {
         connectionDecision += 1
         let attempt = connectionDecision
 
-        Task {
+        Task { [weak self] in
             let outcome = await adapter.restorePreviousSignIn()
 
-            // A stale completion must not overwrite a newer decision.
-            guard attempt == connectionDecision else {
+            // A stale completion must not overwrite a newer decision, and a
+            // completed module ignores work that outlived it.
+            guard let self, attempt == self.connectionDecision else {
                 return
             }
+
+            // Any definitive outcome settles the owed offline retry; only an
+            // offline failure re-arms it below.
+            owesOfflineValidation = false
 
             switch outcome {
             case .restored(let account)
@@ -506,11 +565,31 @@ final class GoogleAccountConnection {
                     message: GoogleAccountConnectionCopy.expired,
                     tone: .error
                 )
-            case .unavailable:
-                // A transient validation failure never clears an established
-                // connection. Only a launch restoration settles, into the
-                // ordinary disconnected presentation; connectivity-aware
-                // warning copy and retry arrive with the offline slice.
+            case .unavailable(.offline):
+                // Connectivity loss is not authorization loss: an
+                // established connection stays connected with a recoverable
+                // warning, a launch restoration settles disconnected with
+                // the same warning, and either way the module owes a retry
+                // when connectivity returns.
+                if case .restoring = control {
+                    control = .disconnected(connectEnabled: true)
+                    status = Status(
+                        message: GoogleAccountConnectionCopy.offline,
+                        tone: .warning
+                    )
+                    owesOfflineValidation = true
+                } else if control.isConnected {
+                    status = Status(
+                        message: GoogleAccountConnectionCopy.offline,
+                        tone: .warning
+                    )
+                    owesOfflineValidation = true
+                }
+            case .unavailable(.failed):
+                // A non-connectivity validation failure confirms nothing
+                // about the authorization: preserve an established
+                // connection silently and settle a launch restoration into
+                // the ordinary disconnected presentation.
                 if case .restoring = control {
                     control = .disconnected(connectEnabled: true)
                     status = Status(message: nil, tone: .info)
@@ -569,6 +648,11 @@ extension GoogleAccountConnectionCopy {
     /// Shown when saved authorization is confirmed invalid or revoked, so
     /// the local connection is cleared.
     static let expired = "Google connection expired. Connect again"
+
+    /// Shown when connectivity loss prevents validation; an established
+    /// connection stays connected and validation retries on recovery.
+    static let offline =
+        "You\u{2019}re offline. Google connection will be checked when online"
 
     /// Shown for any authorization failure without more specific copy.
     static let failed = "Google connection failed. Try again"
