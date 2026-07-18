@@ -18,10 +18,29 @@ enum GoogleAuthorizationOutcome: Equatable, Sendable {
     case unavailable(GoogleAuthorizationFailure)
 }
 
+/// The product-oriented outcome of one silent validation of saved Google
+/// authorization: launch restoration and foreground revalidation share it.
+enum GoogleRestorationOutcome: Equatable, Sendable {
+    /// A saved account was restored, refreshing expired credentials when
+    /// Google Sign-In could refresh them.
+    case restored(GoogleAuthorizedAccount)
+
+    /// No saved sign-in exists: an ordinary disconnected result, never an
+    /// error.
+    case noSavedUser
+
+    /// The saved authorization is confirmed invalid or revoked; the local
+    /// connection must be cleared.
+    case invalidAuthorization
+
+    /// Validation could not complete.
+    case unavailable(GoogleAuthorizationFailure)
+}
+
 /// Planner-relevant authorization failure kinds.
 enum GoogleAuthorizationFailure: Equatable, Sendable {
-    /// A transient connectivity failure; recovery arrives with the
-    /// offline/lifecycle slice.
+    /// A transient connectivity failure; connectivity-aware recovery copy
+    /// and retry arrive with the offline/lifecycle slice.
     case offline
 
     /// Any other failure, reported through stable Planner-owned copy.
@@ -57,6 +76,11 @@ protocol GoogleSignInAdapting {
     /// project-wide consent is reused without a redundant prompt.
     func signIn(requestingScopes scopes: [String]) async -> GoogleAuthorizationOutcome
 
+    /// Silently restores the saved sign-in, refreshing expired access
+    /// credentials when refresh is available. Planner imposes no expiry of
+    /// its own: the saved authorization decides the outcome.
+    func restorePreviousSignIn() async -> GoogleRestorationOutcome
+
     /// Removes the local sign-in immediately, without connectivity.
     func signOut()
 
@@ -66,14 +90,18 @@ protocol GoogleSignInAdapting {
 }
 
 /// The deep native module behind the iOS Account Control and iOS Header
-/// Status: it owns the complete Connect and Disconnect on This Device state
-/// machine and publishes only two observable values — the control's
-/// presentation and the current status.
+/// Status: it owns the connection state machine — launch restoration,
+/// Connect, foreground revalidation, and Disconnect on This Device — and
+/// publishes only two observable values: the control's presentation and the
+/// current status.
 ///
-/// Exactly one connected account exists at any time. Restoration, refresh,
-/// connectivity recovery, the first-connect explanation, and installation
-/// identity arrive in later slices as hidden implementation growth; SDK
-/// error classification stays behind the ``GoogleSignInAdapting`` seam.
+/// Exactly one connected account exists at any time. Startup enters a
+/// restoring presentation before deciding connected or disconnected, so a
+/// saved connection never flashes a false Connect control and a first launch
+/// settles into an ordinary blank disconnected state. Connectivity-aware
+/// recovery, the first-connect explanation, and installation identity arrive
+/// in later slices; SDK error classification stays behind the
+/// ``GoogleSignInAdapting`` seam.
 @MainActor
 @Observable
 final class GoogleAccountConnection {
@@ -83,8 +111,12 @@ final class GoogleAccountConnection {
         /// unconfigured or a connection attempt is being prepared.
         case disconnected(connectEnabled: Bool)
 
-        /// An authorization attempt is in flight; the control is disabled
-        /// so repeated taps cannot launch a second flow.
+        /// Saved authorization is being restored; the control is disabled
+        /// so a false Connect cannot appear or be activated.
+        case restoring
+
+        /// An interactive authorization attempt is in flight; the control is
+        /// disabled so repeated taps cannot launch a second flow.
         case connecting
 
         /// The compact connected control with the Disconnect on This Device
@@ -137,10 +169,11 @@ final class GoogleAccountConnection {
     private(set) var status: Status
 
     /// Builds the module for a gate-on build. A configured build receives an
-    /// adapter and starts disconnected with a blank status; an unconfigured
-    /// build disables Connect and reports that the connection is not
-    /// configured. The release gate decision itself stays outside: when the
-    /// gate is off, no module exists at all.
+    /// adapter, enters the restoring presentation, and immediately validates
+    /// the saved authorization; an unconfigured build disables Connect and
+    /// reports that the connection is not configured. The release gate
+    /// decision itself stays outside: when the gate is off, no module exists
+    /// at all.
     init(
         configuration: GoogleAccountConnectionConfiguration,
         makeAdapter: (GoogleAccountConnectionConfiguration.Configured) ->
@@ -149,8 +182,12 @@ final class GoogleAccountConnection {
         switch configuration {
         case .configured(let configured):
             adapter = makeAdapter(configured)
-            control = .disconnected(connectEnabled: true)
-            status = Status(message: nil, tone: .info)
+            control = .restoring
+            status = Status(
+                message: GoogleAccountConnectionCopy.restoring,
+                tone: .info
+            )
+            beginValidation()
         case .unconfigured, .gatedOff:
             // The composition root never passes a gated-off configuration;
             // defensively it behaves like any other unusable build.
@@ -165,8 +202,8 @@ final class GoogleAccountConnection {
 
     #if DEBUG
     /// Deterministic presentation seam for SwiftUI previews. Interactive
-    /// transitions still work for Disconnect on This Device; Connect is a
-    /// no-op without an adapter.
+    /// transitions still work for Disconnect on This Device; Connect and
+    /// restoration are no-ops without an adapter.
     init(control: ControlPresentation, status: Status) {
         adapter = nil
         self.control = control
@@ -178,8 +215,10 @@ final class GoogleAccountConnection {
     /// authorization as one product flow.
     ///
     /// Duplicate activations are refused: Connect only starts from the
-    /// enabled disconnected presentation, so a connection already in flight
-    /// or an established connection can never launch a second authorization.
+    /// enabled disconnected presentation, so restoration, a connection
+    /// already in flight, or an established connection can never launch a
+    /// second authorization. Starting Connect supersedes any silent
+    /// validation still in flight.
     func connect() {
         guard
             let adapter,
@@ -210,16 +249,7 @@ final class GoogleAccountConnection {
             switch outcome {
             case .connected(let account)
             where account.grantedScopes.contains(Self.calendarReadScope):
-                control = .connected(
-                    GoogleConnectedProfile(
-                        displayName: account.displayName,
-                        imageURL: account.imageURL
-                    )
-                )
-                status = Status(
-                    message: GoogleAccountConnectionCopy.connected,
-                    tone: .info
-                )
+                publishConnected(account)
             case .connected:
                 // Identity without the Calendar scope is not a connection:
                 // clear the partial local sign-in and stay disconnected.
@@ -245,6 +275,20 @@ final class GoogleAccountConnection {
         }
     }
 
+    /// Revalidates the saved authorization when the app returns to the
+    /// foreground. Silent validation never changes the presentation on
+    /// entry; only its confirmed outcomes do. An interactive Connect owns
+    /// the pipeline, so foreground refresh is refused while it is in flight;
+    /// a newer validation supersedes one still in flight.
+    ///
+    /// The Calendar Screen requests this without ever seeing SDK details.
+    func validateOnForeground() {
+        guard adapter != nil, !isInteractiveFlowInFlight else {
+            return
+        }
+        beginValidation()
+    }
+
     /// Disconnect on This Device: one activation immediately removes the
     /// local connection with no confirmation and no connectivity. The seam
     /// can only express local sign-out, so SDK disconnect and Google
@@ -268,9 +312,111 @@ final class GoogleAccountConnection {
     func handleCallbackURL(_ url: URL) -> Bool {
         adapter?.handleCallbackURL(url) ?? false
     }
+
+    // MARK: Validation pipeline
+
+    private var isInteractiveFlowInFlight: Bool {
+        if case .connecting = control {
+            return true
+        }
+        return false
+    }
+
+    /// Starts one silent validation attempt: launch restoration and
+    /// foreground revalidation share this pipeline. The attempt supersedes
+    /// any earlier silent work; its completion applies only while it remains
+    /// the latest decision.
+    private func beginValidation() {
+        guard let adapter else {
+            return
+        }
+
+        connectionDecision += 1
+        let attempt = connectionDecision
+
+        Task {
+            let outcome = await adapter.restorePreviousSignIn()
+
+            // A stale completion must not overwrite a newer decision.
+            guard attempt == connectionDecision else {
+                return
+            }
+
+            switch outcome {
+            case .restored(let account)
+            where account.grantedScopes.contains(Self.calendarReadScope):
+                publishConnected(account)
+            case .restored:
+                // The grant lost the Calendar scope: the saved identity is
+                // not a connection, so clear it and stay disconnected.
+                adapter.signOut()
+                control = .disconnected(connectEnabled: true)
+                status = Status(
+                    message: GoogleAccountConnectionCopy.calendarReadAccessRequired,
+                    tone: .warning
+                )
+            case .noSavedUser:
+                // An established connection whose saved sign-in vanished
+                // expired like any invalid authorization; anything else is
+                // an ordinary blank disconnected state.
+                let wasConnected = control.isConnected
+                control = .disconnected(connectEnabled: true)
+                status = wasConnected
+                    ? Status(
+                        message: GoogleAccountConnectionCopy.expired,
+                        tone: .error
+                    )
+                    : Status(message: nil, tone: .info)
+            case .invalidAuthorization:
+                adapter.signOut()
+                control = .disconnected(connectEnabled: true)
+                status = Status(
+                    message: GoogleAccountConnectionCopy.expired,
+                    tone: .error
+                )
+            case .unavailable:
+                // A transient validation failure never clears an established
+                // connection. Only a launch restoration settles, into the
+                // ordinary disconnected presentation; connectivity-aware
+                // warning copy and retry arrive with the offline slice.
+                if case .restoring = control {
+                    control = .disconnected(connectEnabled: true)
+                    status = Status(message: nil, tone: .info)
+                }
+            }
+        }
+    }
+
+    /// Publishes the connected presentation for an authorized account that
+    /// holds the Calendar scope, refreshing the presented identity on every
+    /// successful validation.
+    private func publishConnected(_ account: GoogleAuthorizedAccount) {
+        control = .connected(
+            GoogleConnectedProfile(
+                displayName: account.displayName,
+                imageURL: account.imageURL
+            )
+        )
+        status = Status(
+            message: GoogleAccountConnectionCopy.connected,
+            tone: .info
+        )
+    }
+}
+
+private extension GoogleAccountConnection.ControlPresentation {
+    var isConnected: Bool {
+        if case .connected = self {
+            return true
+        }
+        return false
+    }
 }
 
 extension GoogleAccountConnectionCopy {
+    /// Shown while saved authorization is restored at launch.
+    static let restoring = "Restoring Google account…"
+
     /// Shown while the Google authorization flow is in flight.
     static let connecting = "Connecting Google account…"
 
@@ -287,6 +433,10 @@ extension GoogleAccountConnectionCopy {
     /// Shown when identity succeeds without the Calendar scope; the partial
     /// local sign-in is cleared and the app stays disconnected.
     static let calendarReadAccessRequired = "Calendar read access is required"
+
+    /// Shown when saved authorization is confirmed invalid or revoked, so
+    /// the local connection is cleared.
+    static let expired = "Google connection expired. Connect again"
 
     /// Shown for any authorization failure without more specific copy.
     static let failed = "Google connection failed. Try again"

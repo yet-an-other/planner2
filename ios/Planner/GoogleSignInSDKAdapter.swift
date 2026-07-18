@@ -41,16 +41,21 @@ final class GoogleSignInSDKAdapter: GoogleSignInAdapting {
                 additionalScopes: scopes
             )
 
-            let profile = result.user.profile
-            return .connected(
-                GoogleAuthorizedAccount(
-                    displayName: profile?.name,
-                    imageURL: profile.flatMap(Self.profileImageURL),
-                    grantedScopes: Set(result.user.grantedScopes ?? [])
-                )
-            )
+            return .connected(Self.account(from: result.user))
         } catch {
             return Self.classify(error)
+        }
+    }
+
+    func restorePreviousSignIn() async -> GoogleRestorationOutcome {
+        do {
+            // The SDK restores from its Keychain store and refreshes the
+            // access token when it is near expiry; Planner adds no expiry
+            // of its own.
+            let user = try await GIDSignIn.sharedInstance.restorePreviousSignIn()
+            return .restored(Self.account(from: user))
+        } catch {
+            return Self.classifyRestoration(error)
         }
     }
 
@@ -60,6 +65,15 @@ final class GoogleSignInSDKAdapter: GoogleSignInAdapting {
 
     func handleCallbackURL(_ url: URL) -> Bool {
         GIDSignIn.sharedInstance.handle(url)
+    }
+
+    /// The memory-only account snapshot crossing the seam.
+    private static func account(from user: GIDGoogleUser) -> GoogleAuthorizedAccount {
+        GoogleAuthorizedAccount(
+            displayName: user.profile?.name,
+            imageURL: user.profile.flatMap(Self.profileImageURL),
+            grantedScopes: Set(user.grantedScopes ?? [])
+        )
     }
 
     /// The profile image URL, requested large enough for the connected
@@ -86,6 +100,38 @@ final class GoogleSignInSDKAdapter: GoogleSignInAdapting {
         return .unavailable(.failed)
     }
 
+    /// Maps restoration errors to Planner-relevant outcomes: no saved
+    /// sign-in is ordinary, a rejected refresh is confirmed invalidation,
+    /// connectivity loss is transient, and anything else is a generic
+    /// failure.
+    private static func classifyRestoration(
+        _ error: Error
+    ) -> GoogleRestorationOutcome {
+        if let signInError = error as? GIDSignInError,
+           signInError.code == .hasNoAuthInKeychain
+        {
+            return .noSavedUser
+        }
+
+        if Self.isInvalidGrant(error) {
+            return .invalidAuthorization
+        }
+
+        if Self.isConnectivityFailure(error) {
+            return .unavailable(.offline)
+        }
+
+        return .unavailable(.failed)
+    }
+
+    /// AppAuth surfaces a rejected token refresh as an `invalid_grant` OAuth
+    /// token error: Google revoked or expired the authorization itself.
+    private static func isInvalidGrant(_ error: Error) -> Bool {
+        containsError(error) {
+            $0.domain == "org.openid.appauth.oauth_token" && $0.code == -10
+        }
+    }
+
     /// A transient connectivity failure may surface directly as a URL error
     /// or wrapped as the underlying cause of an SDK error.
     private static func isConnectivityFailure(_ error: Error) -> Bool {
@@ -95,11 +141,19 @@ final class GoogleSignInSDKAdapter: GoogleSignInAdapting {
             NSURLErrorTimedOut,
         ]
 
+        return containsError(error) {
+            $0.domain == NSURLErrorDomain && connectivityCodes.contains($0.code)
+        }
+    }
+
+    /// Walks the underlying-error chain looking for a match.
+    private static func containsError(
+        _ error: Error,
+        where predicate: (NSError) -> Bool
+    ) -> Bool {
         var current: NSError? = error as NSError
         while let error = current {
-            if error.domain == NSURLErrorDomain,
-               connectivityCodes.contains(error.code)
-            {
+            if predicate(error) {
                 return true
             }
             current = error.userInfo[NSUnderlyingErrorKey] as? NSError

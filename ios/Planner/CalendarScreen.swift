@@ -56,6 +56,9 @@ struct CalendarScreen: View {
             midnightScheduleGeneration += 1
             if nextScenePhase == .active {
                 refreshCalendarGrid()
+                // A foreground refresh asks the module to revalidate the
+                // connection; no SDK detail crosses this boundary.
+                connection?.validateOnForeground()
             }
         }
         .onReceive(
@@ -373,7 +376,20 @@ struct DateCellView: View {
     CalendarScreen(
         environment: environment,
         currentEnvironment: { environment },
-        connection: previewConnection(configuration: .unconfigured)
+        connection: previewUnconfiguredConnection()
+    )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Account Control · Restoring") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewRestoringConnection()
     )
     .frame(width: 393, height: 852)
 }
@@ -449,15 +465,26 @@ struct DateCellView: View {
     .frame(width: 507, height: 700)
 }
 
-/// A connection module for deterministic shell previews: disconnected and
-/// Connect-enabled, backed by a stub adapter that never reaches Google.
+/// A connection module fixed in the disconnected, Connect-enabled
+/// presentation for deterministic shell previews.
 @MainActor
-private func previewConnection(
-    configuration: GoogleAccountConnectionConfiguration? = nil
-) -> GoogleAccountConnection {
+private func previewConnection() -> GoogleAccountConnection {
     GoogleAccountConnection(
-        configuration: configuration ?? previewConfiguredConnection(),
-        makeAdapter: { _ in PreviewGoogleSignInAdapter() }
+        control: .disconnected(connectEnabled: true),
+        status: GoogleAccountConnection.Status(message: nil, tone: .info)
+    )
+}
+
+/// A connection module fixed in the restoring presentation that greets a
+/// returning user before saved authorization is validated.
+@MainActor
+private func previewRestoringConnection() -> GoogleAccountConnection {
+    GoogleAccountConnection(
+        control: .restoring,
+        status: GoogleAccountConnection.Status(
+            message: GoogleAccountConnectionCopy.restoring,
+            tone: .info
+        )
     )
 }
 
@@ -481,8 +508,18 @@ private func previewConnectedConnection() -> GoogleAccountConnection {
     )
 }
 
-/// The stub Google Sign-In adapter for previews: cancellation for Connect,
-/// no-op sign-out, and no callback handling.
+/// A connection module for the unconfigured-build presentation, driven
+/// through the real configuration path.
+@MainActor
+private func previewUnconfiguredConnection() -> GoogleAccountConnection {
+    GoogleAccountConnection(
+        configuration: .unconfigured,
+        makeAdapter: { _ in PreviewGoogleSignInAdapter() }
+    )
+}
+
+/// The stub Google Sign-In adapter for the unconfigured preview: it is
+/// never invoked because the module owns no adapter in that state.
 private struct PreviewGoogleSignInAdapter: GoogleSignInAdapting {
     func signIn(
         requestingScopes scopes: [String]
@@ -490,29 +527,15 @@ private struct PreviewGoogleSignInAdapter: GoogleSignInAdapting {
         .cancelled
     }
 
+    func restorePreviousSignIn() async -> GoogleRestorationOutcome {
+        .noSavedUser
+    }
+
     func signOut() {}
 
     func handleCallbackURL(_ url: URL) -> Bool {
         false
     }
-}
-
-/// A complete, valid connection configuration for deterministic shell
-/// previews. The values are placeholders, not real OAuth credentials.
-@MainActor
-private func previewConfiguredConnection() -> GoogleAccountConnectionConfiguration {
-    guard let privacyPolicyURL = URL(string: "https://planner.example/privacy")
-    else {
-        preconditionFailure("The preview Privacy Policy URL must be valid")
-    }
-
-    return .configured(
-        GoogleAccountConnectionConfiguration.Configured(
-            clientID: "1050123456789-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com",
-            reversedClientID: "com.googleusercontent.apps.1050123456789-abcdefghijklmnopqrstuvwxyz012345",
-            privacyPolicyURL: privacyPolicyURL
-        )
-    )
 }
 
 @MainActor

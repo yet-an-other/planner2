@@ -7,8 +7,9 @@ import SwiftUI
 /// button so branding, localization, and the disabled presentation stay
 /// Google-owned. The wide labeled form appears only when it fits the width
 /// the iOS Calendar Header offers; the icon form is used whenever the width
-/// is constrained. While a connection attempt is in flight the supplied
-/// disabled state prevents repeated activations.
+/// is constrained. While restoration or a connection attempt is in flight,
+/// the supplied disabled state prevents a false Connect and repeated
+/// activations.
 ///
 /// The connected presentation is a compact Planner-styled capsule with the
 /// account avatar — profile image when it loads, initials otherwise — and a
@@ -41,7 +42,9 @@ struct IOSAccountControl: View {
         switch presentation {
         case .disconnected(let connectEnabled):
             disconnectedControl(connectEnabled: connectEnabled)
-        case .connecting:
+        case .restoring, .connecting:
+            // Restoration and interactive Connect both present Google's
+            // disabled state: no false Connect, no repeated activation.
             disconnectedControl(connectEnabled: false)
         case .connected(let profile):
             ConnectedAccountControl(
