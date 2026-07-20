@@ -109,7 +109,7 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
         GeometryReader { geometry in
             ZStack {
                 Text("Planner")
-                    .font(.title.bold())
+                    .font(.headline.bold())
                     .foregroundStyle(PlannerPalette.olive)
                     .frame(
                         maxWidth: .infinity,
@@ -120,7 +120,7 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
 
                 Button(action: onJumpToToday) {
                     Text(visibleMonth)
-                        .font(.headline.bold())
+                        .font(.title.bold())
                         .foregroundStyle(PlannerPalette.ink)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
