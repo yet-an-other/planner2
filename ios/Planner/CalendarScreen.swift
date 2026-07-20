@@ -482,6 +482,9 @@ struct DateCellView: View {
                 .padding(.horizontal, 3)
                 .padding(.top, rowsTop)
                 .allowsHitTesting(false)
+                // Rows never paint past the fixed 96-point Week Row; the
+                // visible-cap slice decides how many may appear.
+                .clipped()
             }
         }
     }
@@ -950,6 +953,20 @@ private struct PreviewGoogleSignInAdapter: GoogleSignInAdapting {
     .frame(width: 834, height: 1_194)
 }
 
+#Preview("Calendar Events · Compact") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnectedConnection(),
+        events: previewEvents(environment: environment)
+    )
+    .frame(width: 320, height: 700)
+}
+
 #Preview("Calendar Events · Right to Left") {
     let environment = previewCalendarEnvironment(
         localeIdentifier: "ar_SA",
@@ -1033,6 +1050,15 @@ private struct PreviewGoogleCalendarEventsAdapter: GoogleCalendarEventsAdapting 
                     summary: "Dentist",
                     start: .timed(previewInstant(2026, 7, 16, 11, 0)),
                     end: .timed(previewInstant(2026, 7, 16, 12, 0)),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "month-start",
+                    summary: "Month Start",
+                    // A Month Marker cell carrying an all-day bar.
+                    start: .allDay(year: 2026, month: 8, day: 1),
+                    end: .allDay(year: 2026, month: 8, day: 2),
                     isCancelled: false,
                     isDeclinedByViewer: false
                 ),

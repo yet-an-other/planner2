@@ -683,6 +683,91 @@ struct CalendarEventsModelTests {
         #expect(model.layout(forWeekStarting: Self.gmt(2026, 7, 20)) == nil)
     }
 
+    @Test("A fetch completing after Disconnect on This Device stays cleared")
+    func staleFetchCompletionStaysCleared() async {
+        let (model, adapter) = makeModel()
+        var release: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { release = $0 }
+        }
+
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        model.setConnected(false)
+        release?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "stale",
+                        summary: "Stale",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        )
+
+        // The stale completion must never republish events over the user's
+        // Disconnect on This Device.
+        #expect(
+            await neverHappens {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 20)) != nil
+            }
+        )
+    }
+
+    @Test("Classification follows the environment's local days, not GMT")
+    func classificationFollowsEnvironmentLocalDays() async {
+        // Pacific/Kiritimati is UTC+14: an event from 23:30 to 00:30 GMT is
+        // 13:30–14:30 on a single local day there, so it presents as an
+        // intraday row; in GMT it would span midnight and become a bar.
+        guard let kiritimati = TimeZone(identifier: "Pacific/Kiritimati")
+        else {
+            preconditionFailure("Kiritimati must be available")
+        }
+        let environment = CalendarEnvironment(
+            now: Self.now,
+            calendar: Calendar(identifier: .gregorian),
+            locale: Locale(identifier: "en_US_POSIX"),
+            timeZone: kiritimati
+        )
+        let (model, adapter) = makeModel(environment: environment)
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "island-time",
+                        summary: "Island Time",
+                        start: .timed(Self.gmt(2026, 7, 21, 23, 30)),
+                        end: .timed(Self.gmt(2026, 7, 22, 0, 30)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        // The local Monday of the event's week is 2026-07-20 in Kiritimati.
+        var localCalendar = Calendar(identifier: .gregorian)
+        localCalendar.locale = Locale(identifier: "en_US_POSIX")
+        localCalendar.timeZone = kiritimati
+        let weekStart = localCalendar.date(
+            from: DateComponents(year: 2026, month: 7, day: 20)
+        )!
+
+        let layout = await layoutEventually(model, weekStart: weekStart)
+        // Locally the event is Wednesday 13:30–14:30: a row, never a bar.
+        #expect(layout?.bars == [])
+        #expect(layout?.cells[2].rows.map(\.id) == ["island-time"])
+    }
+
     // MARK: Helpers
 
     private func makeModel(
@@ -708,6 +793,22 @@ struct CalendarEventsModelTests {
         let deadline = ContinuousClock.now + timeout
         while !condition() {
             if ContinuousClock.now >= deadline {
+                return false
+            }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        return true
+    }
+
+    /// The mirror of `eventually`: holds for a short window that a condition
+    /// never becomes true, for stale-completion and no-fetch assertions.
+    private func neverHappens(
+        timeout: Duration = .milliseconds(200),
+        condition: @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if condition() {
                 return false
             }
             try? await Task.sleep(for: .milliseconds(1))

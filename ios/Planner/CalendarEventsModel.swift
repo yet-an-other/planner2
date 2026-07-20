@@ -135,6 +135,12 @@ final class CalendarEventsModel {
     @ObservationIgnored
     private var fetchedWindow: (start: Date, end: Date)?
 
+    /// Monotonic marker of the latest connection decision, so a stale
+    /// asynchronous fetch completion can never overwrite newer user intent
+    /// — the same discipline the connection module keeps.
+    @ObservationIgnored
+    private var connectionGeneration = 0
+
     /// Builds the module. A `nil` adapter leaves the module permanently
     /// inert: nothing fetches and nothing renders.
     init(
@@ -161,6 +167,8 @@ final class CalendarEventsModel {
             return
         }
 
+        connectionGeneration += 1
+
         guard connected else {
             fetchedWindow = nil
             weekLayouts = [:]
@@ -185,13 +193,17 @@ final class CalendarEventsModel {
             return
         }
 
+        let attempt = connectionGeneration
         Task { [weak self] in
             let outcome = await adapter.fetchEvents(
                 from: windowStart,
                 to: windowEnd
             )
 
-            guard let self else {
+            // A stale completion must not overwrite a newer decision: after
+            // Disconnect on This Device or a newer connection, its events
+            // are discarded.
+            guard let self, attempt == self.connectionGeneration else {
                 return
             }
 
