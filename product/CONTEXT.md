@@ -1,6 +1,6 @@
 # Planning
 
-The Planning context defines Planner's platform-neutral language for its shared calendar structure, connected Google accounts, and calendar data.
+The Planning context defines Planner's platform-neutral language for its shared calendar structure, connected Google accounts, calendar data, and event presentation.
 
 ## Language
 
@@ -67,6 +67,22 @@ _Avoid_: Calendar sync, selection reset, calendar reload
 **Calendar Event**:
 A Google Calendar event available to Planner from one of the Selected Source Calendars.
 _Avoid_: Event item, schedule entry, appointment
+
+**Fetched Window**:
+The continuous date range bounded by the earliest and latest dates fetched from Google Calendar.
+_Avoid_: Fetched cache, loaded range, data window
+
+**Calendar Event Bar**:
+A visual representation of a multiday or all-day Calendar Event rendered as a solid colored bar spanning one or more Date Cells.
+_Avoid_: Event strip, block, banner
+
+**Calendar Event Row**:
+A visual representation of an intraday Calendar Event rendered inside a single Date Cell with a dot, start time, and title.
+_Avoid_: Event chip, pill, card
+
+**Events Overflow**:
+The “+N more” marker shown in a Date Cell when its Calendar Events exceed the visible cap.
+_Avoid_: More link, +x item, extra events, expand button, overflow menu
 
 **Today**:
 The current calendar date in the viewer's local timezone.

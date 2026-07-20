@@ -4,10 +4,6 @@ The Web Experience context defines the language of Planner's browser-based calen
 
 ## Language
 
-**Fetched Window**:
-The continuous date range bounded by the earliest and latest dates fetched from Google Calendar.
-_Avoid_: Fetched cache, loaded range, data window
-
 **Calendar Surface**:
 The browser presentation of the Calendar Grid, extended with the user's Calendar Events.
 _Avoid_: Planner app, full planner, schedule manager, infinite calendar
@@ -36,14 +32,6 @@ _Avoid_: Toast, alert, notification bar
 A replacement of Calendar Events for the visible dates and the one-month scroll-prefetch buffer with their current state from the Selected Source Calendars.
 _Avoid_: Page refresh, reload, calendar refresh, sync
 
-**Calendar Event Bar**:
-A visual representation of a multiday or all-day Calendar Event rendered as a solid colored bar spanning one or more Date Cells.
-_Avoid_: Event strip, block, banner
-
-**Calendar Event Row**:
-A visual representation of an intraday Calendar Event rendered inside a single Date Cell with a dot, start time, and title.
-_Avoid_: Event chip, pill, card
-
 **Saved Busy Block**:
 A privacy-preserving placeholder persisted by the Web Experience for offline use that retains a Calendar Event's timing and color but not its title.
 _Avoid_: Cached event, local event, offline event
@@ -51,10 +39,6 @@ _Avoid_: Cached event, local event, offline event
 **Event Detail Popover**:
 A transient, read-only overlay that presents the details of one Calendar Event, including a link to that event in Google Calendar.
 _Avoid_: Event modal, event popup, detail card, edit dialog
-
-**Events Overflow**:
-The “+N more” affordance shown in a Date Cell when its Calendar Events exceed the visible cap.
-_Avoid_: More link, +x item, extra events, expand button, overflow menu
 
 **Day Events Popover**:
 A transient, read-only overlay that lists the Calendar Events for one Date Cell.
