@@ -56,10 +56,9 @@ enum HeaderCollisionLayout {
 /// The header owns the Product Name on the leading side — with the Product
 /// Version beneath it when the bundle provides one — the geometrically
 /// centered Visible Month (which acts as a Today Jump), and the
-/// Monday-first weekday labels. The Visible Month presents its full
-/// localized form while that fits at full size, falling back to the
-/// uppercase short month form before scaling and truncation. Two optional
-/// content seams —
+/// Monday-first weekday labels. The Visible Month presents the localized
+/// short month-and-year form (for example, Jul 2026), scaled down modestly
+/// and then truncated when space runs out. Two optional content seams —
 /// `accountControl` and `headerStatus` — let future work mount an iOS
 /// Account Control and iOS Header Status through the header rather than
 /// accumulating authentication or status behavior inside the Calendar
@@ -79,9 +78,11 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
     @FocusState private var visibleMonthFocused: Bool
     @State private var visibleMonthHovered = false
     @State private var accountControlWidth = HeaderCollisionLayout.minimumSideReservation
+    /// The Product Version's size: 75% of the iOS Header Status's footnote,
+    /// scaling proportionally with Dynamic Type.
+    @ScaledMetric(relativeTo: .footnote) private var productVersionFontSize = 9.75
 
     let visibleMonth: String
-    let shortVisibleMonth: String
     let productVersion: String?
     let weekdayLabels: [WeekdayLabel]
     let onJumpToToday: () -> Void
@@ -90,7 +91,6 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
 
     init(
         visibleMonth: String,
-        shortVisibleMonth: String,
         productVersion: String?,
         weekdayLabels: [WeekdayLabel],
         onJumpToToday: @escaping () -> Void,
@@ -98,7 +98,6 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
         @ViewBuilder headerStatus: () -> HeaderStatus = { EmptyView() }
     ) {
         self.visibleMonth = visibleMonth
-        self.shortVisibleMonth = shortVisibleMonth
         self.productVersion = productVersion
         self.weekdayLabels = weekdayLabels
         self.onJumpToToday = onJumpToToday
@@ -126,7 +125,7 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
 
                     if let productVersion {
                         Text(productVersion)
-                            .font(.footnote)
+                            .font(.system(size: productVersionFontSize))
                             .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                             .foregroundStyle(PlannerPalette.monthRule)
                             .lineLimit(1)
@@ -141,23 +140,17 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
                 .padding(.horizontal, 16)
 
                 Button(action: onJumpToToday) {
-                    ViewThatFits(in: .horizontal) {
-                        Text(visibleMonth)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-
-                        Text(shortVisibleMonth)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .truncationMode(.tail)
-                    }
-                    .font(.title.bold())
-                    .foregroundStyle(PlannerPalette.ink)
-                    .frame(
-                        maxWidth: visibleMonthMaxWidth(
-                            in: geometry.size.width
+                    Text(visibleMonth)
+                        .font(.title.bold())
+                        .foregroundStyle(PlannerPalette.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .truncationMode(.tail)
+                        .frame(
+                            maxWidth: visibleMonthMaxWidth(
+                                in: geometry.size.width
+                            )
                         )
-                    )
                 }
                 .buttonStyle(
                     VisibleMonthButtonStyle(

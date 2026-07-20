@@ -186,13 +186,11 @@ struct CalendarGridModelTests {
             yearMonthDay(of: $0.start, calendar: calendar) == [2026, 8, 3]
         })
 
-        #expect(model.visibleMonth == "July 2026")
-        #expect(model.shortVisibleMonth == "JUL 2026")
+        #expect(model.visibleMonth == "Jul 2026")
 
         model.showWeek(starting: augustWeek.start)
 
-        #expect(model.visibleMonth == "August 2026")
-        #expect(model.shortVisibleMonth == "AUG 2026")
+        #expect(model.visibleMonth == "Aug 2026")
     }
 
     @Test("Visible Month uses the Monday of Today's Week Row at a year boundary")
@@ -222,7 +220,7 @@ struct CalendarGridModelTests {
         )
 
         #expect(yearMonthDay(of: model.topWeekStart, calendar: calendar) == [2022, 12, 26])
-        #expect(model.visibleMonth == "December 2022")
+        #expect(model.visibleMonth == "Dec 2022")
     }
 
     @Test("Today Jump targets Today's Week Row and is a no-op when already there")
@@ -296,8 +294,7 @@ struct CalendarGridModelTests {
             yearMonthDay(of: $0.date, calendar: calendar) == [2026, 7, 1]
         })
 
-        #expect(model.visibleMonth == "julio de 2026")
-        #expect(model.shortVisibleMonth == "JUL 2026")
+        #expect(model.visibleMonth == "jul 2026")
         #expect(model.weekdayLabels.map(\.text) == ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"])
         #expect(model.todayWeek.dateCells[2].dayText == "15")
         #expect(firstOfJuly.monthMarker == "JUL")
@@ -330,7 +327,7 @@ struct CalendarGridModelTests {
         )
 
         #expect(yearMonthDay(of: model.today, calendar: gregorian) == [2026, 7, 15])
-        #expect(model.visibleMonth == "julio de 2026")
+        #expect(model.visibleMonth == "jul 2026")
         #expect(model.todayWeek.dateCells.map {
             gregorian.component(.weekday, from: $0.date)
         } == [2, 3, 4, 5, 6, 7, 1])
@@ -425,7 +422,7 @@ struct CalendarGridModelTests {
         #expect(yearMonthDay(of: model.today, calendar: calendar) == [2026, 7, 16])
         #expect(yearMonthDay(of: model.topWeekStart, calendar: calendar) == [2026, 8, 3])
         #expect(yearMonthDay(of: scrollTarget, calendar: calendar) == [2026, 8, 3])
-        #expect(model.visibleMonth == "August 2026")
+        #expect(model.visibleMonth == "Aug 2026")
         #expect(model.todayWeek.dateCells.map(\.isToday) == [false, false, false, true, false, false, false])
         #expect(model.todayJumpTarget() == model.todayWeek.start)
     }
@@ -617,7 +614,7 @@ struct CalendarGridModelTests {
         #expect(lowerScrollTarget == refreshedFirstWeek.start)
         #expect(lowerEdgeModel.topWeekStart == refreshedFirstWeek.start)
         #expect(yearMonthDay(of: refreshedFirstWeek.start, calendar: calendar) == [2018, 7, 9])
-        #expect(lowerEdgeModel.visibleMonth == "July 2018")
+        #expect(lowerEdgeModel.visibleMonth == "Jul 2018")
         #expect(lowerEdgeModel.todayJumpTarget() == lowerEdgeModel.todayWeek.start)
 
         let upperEdgeModel = CalendarGridModel(
@@ -644,7 +641,7 @@ struct CalendarGridModelTests {
         #expect(upperScrollTarget == refreshedLastWeek.start)
         #expect(upperEdgeModel.topWeekStart == refreshedLastWeek.start)
         #expect(yearMonthDay(of: refreshedLastWeek.start, calendar: calendar) == [2034, 7, 10])
-        #expect(upperEdgeModel.visibleMonth == "July 2034")
+        #expect(upperEdgeModel.visibleMonth == "Jul 2034")
         #expect(upperEdgeModel.todayJumpTarget() == upperEdgeModel.todayWeek.start)
     }
 

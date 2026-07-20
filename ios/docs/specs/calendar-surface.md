@@ -40,7 +40,7 @@ The iOS delivery stack is independent from the Web Experience. It shares vocabul
 - Keep semantic weekday and Date Cell order Monday through Sunday.
 - Classify weekends with the locale's calendar rules rather than fixed Saturday/Sunday assumptions.
 - Mirror the iOS Calendar Header and Calendar Grid for right-to-left languages. Monday remains at the leading edge, the Product Name moves to leading, and day numbers remain top-trailing.
-- Keep the Visible Month on one line without overlapping the Product Name or changing header height: present the full localized month-and-year form while it fits at full size; when it does not, fall back to the uppercase localized short month form (matching the Month Marker treatment); scale the short form down modestly, then truncate.
+- Present the Visible Month as the localized short month-and-year form (for example, Jan 2026) on one line; scale it down modestly, then truncate, without overlapping the Product Name or changing header height.
 
 ### Date Cell presentation
 
@@ -101,7 +101,7 @@ See [`../../README.md`](../../README.md) for copyable build and test commands. C
 | Large iPhone with system Dark | iPhone 16 Pro Max, iOS 18.5 Simulator | Pass: application remains in the designed light appearance |
 | iPad portrait | 11-inch iPad Pro, iOS 18.5 Simulator | Pass: full-width Calendar Grid, RTL presentation, no card or maximum width |
 | iPad landscape | 11-inch iPad Pro, iOS 18.5 Simulator | Pass: position identity retained and seven columns reflowed without blanking |
-| Compact iPhone width | Deterministic 320-point Spanish preview | Pass: long Visible Month falls back to the short form without collision |
+| Compact iPhone width | Deterministic 320-point Spanish preview | Pass: Visible Month short form scales/truncates without collision |
 | Compact iPad width | Deterministic 507-point Arabic preview | Preview pass: full-width RTL reflow without a sidebar or alternate layout; actual Split View runtime check remains pending |
 | Native scrolling | iPhone 16 Pro, iOS 18.5 Simulator | Pass: native movement, transient indicator, immediate Visible Month; end-of-range boundary bounce was not separately re-run |
 | Today Jump | iPhone 16 Pro plus deterministic model coverage | Pass: animated return and no-op state; manual Reduce Motion setting remains pending |
