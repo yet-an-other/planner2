@@ -10,7 +10,7 @@ struct ProductVersionTests {
             ProductVersion.display(
                 marketingVersion: "1.0",
                 buildNumber: "1"
-            ) == "v1.0 (1)"
+            ) == "v1.0.1"
         )
     }
 
@@ -20,20 +20,20 @@ struct ProductVersionTests {
             ProductVersion.display(
                 marketingVersion: "2026.1",
                 buildNumber: "42"
-            ) == "v2026.1 (42)"
+            ) == "v2026.1.42"
         )
         #expect(
             ProductVersion.display(
                 marketingVersion: "beta",
                 buildNumber: "3"
-            ) == "beta (3)"
+            ) == "beta.3"
         )
         // Parity with the web rule's ASCII-only `/^\d/`.
         #expect(
             ProductVersion.display(
                 marketingVersion: "٢.0",
                 buildNumber: "1"
-            ) == "٢.0 (1)"
+            ) == "٢.0.1"
         )
     }
 

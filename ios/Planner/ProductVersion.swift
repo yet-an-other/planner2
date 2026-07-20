@@ -6,7 +6,7 @@ import Foundation
 /// deterministic to test; the composition mirrors the web Product Version's
 /// digit-leading `v`-prefix rule.
 enum ProductVersion {
-    /// The displayed identifier: `v1.0 (1)` with marketing version and
+    /// The displayed identifier: `v1.0.1` with marketing version and
     /// build number, `v1.0` when the build number is absent, and `nil` —
     /// the header hides the version — when the marketing version is absent.
     /// Never a bare build number. Empty values behave as absent.
@@ -31,7 +31,7 @@ enum ProductVersion {
         guard let buildNumber, !buildNumber.isEmpty else {
             return prefixed
         }
-        return "\(prefixed) (\(buildNumber))"
+        return "\(prefixed).\(buildNumber)"
     }
 
     /// The Product Version composed from the app's own bundle, or `nil`
