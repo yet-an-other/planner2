@@ -27,6 +27,7 @@ struct CalendarScreen: View {
         VStack(spacing: 0) {
             IOSCalendarHeader(
                 visibleMonth: model.visibleMonth,
+                shortVisibleMonth: model.shortVisibleMonth,
                 weekdayLabels: model.weekdayLabels,
                 onJumpToToday: jumpToToday,
                 accountControl: { accountControl },

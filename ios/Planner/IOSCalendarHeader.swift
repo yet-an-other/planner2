@@ -11,13 +11,13 @@ import SwiftUI
 /// colliding with it.
 enum HeaderCollisionLayout {
     /// The width each side of the title row reserves by default for the
-    /// Product Name and an optional account control, keeping the Visible
-    /// Month geometrically centered and clear of both.
-    static let minimumSideReservation: CGFloat = 144
+    /// compact Product Name block and an optional account control, keeping
+    /// the Visible Month geometrically centered and clear of both.
+    static let minimumSideReservation: CGFloat = 96
 
     /// The Visible Month's accepted minimum footprint: the width it keeps
-    /// at its minimum scale across supported locales before truncation is
-    /// allowed to begin.
+    /// across supported locales before the short month form, scaling, and
+    /// finally truncation take over, in either presentation form.
     static let visibleMonthMinimumFootprint: CGFloat = 120
 
     /// The widest control the header offers at a given total width.
@@ -55,10 +55,13 @@ enum HeaderCollisionLayout {
 ///
 /// The header owns the Product Name on the leading side, the geometrically
 /// centered Visible Month (which acts as a Today Jump), and the Monday-first
-/// weekday labels. Two optional content seams — `accountControl` and
-/// `headerStatus` — let future work mount an iOS Account Control and iOS
-/// Header Status through the header rather than accumulating authentication
-/// or status behavior inside the Calendar Screen.
+/// weekday labels. The Visible Month presents its full localized form while
+/// that fits at full size, falling back to the uppercase short month form
+/// before scaling and truncation. Two optional content seams —
+/// `accountControl` and `headerStatus` — let future work mount an iOS
+/// Account Control and iOS Header Status through the header rather than
+/// accumulating authentication or status behavior inside the Calendar
+/// Screen.
 ///
 /// A mounted account control stays clear of the centered Visible Month: the
 /// header bounds the control so it collapses before the month is forced
@@ -76,6 +79,7 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
     @State private var accountControlWidth = HeaderCollisionLayout.minimumSideReservation
 
     let visibleMonth: String
+    let shortVisibleMonth: String
     let weekdayLabels: [WeekdayLabel]
     let onJumpToToday: () -> Void
     @ViewBuilder var accountControl: AccountControl
@@ -83,12 +87,14 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
 
     init(
         visibleMonth: String,
+        shortVisibleMonth: String,
         weekdayLabels: [WeekdayLabel],
         onJumpToToday: @escaping () -> Void,
         @ViewBuilder accountControl: () -> AccountControl = { EmptyView() },
         @ViewBuilder headerStatus: () -> HeaderStatus = { EmptyView() }
     ) {
         self.visibleMonth = visibleMonth
+        self.shortVisibleMonth = shortVisibleMonth
         self.weekdayLabels = weekdayLabels
         self.onJumpToToday = onJumpToToday
         self.accountControl = accountControl()
@@ -119,17 +125,23 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
                     .padding(.horizontal, 16)
 
                 Button(action: onJumpToToday) {
-                    Text(visibleMonth)
-                        .font(.title.bold())
-                        .foregroundStyle(PlannerPalette.ink)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .truncationMode(.tail)
-                        .frame(
-                            maxWidth: visibleMonthMaxWidth(
-                                in: geometry.size.width
-                            )
+                    ViewThatFits(in: .horizontal) {
+                        Text(visibleMonth)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+
+                        Text(shortVisibleMonth)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .truncationMode(.tail)
+                    }
+                    .font(.title.bold())
+                    .foregroundStyle(PlannerPalette.ink)
+                    .frame(
+                        maxWidth: visibleMonthMaxWidth(
+                            in: geometry.size.width
                         )
+                    )
                 }
                 .buttonStyle(
                     VisibleMonthButtonStyle(
@@ -141,6 +153,18 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
             }
             .overlay(alignment: .trailing) {
                 accountControl
+                    // Measure the control itself, not the bounding frame:
+                    // the control receives the frame's clamped proposal and
+                    // reports its honest collapsed width, while a flexible
+                    // frame would report the whole budget it was offered.
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.width
+                    } action: { measuredWidth in
+                        // The footprint includes the control's margins: the
+                        // 16-point horizontal padding applied below on each
+                        // side.
+                        accountControlWidth = measuredWidth + 32
+                    }
                     .frame(
                         maxWidth: HeaderCollisionLayout.accountControlBudget(
                             in: geometry.size.width
@@ -148,11 +172,6 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
                         alignment: .trailing
                     )
                     .padding(.horizontal, 16)
-                    .onGeometryChange(for: CGFloat.self) { proxy in
-                        proxy.size.width
-                    } action: { measuredWidth in
-                        accountControlWidth = measuredWidth
-                    }
             }
         }
         .frame(height: 64)

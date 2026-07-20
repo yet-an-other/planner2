@@ -39,14 +39,14 @@ struct HeaderCollisionLayoutTests {
         #expect(
             HeaderCollisionLayout.visibleMonthMaxWidth(
                 in: 393,
-                controlFootprint: 144
-            ) == 105
+                controlFootprint: 96
+            ) == 201
         )
         #expect(
             HeaderCollisionLayout.visibleMonthMaxWidth(
                 in: 402,
                 controlFootprint: 96
-            ) == 114
+            ) == 210
         )
     }
 

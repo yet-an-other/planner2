@@ -48,8 +48,19 @@ final class CalendarGridModel {
     @ObservationIgnored
     private var visibleMonthFormatter: DateFormatter
 
+    @ObservationIgnored
+    private var shortVisibleMonthFormatter: DateFormatter
+
     var visibleMonth: String {
         visibleMonthFormatter.string(from: topWeekStart)
+    }
+
+    /// The Visible Month's compact fallback: the localized short month
+    /// name, uppercased like a Month Marker, with the year. The header
+    /// presents it when the full form would not fit.
+    var shortVisibleMonth: String {
+        shortVisibleMonthFormatter.string(from: topWeekStart)
+            .uppercased(with: calendar.locale)
     }
 
     init(environment: CalendarEnvironment) {
@@ -124,6 +135,12 @@ final class CalendarGridModel {
         visibleMonthFormatter.timeZone = environment.timeZone
         visibleMonthFormatter.setLocalizedDateFormatFromTemplate("yyyyMMMM")
 
+        let shortVisibleMonthFormatter = DateFormatter()
+        shortVisibleMonthFormatter.calendar = calendar
+        shortVisibleMonthFormatter.locale = environment.locale
+        shortVisibleMonthFormatter.timeZone = environment.timeZone
+        shortVisibleMonthFormatter.setLocalizedDateFormatFromTemplate("yyyyMMM")
+
         self.today = today
         self.weekRows = weekRows
         self.todayWeekIndex = todayWeekIndex
@@ -135,6 +152,7 @@ final class CalendarGridModel {
         self.topWeekStart = todayWeekStart
         self.calendar = calendar
         self.visibleMonthFormatter = visibleMonthFormatter
+        self.shortVisibleMonthFormatter = shortVisibleMonthFormatter
     }
 
     @discardableResult
@@ -168,6 +186,7 @@ final class CalendarGridModel {
         layoutDirection = refreshed.layoutDirection
         calendar = refreshed.calendar
         visibleMonthFormatter = refreshed.visibleMonthFormatter
+        shortVisibleMonthFormatter = refreshed.shortVisibleMonthFormatter
         topWeekStart = preservedTopWeekStart
 
         return preservedTopWeekStart

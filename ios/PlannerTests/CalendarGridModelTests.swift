@@ -187,10 +187,12 @@ struct CalendarGridModelTests {
         })
 
         #expect(model.visibleMonth == "July 2026")
+        #expect(model.shortVisibleMonth == "JUL 2026")
 
         model.showWeek(starting: augustWeek.start)
 
         #expect(model.visibleMonth == "August 2026")
+        #expect(model.shortVisibleMonth == "AUG 2026")
     }
 
     @Test("Visible Month uses the Monday of Today's Week Row at a year boundary")
@@ -295,6 +297,7 @@ struct CalendarGridModelTests {
         })
 
         #expect(model.visibleMonth == "julio de 2026")
+        #expect(model.shortVisibleMonth == "JUL 2026")
         #expect(model.weekdayLabels.map(\.text) == ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"])
         #expect(model.todayWeek.dateCells[2].dayText == "15")
         #expect(firstOfJuly.monthMarker == "JUL")
