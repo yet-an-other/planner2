@@ -1,15 +1,15 @@
-import GoogleSignInSwift
 import SwiftUI
 
 /// The iOS Account Control across its connection presentations.
 ///
-/// The disconnected presentation uses Google's supplied SwiftUI sign-in
-/// button so branding, localization, and the disabled presentation stay
-/// Google-owned. The wide labeled form appears only when it fits the width
-/// the iOS Calendar Header offers; the icon form is used whenever the width
-/// is constrained. While restoration or a connection attempt is in flight,
-/// the supplied disabled state prevents a false Connect and repeated
-/// activations.
+/// The disconnected presentation is a Planner-styled capsule mirroring the
+/// connected form: a person-glyph circle in place of the avatar, a
+/// "Connect Google" label only when the measured width fits, and an
+/// enter-style affordance glyph. While restoration or a connection attempt
+/// is in flight, the same capsule renders dimmed and non-interactive, so
+/// there is no false Connect and no repeated activation. Planner owns the
+/// copy (English-only); no Google logo or "Sign in with Google" phrasing
+/// appears, per the custom-connect-control ADR.
 ///
 /// The connected presentation is a Planner-styled capsule with the account
 /// avatar — profile image when it loads, initials otherwise — a Disconnect
@@ -43,11 +43,18 @@ struct IOSAccountControl: View {
     var body: some View {
         switch presentation {
         case .disconnected(let connectEnabled):
-            disconnectedControl(connectEnabled: connectEnabled)
+            DisconnectedAccountControl(
+                connectEnabled: connectEnabled,
+                connect: connect
+            )
         case .restoring, .connecting:
-            // Restoration and interactive Connect both present Google's
-            // disabled state: no false Connect, no repeated activation.
-            disconnectedControl(connectEnabled: false)
+            // Restoration and interactive Connect both present the dimmed,
+            // non-interactive capsule: no false Connect, no repeated
+            // activation.
+            DisconnectedAccountControl(
+                connectEnabled: false,
+                connect: connect
+            )
         case .connected(let profile):
             ConnectedAccountControl(
                 profile: profile,
@@ -55,33 +62,72 @@ struct IOSAccountControl: View {
             )
         }
     }
+}
 
-    private func disconnectedControl(connectEnabled: Bool) -> some View {
-        ViewThatFits(in: .horizontal) {
-            googleButton(style: .wide, enabled: connectEnabled)
-                .fixedSize()
-            googleButton(style: .icon, enabled: connectEnabled)
+/// The disconnected form: the mirror of the connected capsule — a
+/// person-glyph circle in place of the avatar, the "Connect Google" label
+/// only when the measured width fits (the compact form takes over before
+/// the capsule could crowd the centered Visible Month), and an enter-style
+/// affordance glyph distinct from the connected form's disconnect glyph.
+/// While disabled, the capsule is non-interactive and dimmed.
+private struct DisconnectedAccountControl: View {
+    let connectEnabled: Bool
+    let connect: () -> Void
+
+    @FocusState private var focused: Bool
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: connect) {
+            ViewThatFits(in: .horizontal) {
+                disconnectedContent(showLabel: true)
+                    .fixedSize()
+                disconnectedContent(showLabel: false)
+            }
         }
+        .buttonStyle(
+            AccountCapsuleButtonStyle(emphasized: focused || hovered)
+        )
+        .focused($focused)
+        .onHover { hovered = $0 }
+        .disabled(!connectEnabled)
+        .opacity(connectEnabled ? 1 : 0.6)
         .frame(minWidth: 44, minHeight: 44)
         .contentShape(Rectangle())
         .hoverEffect()
-        // The label leads with Google's visible button text so VoiceOver
-        // and Voice Control match what sighted users see; the hint names
+        // The label leads with the visible button text so VoiceOver and
+        // Voice Control match what sighted users see; the hint names
         // Planner's action.
-        .accessibilityLabel("Sign in with Google")
+        .accessibilityLabel("Connect Google")
         .accessibilityHint("Connects your Google account")
     }
 
-    private func googleButton(
-        style: GoogleSignInButtonStyle,
-        enabled: Bool
-    ) -> some View {
-        GoogleSignInButton(
-            scheme: .light,
-            style: style,
-            state: enabled ? .normal : .disabled,
-            action: connect
-        )
+    private func disconnectedContent(showLabel: Bool) -> some View {
+        HStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(PlannerPalette.emphasizedControl)
+
+                Image(systemName: "person.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(PlannerPalette.olive)
+            }
+            .frame(width: 28, height: 28)
+
+            if showLabel {
+                Text("Connect Google")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(PlannerPalette.ink)
+                    .lineLimit(1)
+            }
+
+            Image(systemName: "arrow.right.to.line.compact")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(PlannerPalette.olive)
+        }
+        .padding(.leading, 4)
+        .padding(.trailing, 10)
+        .frame(height: 36)
     }
 }
 
@@ -106,7 +152,7 @@ private struct ConnectedAccountControl: View {
             }
         }
         .buttonStyle(
-            ConnectedAccountButtonStyle(emphasized: focused || hovered)
+            AccountCapsuleButtonStyle(emphasized: focused || hovered)
         )
         .focused($focused)
         .onHover { hovered = $0 }
@@ -151,9 +197,10 @@ private struct ConnectedAccountControl: View {
     }
 }
 
-/// The connected capsule's appearance: the Planner shell with a visible
+/// The account capsule's appearance — shared by the disconnected and
+/// connected forms: the Planner shell with a visible
 /// focus ring, and emphasis on keyboard focus, pointer hover, or press.
-private struct ConnectedAccountButtonStyle: ButtonStyle {
+private struct AccountCapsuleButtonStyle: ButtonStyle {
     let emphasized: Bool
 
     func makeBody(configuration: Configuration) -> some View {

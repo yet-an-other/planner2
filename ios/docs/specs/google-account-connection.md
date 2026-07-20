@@ -3,13 +3,13 @@
 - **Status:** Accepted
 - **Applies to:** Planner native iOS/iPadOS Google Account Connection
 - **Minimum deployment target:** iOS/iPadOS 17.0
-- **Related:** [`calendar-surface.md`](calendar-surface.md), [`../adr/0001-use-google-sign-in-for-native-account-connection.md`](../adr/0001-use-google-sign-in-for-native-account-connection.md), system ADR [`0002-keep-google-account-connections-local.md`](../../../docs/adr/0002-keep-google-account-connections-local.md), [`../research/google-account-connection-authentication.md`](../research/google-account-connection-authentication.md)
+- **Related:** [`calendar-surface.md`](calendar-surface.md), [`../adr/0001-use-google-sign-in-for-native-account-connection.md`](../adr/0001-use-google-sign-in-for-native-account-connection.md), [`../adr/0002-planner-owned-connect-control.md`](../adr/0002-planner-owned-connect-control.md), system ADR [`0002-keep-google-account-connections-local.md`](../../../docs/adr/0002-keep-google-account-connections-local.md), [`../research/google-account-connection-authentication.md`](../research/google-account-connection-authentication.md)
 
 ## Purpose and ownership
 
 The **iOS Google Account Connection** authorizes Planner for future read-only Google Calendar features from the native app. It presents through the **iOS Account Control** and **iOS Header Status** in the **iOS Calendar Header**, establishes Google identity plus the `calendar.readonly` scope through the official Google Sign-In SDK, and stays strictly local to one installation on one physical device. This slice performs no Google Calendar API request and fetches no Calendar data.
 
-Planning owns the shared **Google Authorization Grant**, **Google Account Connection**, and **Disconnect on This Device** language. The iOS Experience owns the **iOS Account Control** and **iOS Header Status** presentation. Google owns its supplied sign-in button, authorization UI, and their localization.
+Planning owns the shared **Google Authorization Grant**, **Google Account Connection**, and **Disconnect on This Device** language. The iOS Experience owns the **iOS Account Control** and **iOS Header Status** presentation, including the connect control's English-only copy. Google owns its authorization UI.
 
 ## Accepted behavior
 
@@ -18,7 +18,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 - A build-time release gate controls the entire addition. While off — every committed and production configuration — the app initializes no connection behavior, mounts neither the iOS Account Control nor the iOS Header Status, and renders the accepted 100-point iOS Calendar Header.
 - The gate remains off for production until a Calendar-data feature provides visible value for the sensitive scope.
 - With the gate on, the iOS OAuth client ID, reversed callback scheme, and HTTPS Privacy Policy URL arrive as environment-specific build settings substituted into the app bundle. No client secret setting exists anywhere.
-- A gate-on build with missing or invalid values leaves the iOS Calendar Surface usable, disables Connect through Google's supplied disabled state, and reports "Google connection is not configured".
+- A gate-on build with missing or invalid values leaves the iOS Calendar Surface usable, disables Connect through the control's dimmed, non-interactive state, and reports "Google connection is not configured".
 - Ordinary builds, previews, tests, and CI require no Google credentials, account, callback, or network access.
 
 ### Header composition
@@ -29,9 +29,9 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 
 ### iOS Account Control presentation
 
-- The disconnected presentation uses Google's supplied SwiftUI button: the wide labeled form only when the measured width fits, the icon form when constrained. Every form provides at least a 44-point activation target.
+- The disconnected presentation is a Planner-styled capsule mirroring the connected form: a person-glyph circle, a "Connect Google" label only when the measured width fits, and an enter-style affordance glyph distinct from the connected form's disconnect glyph. The capsule uses no Google logo and no "Sign in with Google" phrasing; its copy is English-only. Every form provides at least a 44-point activation target.
 - The connected presentation is a Planner-styled capsule with the account avatar — profile image once loaded, initials underneath at all times so a broken image never appears, a neutral person glyph without a display name — the Disconnect on This Device affordance, and the display name only when the measured width fits. Compact-versus-labeled selection always uses actual available width, never device category.
-- Restoration and Connect in flight present Google's disabled state; every control state preserves focus, pointer, hover, RTL, and accessibility behavior. VoiceOver labels lead with Google's visible button text when disconnected and announce the connected account identity with the local disconnect action when connected.
+- Restoration and Connect in flight present the same capsule dimmed and non-interactive; every control state preserves focus, pointer, hover, RTL, and accessibility behavior. VoiceOver labels lead with the visible button text when disconnected ("Connect Google") and announce the connected account identity with the local disconnect action when connected.
 
 ### Connect
 
@@ -100,7 +100,8 @@ Results recorded honestly. Cases requiring production-like OAuth configuration i
 | --- | --- | --- |
 | Gate-off build keeps the 100-point header | iPhone/iPad simulator, committed configuration | Pass: no control, no status row, unchanged surface |
 | Unconfigured gate-on build | iPhone simulator, gate on without values | Pass: disabled control, "Google connection is not configured", surface usable |
-| Disconnected/restoring/connected/offline presentations | iPhone/iPad simulator, deterministic module presentations | Pass: adaptive icon/wide/compact forms, RTL mirroring, centered month preserved |
+| Disconnected/restoring/connected/offline presentations | iPhone/iPad simulator, deterministic module presentations | Pass: adaptive compact/labeled capsule forms, RTL mirroring, centered month preserved |
+| Custom connect control | iPhone SE (3rd generation) and 11-inch iPad Pro, iOS 18.5 Simulators | Pass: compact capsule at compact width, labeled "Connect Google" capsule at wide width, no Google button assets; the dimmed non-interactive in-flight state is covered by the deterministic previews |
 | Long-name compact fallback | iPhone/iPad simulator | Pass: compact capsule without name at both widths |
 | First Connect with disclosure | Production-like iOS OAuth client and consent screen | Pending — external OAuth configuration required |
 | Connect success and scope grant | Production-like OAuth configuration | Pending — external OAuth configuration required |
@@ -134,7 +135,7 @@ These gates are deliberately **not complete** and are not reported as such:
 ## Compliance validation
 
 - **Pinned SDK graph.** Google Sign-In for iOS 9.2.0 is pinned at an exact version with the full dependency graph in `Package.resolved` (AppAuth 2.1.0, GTMAppAuth 5.0.0, gtm-session-fetcher 3.5.0, app-check 11.3.1, GoogleUtilities 8.1.2, Promises 2.4.1, interop 101.0.0); release notes and behavior were reviewed at adoption.
-- **Privacy manifest.** Verified in an unsigned Release archive (2026-07-18): the app bundle embeds `PrivacyInfo.xcprivacy` for GoogleSignIn, GoogleSignInSwift, AppAuth, AppAuthCore, GTMAppAuth, GTMSessionFetcherCore, GoogleUtilities (Environment, Logger, UserDefaults), and Promises — every Apple-listed SDK in the pinned graph. The archive contains no `Frameworks` directory: all packages are statically linked from source via Swift Package Manager, so Apple's SDK signature requirement (which covers listed binary SDKs) does not apply. Reconfirm the archive contents and Apple's current list before any App Store submission.
+- **Privacy manifest.** Verified in an unsigned Release archive (2026-07-18): the app bundle embeds `PrivacyInfo.xcprivacy` for GoogleSignIn, AppAuth, AppAuthCore, GTMAppAuth, GTMSessionFetcherCore, GoogleUtilities (Environment, Logger, UserDefaults), and Promises — every Apple-listed SDK in the pinned graph. (The 2026-07-18 archive also embedded GoogleSignInSwift's manifest; the supplied-button module and its Roboto brand font were removed from the link when the connect control became Planner-owned, and the manifest list here reflects the current graph.) The archive contains no `Frameworks` directory: all packages are statically linked from source via Swift Package Manager, so Apple's SDK signature requirement (which covers listed binary SDKs) does not apply. Reconfirm the archive contents and Apple's current list before any App Store submission.
 - **Fresh-install cleanup.** Google Sign-In 9.2.0 removes its own stale Keychain entries on fresh installs; Planner's installation boundary adds the device-migration case and never deletes SDK Keychain items directly.
 
 ## Deferred validation and release work

@@ -20,7 +20,6 @@
 		A00000000000000000000103 /* IOSHeaderStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000097 /* IOSHeaderStatus.swift */; };
 		A00000000000000000000104 /* GoogleAccountConnectionConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000098 /* GoogleAccountConnectionConfigurationTests.swift */; };
 		A00000000000000000000109 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000107 /* GoogleSignIn */; };
-		A00000000000000000000110 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000108 /* GoogleSignInSwift */; };
 		A00000000000000000000113 /* GoogleAccountConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000111 /* GoogleAccountConnection.swift */; };
 		A00000000000000000000114 /* GoogleSignInSDKAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000112 /* GoogleSignInSDKAdapter.swift */; };
 		A00000000000000000000116 /* GoogleAccountConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000115 /* GoogleAccountConnectionTests.swift */; };
@@ -79,7 +78,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000109 /* GoogleSignIn in Frameworks */,
-				A00000000000000000000110 /* GoogleSignInSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -176,7 +174,6 @@
 			name = Planner;
 			packageProductDependencies = (
 				A00000000000000000000107 /* GoogleSignIn */,
-				A00000000000000000000108 /* GoogleSignInSwift */,
 			);
 			productName = Planner;
 			productReference = A00000000000000000000010 /* Planner.app */;
@@ -572,11 +569,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A00000000000000000000106 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
-		};
-		A00000000000000000000108 /* GoogleSignInSwift */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A00000000000000000000106 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
-			productName = GoogleSignInSwift;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

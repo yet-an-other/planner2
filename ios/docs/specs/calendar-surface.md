@@ -75,7 +75,7 @@ Scrolling and Today Jump are the only product interactions. _Superseded for buil
 - Persistence, restoration state, networking, permission, analytics, user notification, or extension. _Superseded only as needed by the gated Google Account Connection: enabled builds persist the non-identifying disclosure acknowledgement and installation markers, reach Google for authorization and the profile image, and request Calendar read authorization; no other persistence, networking, permission, analytics, notification, or extension exists, and the gate keeps the addition inactive in committed and production builds._
 - Background-processing entitlement, continuously running timer, widget, or alternate scene
 - Web font, project generator, or executable dependency on `web/`
-- Third-party packages, with one reviewed exception: the pinned Google Sign-In for iOS SDK (including its supplied SwiftUI button and Roboto brand font) behind the build-time Google connection release gate. _Superseded only as recorded in the native-authentication ADR; the gate keeps the addition inactive in committed and production builds._
+- Third-party packages, with one reviewed exception: the pinned Google Sign-In for iOS SDK behind the build-time Google connection release gate. _Superseded only as recorded in the native-authentication ADR; the gate keeps the addition inactive in committed and production builds._
 
 ## Deterministic verification
 
