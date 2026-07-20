@@ -9,7 +9,7 @@ The event-free presentation of the Calendar Grid adapted for iOS conventions.
 _Avoid_: iOS calendar, web calendar clone, event calendar
 
 **iOS Calendar Header**:
-The non-scrolling area above the iOS Calendar Surface that displays the Product Name, a Visible Month that acts as a Today Jump, an iOS Account Control, an iOS Header Status, and Monday-first weekday labels.
+The non-scrolling area above the iOS Calendar Surface that displays the Product Name, the Product Version, a Visible Month that acts as a Today Jump, an iOS Account Control, an iOS Header Status, and Monday-first weekday labels.
 _Avoid_: Navigation bar, top bar, web header
 
 **iOS Account Control**:
@@ -22,7 +22,7 @@ _Avoid_: Toast, banner, notification bar, status bar
 
 ## Relationships
 
-- **iOS Experience → Planning**: Uses Planning's Calendar Grid, Product Name, Today, Week Row, Date Cell, Extended Calendar Range, Month Marker, Visible Month, Today Jump, Google Authorization Grant, Google Account Connection, and Disconnect on This Device language.
+- **iOS Experience → Planning**: Uses Planning's Calendar Grid, Product Name, Product Version, Today, Week Row, Date Cell, Extended Calendar Range, Month Marker, Visible Month, Today Jump, Google Authorization Grant, Google Account Connection, and Disconnect on This Device language.
 - **iOS Experience ∥ Web Experience**: The native and web delivery stacks are peers. They share vocabulary but no executable code, packages, generated source, or build tooling.
 
 ## Delivery documentation

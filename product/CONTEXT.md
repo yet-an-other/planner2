@@ -8,6 +8,10 @@ The Planning context defines Planner's platform-neutral language for its shared 
 The public name of the product: Planner.
 _Avoid_: App name, site title, brand label
 
+**Product Version**:
+The public version identifier displayed with the Product Name.
+_Avoid_: Build number, package version, release tag
+
 **Calendar Grid**:
 Planner's shared, Gregorian, Monday-first, seven-column sequence of consecutive local dates. It scrolls continuously in both vertical directions and is presented by each delivery experience in a platform-appropriate form.
 _Avoid_: Calendar Surface, date picker, month calendar

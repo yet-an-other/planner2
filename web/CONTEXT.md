@@ -16,10 +16,6 @@ _Avoid_: Planner app, full planner, schedule manager, infinite calendar
 The non-scrolling area that displays the Product Name, Visible Month, and Monday-first weekday labels for the Calendar Surface.
 _Avoid_: Top bar, sticky header, current month header
 
-**Product Version**:
-The public version identifier displayed with the Product Name.
-_Avoid_: Build number, package version, release tag
-
 **Account Control**:
 The Calendar Header control that displays the Google Account Connection state and lets the user connect or Disconnect on This Device.
 _Avoid_: Login button, profile button, auth widget
