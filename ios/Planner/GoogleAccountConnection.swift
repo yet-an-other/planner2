@@ -626,7 +626,16 @@ final class GoogleAccountConnection {
     }
 }
 
-private extension GoogleAccountConnection.ControlPresentation {
+extension GoogleAccountConnection {
+    /// Whether the module currently publishes a connected Google Account
+    /// Connection. Calendar Events fetch only while this holds and clear
+    /// when it stops holding.
+    var isConnected: Bool {
+        control.isConnected
+    }
+}
+
+extension GoogleAccountConnection.ControlPresentation {
     var isConnected: Bool {
         if case .connected = self {
             return true

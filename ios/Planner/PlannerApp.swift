@@ -8,10 +8,17 @@ struct PlannerApp: App {
     /// 100-point iOS Calendar Header with neither connection seam mounted.
     private let accountConnection: GoogleAccountConnection?
 
+    /// The Calendar Events module, created only when the build-time release
+    /// gate is on. It fetches the primary Source Calendar's events directly
+    /// from Google while the connection is connected, keeps them
+    /// memory-only, and clears them on Disconnect on This Device.
+    private let calendarEvents: CalendarEventsModel?
+
     init() {
         switch GoogleAccountConnectionConfiguration.load(from: .main) {
         case .gatedOff:
             accountConnection = nil
+            calendarEvents = nil
         case let configuration:
             accountConnection = GoogleAccountConnection(
                 configuration: configuration,
@@ -25,6 +32,10 @@ struct PlannerApp: App {
                     deviceMarkerStore: KeychainGoogleConnectionDeviceMarkerStore()
                 )
             )
+            calendarEvents = CalendarEventsModel(
+                environment: .current(),
+                adapter: GoogleCalendarAPIAdapter()
+            )
         }
     }
 
@@ -33,7 +44,8 @@ struct PlannerApp: App {
             CalendarScreen(
                 environment: .current(),
                 currentEnvironment: { .current() },
-                connection: accountConnection
+                connection: accountConnection,
+                events: calendarEvents
             )
             .onOpenURL { url in
                 // The reversed-client-ID scheme routes Google's OAuth

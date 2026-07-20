@@ -10,17 +10,20 @@ struct CalendarScreen: View {
 
     private let currentEnvironment: @MainActor () -> CalendarEnvironment
     private let connection: GoogleAccountConnection?
+    private let events: CalendarEventsModel?
 
     init(
         environment: CalendarEnvironment,
         currentEnvironment: @escaping @MainActor () -> CalendarEnvironment,
-        connection: GoogleAccountConnection? = nil
+        connection: GoogleAccountConnection? = nil,
+        events: CalendarEventsModel? = nil
     ) {
         let model = CalendarGridModel(environment: environment)
         _model = State(initialValue: model)
         _scrollPosition = State(initialValue: model.todayWeek.id)
         self.currentEnvironment = currentEnvironment
         self.connection = connection
+        self.events = events
     }
 
     var body: some View {
@@ -37,7 +40,10 @@ struct CalendarScreen: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: 0) {
                     ForEach(model.weekRows) { weekRow in
-                        WeekRowView(weekRow: weekRow)
+                        WeekRowView(
+                            weekRow: weekRow,
+                            eventWeek: events?.layout(forWeekStarting: weekRow.id)
+                        )
                     }
                 }
                 .scrollTargetLayout()
@@ -60,6 +66,15 @@ struct CalendarScreen: View {
             \.layoutDirection,
             model.layoutDirection == .rightToLeft ? .rightToLeft : .leftToRight
         )
+        .task {
+            // The events module follows the connection: fetch while
+            // connected, clear on Disconnect on This Device. While the gate
+            // is off, neither module exists and nothing changes here.
+            events?.setConnected(connection?.isConnected ?? false)
+        }
+        .onChange(of: connection?.control) { _, control in
+            events?.setConnected(control?.isConnected ?? false)
+        }
         .onChange(of: scenePhase) { _, nextScenePhase in
             midnightScheduleGeneration += 1
             if nextScenePhase == .active {
@@ -215,11 +230,19 @@ struct CalendarScreen: View {
 
 private struct WeekRowView: View {
     let weekRow: WeekRow
+    let eventWeek: CalendarEventWeekLayout?
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(weekRow.dateCells) { dateCell in
-                DateCellView(dateCell: dateCell)
+            ForEach(
+                Array(weekRow.dateCells.enumerated()),
+                id: \.element.id
+            ) { column, dateCell in
+                DateCellView(
+                    dateCell: dateCell,
+                    rows: eventWeek?.cells[column].rows ?? [],
+                    maxBarLane: eventWeek?.cells[column].maxBarLane ?? -1
+                )
             }
         }
         .frame(height: 96)
@@ -240,6 +263,136 @@ private struct WeekRowView: View {
                 .fill(PlannerPalette.separator)
                 .frame(height: 1)
         }
+        .overlay(alignment: .topLeading) {
+            if let eventWeek {
+                CalendarEventBarsOverlay(bars: eventWeek.bars)
+            }
+        }
+    }
+}
+
+/// The shared vertical rhythm of Calendar Event presentation within a
+/// 96-point Week Row: the bar layer and the per-cell rows must agree on
+/// where lanes begin and how tall they are.
+private enum CalendarEventLayoutMetrics {
+    /// The first lane's distance from the row's top: below the day-number
+    /// area (6pt padding + 18pt label + 2pt gap).
+    static let barsTop: CGFloat = 26
+    /// An event item's height: the platform fitting of the Web
+    /// Experience's denser presentation (ticket #75).
+    static let itemHeight: CGFloat = 14
+    /// The distance between lane origins.
+    static let lanePitch: CGFloat = 16
+    /// The vertical gap between a cell's rows.
+    static let rowSpacing: CGFloat = 2
+}
+
+/// The Calendar Event Bar layer for one Week Row: continuous colored strips
+/// spanning Date Cells in their lanes. Bars are pure paint — the layer is
+/// inert, keeping Date Cells free of gestures.
+private struct CalendarEventBarsOverlay: View {
+    @Environment(\.layoutDirection) private var layoutDirection
+
+    let bars: [CalendarEventBarSegment]
+
+    var body: some View {
+        GeometryReader { geometry in
+            let cellWidth = geometry.size.width / 7
+            ForEach(bars) { bar in
+                // Logical columns are Monday-first either way; in a
+                // right-to-left presentation the leading edge is the
+                // trailing physical side, so the span mirrors.
+                let leadingColumn = layoutDirection == .rightToLeft
+                    ? 6 - bar.endColumn
+                    : bar.startColumn
+                let columnCount = bar.endColumn - bar.startColumn + 1
+                let x = cellWidth * CGFloat(leadingColumn) + 1
+                let width = cellWidth * CGFloat(columnCount) - 2
+                let y = CalendarEventLayoutMetrics.barsTop
+                    + CGFloat(bar.lane) * CalendarEventLayoutMetrics.lanePitch
+
+                Text(bar.title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(
+                        bar.textTone == .dark ? PlannerPalette.ink : Color.white
+                    )
+                    .lineLimit(1)
+                    .padding(.leading, 4)
+                    .padding(.trailing, 2)
+                    .frame(
+                        width: width,
+                        height: CalendarEventLayoutMetrics.itemHeight,
+                        alignment: .leading
+                    )
+                    .background(
+                        Color(eventHex: bar.colorHex),
+                        in: UnevenRoundedRectangle(
+                            cornerRadii: .init(
+                                topLeading: bar.isStartTruncated ? 0 : 3,
+                                bottomLeading: bar.isStartTruncated ? 0 : 3,
+                                bottomTrailing: bar.isEndTruncated ? 0 : 3,
+                                topTrailing: bar.isEndTruncated ? 0 : 3
+                            )
+                        )
+                    )
+                    .position(
+                        x: x + width / 2,
+                        y: y + CalendarEventLayoutMetrics.itemHeight / 2
+                    )
+            }
+        }
+        .allowsHitTesting(false)
+        .clipped()
+    }
+}
+
+/// A Calendar Event Row: a Source Calendar colored dot, the localized start
+/// time, and the title, truncating at the cell's trailing edge.
+private struct CalendarEventRowView: View {
+    let row: CalendarEventRowItem
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(Color(eventHex: row.colorHex))
+                .frame(width: 5, height: 5)
+            Text(row.startTimeText)
+                .font(.system(size: 10))
+                .monospacedDigit()
+                .foregroundStyle(PlannerPalette.ink)
+                .fixedSize()
+            Text(row.title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(PlannerPalette.ink)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: CalendarEventLayoutMetrics.itemHeight)
+        .clipped()
+    }
+}
+
+private extension Color {
+    /// A Source Calendar color from its `#RRGGBB` hex form; unparsable
+    /// values fall back to the palette's olive.
+    init(eventHex hex: String) {
+        var hex = hex
+        if hex.hasPrefix("#") {
+            hex.removeFirst()
+        }
+        guard hex.count == 6 else {
+            self = PlannerPalette.olive
+            return
+        }
+        let red = Int(hex.prefix(2), radix: 16) ?? 0
+        let green = Int(hex.dropFirst(2).prefix(2), radix: 16) ?? 0
+        let blue = Int(hex.dropFirst(4).prefix(2), radix: 16) ?? 0
+        self = Color(
+            red: Double(red) / 255,
+            green: Double(green) / 255,
+            blue: Double(blue) / 255
+        )
     }
 }
 
@@ -262,6 +415,13 @@ struct DateCellView: View {
     private static let labelFontSize: CGFloat = 10
 
     let dateCell: DateCell
+    var rows: [CalendarEventRowItem] = []
+    var maxBarLane: Int = -1
+
+    private var rowsTop: CGFloat {
+        CalendarEventLayoutMetrics.barsTop
+            + CGFloat(maxBarLane + 1) * CalendarEventLayoutMetrics.lanePitch
+    }
 
     var body: some View {
         HStack(spacing: 1) {
@@ -311,6 +471,18 @@ struct DateCellView: View {
             Rectangle()
                 .fill(PlannerPalette.separator)
                 .frame(width: 1)
+        }
+        .overlay(alignment: .topLeading) {
+            if !rows.isEmpty {
+                VStack(spacing: CalendarEventLayoutMetrics.rowSpacing) {
+                    ForEach(rows) { row in
+                        CalendarEventRowView(row: row)
+                    }
+                }
+                .padding(.horizontal, 3)
+                .padding(.top, rowsTop)
+                .allowsHitTesting(false)
+            }
         }
     }
 }
@@ -748,6 +920,164 @@ private struct PreviewGoogleSignInAdapter: GoogleSignInAdapting {
     func handleCallbackURL(_ url: URL) -> Bool {
         false
     }
+}
+
+#Preview("Calendar Events · Connected") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnectedConnection(),
+        events: previewEvents(environment: environment)
+    )
+    .frame(width: 393, height: 852)
+}
+
+#Preview("Calendar Events · Wide") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnectedConnection(),
+        events: previewEvents(environment: environment)
+    )
+    .frame(width: 834, height: 1_194)
+}
+
+#Preview("Calendar Events · Right to Left") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "ar_SA",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnectedConnection(),
+        events: previewEvents(environment: environment)
+    )
+    .frame(width: 507, height: 700)
+}
+
+/// A Calendar Events module backed by canned events around the preview's
+/// Today (2026-07-15), for deterministic event previews. The preview's
+/// connected control drives the module's fetch exactly as production does.
+@MainActor
+private func previewEvents(
+    environment: CalendarEnvironment
+) -> CalendarEventsModel {
+    CalendarEventsModel(
+        environment: environment,
+        adapter: PreviewGoogleCalendarEventsAdapter()
+    )
+}
+
+/// The stub Google Calendar events adapter for deterministic previews: a
+/// fixed mix of all-day, multiday, intraday, declined, and cancelled events
+/// around 2026-07-15, never the network.
+private struct PreviewGoogleCalendarEventsAdapter: GoogleCalendarEventsAdapting {
+    func fetchEvents(
+        from start: Date,
+        to end: Date
+    ) async -> GoogleCalendarEventsOutcome {
+        .success(
+            calendar: GoogleSourceCalendar(backgroundColorHex: "#039BE5"),
+            events: [
+                GoogleCalendarEvent(
+                    id: "offsite",
+                    summary: "Team Offsite",
+                    start: .allDay(year: 2026, month: 7, day: 14),
+                    end: .allDay(year: 2026, month: 7, day: 17),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "conference",
+                    summary: "Design Conference",
+                    start: .allDay(year: 2026, month: 7, day: 17),
+                    end: .allDay(year: 2026, month: 7, day: 22),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "hackathon",
+                    summary: "Hackathon",
+                    start: .timed(previewInstant(2026, 7, 16, 22, 0)),
+                    end: .timed(previewInstant(2026, 7, 18, 3, 0)),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "standup",
+                    summary: "Standup",
+                    start: .timed(previewInstant(2026, 7, 15, 9, 30)),
+                    end: .timed(previewInstant(2026, 7, 15, 10, 0)),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "review",
+                    summary: "Design Review",
+                    start: .timed(previewInstant(2026, 7, 15, 13, 0)),
+                    end: .timed(previewInstant(2026, 7, 15, 14, 0)),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "dentist",
+                    summary: "Dentist",
+                    start: .timed(previewInstant(2026, 7, 16, 11, 0)),
+                    end: .timed(previewInstant(2026, 7, 16, 12, 0)),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "declined-sync",
+                    summary: "Declined Sync",
+                    start: .timed(previewInstant(2026, 7, 15, 15, 0)),
+                    end: .timed(previewInstant(2026, 7, 15, 16, 0)),
+                    isCancelled: false,
+                    isDeclinedByViewer: true
+                ),
+                GoogleCalendarEvent(
+                    id: "cancelled-review",
+                    summary: "Cancelled Review",
+                    start: .timed(previewInstant(2026, 7, 15, 17, 0)),
+                    end: .timed(previewInstant(2026, 7, 15, 18, 0)),
+                    isCancelled: true,
+                    isDeclinedByViewer: false
+                ),
+            ]
+        )
+    }
+}
+
+/// A GMT instant for the canned preview events; the preview environment's
+/// timezone is GMT, so these land on their stated local dates.
+private func previewInstant(
+    _ year: Int,
+    _ month: Int,
+    _ day: Int,
+    _ hour: Int,
+    _ minute: Int
+) -> Date {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.locale = Locale(identifier: "en_US_POSIX")
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    return calendar.date(
+        from: DateComponents(
+            year: year,
+            month: month,
+            day: day,
+            hour: hour,
+            minute: minute
+        )
+    )!
 }
 
 @MainActor
