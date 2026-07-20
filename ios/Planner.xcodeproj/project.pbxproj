@@ -29,6 +29,8 @@
 		A00000000000000000000122 /* GoogleConnectionInstallationBoundary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000121 /* GoogleConnectionInstallationBoundary.swift */; };
 		A00000000000000000000124 /* GoogleConnectionInstallationBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000123 /* GoogleConnectionInstallationBoundaryTests.swift */; };
 		A00000000000000000000126 /* HeaderCollisionLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000125 /* HeaderCollisionLayoutTests.swift */; };
+		A00000000000000000000128 /* ProductVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000127 /* ProductVersion.swift */; };
+		A00000000000000000000130 /* ProductVersionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000129 /* ProductVersionTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -67,6 +69,8 @@
 		A00000000000000000000121 /* GoogleConnectionInstallationBoundary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleConnectionInstallationBoundary.swift; sourceTree = "<group>"; };
 		A00000000000000000000123 /* GoogleConnectionInstallationBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleConnectionInstallationBoundaryTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000125 /* HeaderCollisionLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderCollisionLayoutTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000127 /* ProductVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductVersion.swift; sourceTree = "<group>"; };
+		A00000000000000000000129 /* ProductVersionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductVersionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -125,6 +129,7 @@
 				A00000000000000000000117 /* IOSConnectionExplanation.swift */,
 				A00000000000000000000119 /* GoogleConnectionConnectivityMonitor.swift */,
 				A00000000000000000000121 /* GoogleConnectionInstallationBoundary.swift */,
+				A00000000000000000000127 /* ProductVersion.swift */,
 				A00000000000000000000018 /* Assets.xcassets */,
 				A00000000000000000000017 /* Info.plist */,
 			);
@@ -139,6 +144,7 @@
 				A00000000000000000000115 /* GoogleAccountConnectionTests.swift */,
 				A00000000000000000000123 /* GoogleConnectionInstallationBoundaryTests.swift */,
 				A00000000000000000000125 /* HeaderCollisionLayoutTests.swift */,
+				A00000000000000000000129 /* ProductVersionTests.swift */,
 			);
 			path = PlannerTests;
 			sourceTree = "<group>";
@@ -264,6 +270,7 @@
 				A00000000000000000000118 /* IOSConnectionExplanation.swift in Sources */,
 				A00000000000000000000120 /* GoogleConnectionConnectivityMonitor.swift in Sources */,
 				A00000000000000000000122 /* GoogleConnectionInstallationBoundary.swift in Sources */,
+				A00000000000000000000128 /* ProductVersion.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -276,6 +283,7 @@
 				A00000000000000000000116 /* GoogleAccountConnectionTests.swift in Sources */,
 				A00000000000000000000124 /* GoogleConnectionInstallationBoundaryTests.swift in Sources */,
 				A00000000000000000000126 /* HeaderCollisionLayoutTests.swift in Sources */,
+				A00000000000000000000130 /* ProductVersionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

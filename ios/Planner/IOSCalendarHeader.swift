@@ -53,11 +53,13 @@ enum HeaderCollisionLayout {
 
 /// The non-scrolling area above the iOS Calendar Surface.
 ///
-/// The header owns the Product Name on the leading side, the geometrically
-/// centered Visible Month (which acts as a Today Jump), and the Monday-first
-/// weekday labels. The Visible Month presents its full localized form while
-/// that fits at full size, falling back to the uppercase short month form
-/// before scaling and truncation. Two optional content seams —
+/// The header owns the Product Name on the leading side — with the Product
+/// Version beneath it when the bundle provides one — the geometrically
+/// centered Visible Month (which acts as a Today Jump), and the
+/// Monday-first weekday labels. The Visible Month presents its full
+/// localized form while that fits at full size, falling back to the
+/// uppercase short month form before scaling and truncation. Two optional
+/// content seams —
 /// `accountControl` and `headerStatus` — let future work mount an iOS
 /// Account Control and iOS Header Status through the header rather than
 /// accumulating authentication or status behavior inside the Calendar
@@ -80,6 +82,7 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
 
     let visibleMonth: String
     let shortVisibleMonth: String
+    let productVersion: String?
     let weekdayLabels: [WeekdayLabel]
     let onJumpToToday: () -> Void
     @ViewBuilder var accountControl: AccountControl
@@ -88,6 +91,7 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
     init(
         visibleMonth: String,
         shortVisibleMonth: String,
+        productVersion: String?,
         weekdayLabels: [WeekdayLabel],
         onJumpToToday: @escaping () -> Void,
         @ViewBuilder accountControl: () -> AccountControl = { EmptyView() },
@@ -95,6 +99,7 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
     ) {
         self.visibleMonth = visibleMonth
         self.shortVisibleMonth = shortVisibleMonth
+        self.productVersion = productVersion
         self.weekdayLabels = weekdayLabels
         self.onJumpToToday = onJumpToToday
         self.accountControl = accountControl()
@@ -114,15 +119,26 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
     private var titleRow: some View {
         GeometryReader { geometry in
             ZStack {
-                Text("Planner")
-                    .font(.headline.bold())
-                    .foregroundStyle(PlannerPalette.olive)
-                    .frame(
-                        maxWidth: .infinity,
-                        maxHeight: .infinity,
-                        alignment: .leading
-                    )
-                    .padding(.horizontal, 16)
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text("Planner")
+                        .font(.headline.bold())
+                        .foregroundStyle(PlannerPalette.olive)
+
+                    if let productVersion {
+                        Text(productVersion)
+                            .font(.footnote)
+                            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                            .foregroundStyle(PlannerPalette.monthRule)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .leading
+                )
+                .padding(.horizontal, 16)
 
                 Button(action: onJumpToToday) {
                     ViewThatFits(in: .horizontal) {

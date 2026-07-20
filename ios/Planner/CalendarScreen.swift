@@ -28,6 +28,7 @@ struct CalendarScreen: View {
             IOSCalendarHeader(
                 visibleMonth: model.visibleMonth,
                 shortVisibleMonth: model.shortVisibleMonth,
+                productVersion: ProductVersion.current,
                 weekdayLabels: model.weekdayLabels,
                 onJumpToToday: jumpToToday,
                 accountControl: { accountControl },

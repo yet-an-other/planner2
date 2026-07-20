@@ -27,6 +27,7 @@ The iOS delivery stack is independent from the Web Experience. It shares vocabul
 - Keep the iOS Calendar Header fixed while Week Rows scroll below it.
 - Use a 64-point title row and 36-point weekday row beneath the top safe area. _Superseded for builds with the Google connection release gate enabled (development only): the enabled iOS Calendar Header uses a 64-point title/control row with a trailing iOS Account Control, a fixed 20-point iOS Header Status row, and the 36-point weekday row. The gate stays off in all committed and production configurations, where the dimensions and behavior here remain in force._
 - Place the Product Name on the leading side and the Visible Month at the geometric center.
+- Display the Product Version directly beneath the Product Name, sized like the iOS Header Status, in the palette's muted olive (the web Product Version's tone), trailing-aligned under the name and mirroring for right-to-left. Compose it from the bundle marketing version and build number as `v1.0 (1)`, prefixing `v` only when the marketing version starts with a digit; when the build number is absent, show the marketing version alone; when the marketing version is absent, omit the Product Version entirely.
 - Derive Visible Month from the Monday of the topmost Week Row and update it while scrolling, not only after deceleration.
 - Make Visible Month the only semantic product control. Activating it scrolls Today's Week Row to the top. _Superseded for builds with the Google connection release gate enabled (development only): the iOS Account Control is a second semantic product control. The gate stays off in all committed and production configurations, where this statement remains in force._
 - Show its subtle warm capsule only while the control is pressed, focused, or hovered; keep no persistent border.
@@ -108,6 +109,7 @@ See [`../../README.md`](../../README.md) for copyable build and test commands. C
 | Foreground refresh | Deterministic model coverage and scene-adapter build | Automated pass: Today and browsing position refresh correctly; manual background/foreground run remains pending |
 | Midnight refresh | Deterministic controlled-clock model coverage | Automated pass: Today moves without moving a browsing user; live controlled-clock run remains pending where practical |
 | Locale and direction | Spanish and Arabic iPhone/iPad runs | Pass: localized labels/numerals, mirrored placement, locale weekend tint |
+| Product Version | iPhone SE (3rd generation), iOS 18.5 Simulator, English and Arabic runs | Pass: `v1.0 (1)` beneath the Product Name, trailing-aligned and mirrored, header height unchanged |
 | App icon | iPhone home screen | Pass: opaque beige icon, unchanged centered glyph, system corner mask |
 
 ## Deferred validation and release work
