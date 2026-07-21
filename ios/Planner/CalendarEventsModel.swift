@@ -200,6 +200,9 @@ struct CalendarEventBarSegment: Equatable, Sendable, Identifiable {
     let isStartTruncated: Bool
     /// The event continues into the next Week Row.
     let isEndTruncated: Bool
+    /// The Event Detail Popover payload this segment summons; every
+    /// segment of a multiday bar carries the same event's detail.
+    let detail: CalendarEventDetail
 }
 
 /// A Calendar Event Row: an intraday event presented in its Date Cell with a
@@ -209,6 +212,8 @@ struct CalendarEventRowItem: Equatable, Sendable, Identifiable {
     let title: String
     let startTimeText: String
     let colorHex: String
+    /// The Event Detail Popover payload this row summons.
+    let detail: CalendarEventDetail
 }
 
 /// One Date Cell's event content: the deepest visible bar lane crossing
@@ -622,6 +627,9 @@ final class CalendarEventsModel {
         let colorHex: String
         let textTone: CalendarEventTextTone
         let kind: Kind
+        /// The Event Detail Popover payload, built at normalization so the
+        /// published layout items carry it (iOS ADR 0005).
+        let detail: CalendarEventDetail
     }
 
     /// Applies Planner's product rules: cancelled and declined events drop
@@ -655,6 +663,17 @@ final class CalendarEventsModel {
                 .flatMap { eventColorBackgrounds[$0] }
                 ?? sourceCalendar.backgroundColorHex
             let textTone = CalendarEventsModel.textTone(forHexColor: colorHex)
+
+            let locale = environment.locale
+            let timeZone = environment.timeZone
+            let timingLine = { (timing: CalendarEventTiming) in
+                CalendarEventTimingLine.timingLine(
+                    for: timing,
+                    calendar: calendar,
+                    locale: locale,
+                    timeZone: timeZone
+                )
+            }
 
             switch (event.start, event.end) {
             case (
@@ -690,6 +709,18 @@ final class CalendarEventsModel {
                         startDate: startDate,
                         endDate: endDate,
                         startsAt: startDate
+                    ),
+                    detail: CalendarEventDetail(
+                        title: title,
+                        colorHex: colorHex,
+                        timingText: timingLine(
+                            CalendarEventTiming(
+                                start: startDate,
+                                end: endDate,
+                                isAllDay: true,
+                                isMultiday: endDate > startDate
+                            )
+                        )
                     )
                 )
             case (.timed(let startsAt), .timed(let endsAt)):
@@ -705,6 +736,18 @@ final class CalendarEventsModel {
                             startDate: startDate,
                             endDate: endDate,
                             startsAt: startsAt
+                        ),
+                        detail: CalendarEventDetail(
+                            title: title,
+                            colorHex: colorHex,
+                            timingText: timingLine(
+                                CalendarEventTiming(
+                                    start: startsAt,
+                                    end: endsAt,
+                                    isAllDay: false,
+                                    isMultiday: true
+                                )
+                            )
                         )
                     )
                 }
@@ -717,6 +760,18 @@ final class CalendarEventsModel {
                         date: startDate,
                         startsAt: startsAt,
                         startTimeText: timeFormatter.string(from: startsAt)
+                    ),
+                    detail: CalendarEventDetail(
+                        title: title,
+                        colorHex: colorHex,
+                        timingText: timingLine(
+                            CalendarEventTiming(
+                                start: startsAt,
+                                end: endsAt,
+                                isAllDay: false,
+                                isMultiday: false
+                            )
+                        )
                     )
                 )
             default:
@@ -830,7 +885,8 @@ final class CalendarEventsModel {
                     startColumn: bar.startColumn,
                     endColumn: bar.endColumn,
                     isStartTruncated: bar.startDate < weekStart,
-                    isEndTruncated: bar.endDate > weekEnd
+                    isEndTruncated: bar.endDate > weekEnd,
+                    detail: bar.event.detail
                 )
             )
         }
@@ -858,7 +914,8 @@ final class CalendarEventsModel {
                         id: event.id,
                         title: event.title,
                         startTimeText: startTimeText,
-                        colorHex: event.colorHex
+                        colorHex: event.colorHex,
+                        detail: event.detail
                     )
                 )
             )

@@ -177,7 +177,16 @@ struct CalendarEventsModelTests {
                     startTimeText: timeFormatter.string(
                         from: Self.gmt(2026, 7, 20, 9, 30)
                     ),
-                    colorHex: "#039BE5"
+                    colorHex: "#039BE5",
+                    detail: CalendarEventDetail(
+                        title: "Standup",
+                        colorHex: "#039BE5",
+                        timingText:
+                            "\(Self.fullDateText(Self.gmt(2026, 7, 20))) · "
+                            + timeFormatter.string(from: Self.gmt(2026, 7, 20, 9, 30))
+                            + " – "
+                            + timeFormatter.string(from: Self.gmt(2026, 7, 20, 10, 15))
+                    )
                 ),
             ]
         )
@@ -220,7 +229,13 @@ struct CalendarEventsModelTests {
                     startColumn: 2,
                     endColumn: 2,
                     isStartTruncated: false,
-                    isEndTruncated: false
+                    isEndTruncated: false,
+                    detail: CalendarEventDetail(
+                        title: "Holiday",
+                        colorHex: "#039BE5",
+                        timingText:
+                            "All day · \(Self.fullDateText(Self.gmt(2026, 7, 22)))"
+                    )
                 ),
             ]
         )
@@ -1938,6 +1953,225 @@ struct CalendarEventsModelTests {
         #expect(model.status.message == nil)
     }
 
+    // MARK: Event Detail Popover payload
+
+    @Test("A bar segment carries its event's detail with the all-day timing line")
+    func barSegmentCarriesAllDayDetail() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "holiday",
+                        summary: "Holiday",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(
+            layout?.bars.first?.detail
+                == CalendarEventDetail(
+                    title: "Holiday",
+                    colorHex: "#039BE5",
+                    timingText:
+                        "All day · \(Self.fullDateText(Self.gmt(2026, 7, 22)))"
+                )
+        )
+    }
+
+    @Test("An all-day multiday event's timing line spans its inclusive dates")
+    func allDayMultidayTimingLine() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "trip",
+                        summary: "Trip",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        // Google's exclusive end: the last day is 2026-07-24.
+                        end: .allDay(year: 2026, month: 7, day: 25),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(
+            layout?.bars.first?.detail.timingText
+                == "All day · \(Self.dayMonthYearText(Self.gmt(2026, 7, 22)))"
+                    + " – \(Self.dayMonthYearText(Self.gmt(2026, 7, 24)))"
+        )
+    }
+
+    @Test("A timed multiday event's timing line carries date and time on both ends")
+    func timedMultidayTimingLine() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "hackathon",
+                        summary: "Hackathon",
+                        start: .timed(Self.gmt(2026, 7, 21, 22, 0)),
+                        end: .timed(Self.gmt(2026, 7, 23, 2, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(
+            layout?.bars.first?.detail.timingText
+                == "\(Self.dayMonthYearText(Self.gmt(2026, 7, 21))), "
+                    + "\(Self.timeText(Self.gmt(2026, 7, 21, 22, 0)))"
+                    + " – \(Self.dayMonthYearText(Self.gmt(2026, 7, 23))), "
+                    + "\(Self.timeText(Self.gmt(2026, 7, 23, 2, 0)))"
+        )
+    }
+
+    @Test("Every segment of a week-crossing bar carries the same event's detail")
+    func weekCrossingBarSegmentsCarrySameDetail() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "conference",
+                        summary: "Conference",
+                        start: .allDay(year: 2026, month: 7, day: 24),
+                        end: .allDay(year: 2026, month: 7, day: 29),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        #expect(await layoutEventually(model, weekStart: Self.gmt(2026, 7, 27)) != nil)
+        let firstWeek = model.layout(forWeekStarting: Self.gmt(2026, 7, 20))
+        let secondWeek = model.layout(forWeekStarting: Self.gmt(2026, 7, 27))
+        #expect(firstWeek?.bars.first?.detail != nil)
+        #expect(firstWeek?.bars.first?.detail == secondWeek?.bars.first?.detail)
+    }
+
+    @Test("The timing line follows the environment's timezone")
+    func timingLineFollowsEnvironmentTimeZone() async {
+        // Pacific/Kiritimati is UTC+14: the event is 13:30–14:30 on a
+        // single local day there, and the timing line must read so.
+        guard let kiritimati = TimeZone(identifier: "Pacific/Kiritimati")
+        else {
+            preconditionFailure("Kiritimati must be available")
+        }
+        let environment = CalendarEnvironment(
+            now: Self.now,
+            calendar: Calendar(identifier: .gregorian),
+            locale: Locale(identifier: "en_US_POSIX"),
+            timeZone: kiritimati
+        )
+        let (model, adapter) = makeModel(environment: environment)
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "island-time",
+                        summary: "Island Time",
+                        start: .timed(Self.gmt(2026, 7, 21, 23, 30)),
+                        end: .timed(Self.gmt(2026, 7, 22, 0, 30)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        var localCalendar = Calendar(identifier: .gregorian)
+        localCalendar.locale = Locale(identifier: "en_US_POSIX")
+        localCalendar.timeZone = kiritimati
+        let weekStart = localCalendar.date(
+            from: DateComponents(year: 2026, month: 7, day: 20)
+        )!
+        let localDate = localCalendar.date(
+            from: DateComponents(year: 2026, month: 7, day: 22)
+        )!
+        let fullDateFormatter = DateFormatter()
+        fullDateFormatter.calendar = localCalendar
+        fullDateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        fullDateFormatter.timeZone = kiritimati
+        fullDateFormatter.setLocalizedDateFormatFromTemplate("yMMMEd")
+
+        let layout = await layoutEventually(model, weekStart: weekStart)
+        // Locally Wednesday 13:30–14:30: a row reading the local day and
+        // times, never the GMT dates.
+        let timeFormatter = DateFormatter()
+        timeFormatter.calendar = localCalendar
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        timeFormatter.timeZone = kiritimati
+        timeFormatter.setLocalizedDateFormatFromTemplate("jm")
+        let timingText = layout?.cells[2].rows.first?.detail.timingText
+        #expect(
+            timingText
+                == fullDateFormatter.string(from: localDate)
+                    + " · \(timeFormatter.string(from: Self.gmt(2026, 7, 21, 23, 30)))"
+                    + " – \(timeFormatter.string(from: Self.gmt(2026, 7, 22, 0, 30)))"
+        )
+    }
+
+    @Test("Disconnect on This Device clears event detail together with the events")
+    func disconnectClearsEventDetail() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "event",
+                        summary: "Event",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.cells[2].rows.first?.detail != nil)
+
+        model.setConnected(false)
+
+        // No published layout remains to render detail from — an open
+        // popover dismisses as a consequence (iOS ADR 0005).
+        #expect(model.layout(forWeekStarting: Self.gmt(2026, 7, 20)) == nil)
+    }
+
     // MARK: Helpers
 
     private static var initialEvent: GoogleCalendarEvent {
@@ -1949,6 +2183,40 @@ struct CalendarEventsModelTests {
             isCancelled: false,
             isDeclinedByViewer: false
         )
+    }
+
+    /// The popover timing line's full-date form (weekday, month, day,
+    /// year) under the suite's fixed locale and timezone, from the same
+    /// formatter discipline the model uses.
+    private static func fullDateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = makeEnvironment().calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.setLocalizedDateFormatFromTemplate("yMMMEd")
+        return formatter.string(from: date)
+    }
+
+    /// The popover timing line's month-day-year form under the suite's
+    /// fixed locale and timezone.
+    private static func dayMonthYearText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = makeEnvironment().calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.setLocalizedDateFormatFromTemplate("yMMMd")
+        return formatter.string(from: date)
+    }
+
+    /// The localized short time form under the suite's fixed locale and
+    /// timezone, from the same template the model uses.
+    private static func timeText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = makeEnvironment().calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.setLocalizedDateFormatFromTemplate("jm")
+        return formatter.string(from: date)
     }
 
     private func makeModel(

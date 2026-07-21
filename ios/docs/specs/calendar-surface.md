@@ -84,22 +84,29 @@ _Development-only: every statement in this section applies only to builds with t
 - Explicit Google event colors resolve through Google's colors metadata, fetched alongside event fetches; when it is unavailable, affected events silently use the Source Calendar's background color and the iOS Header Status says nothing. Bar titles use whichever of Planner's ink or white has the stronger APCA lightness contrast against the Event Color (ADR 0004).
 - A Date Cell presents at most four event slots at the fixed 96-point Week Row height; beyond the cap it shows three items plus the inert Events Overflow marker carrying the hidden count, in bars-then-rows order. A bar lane deeper than the third renders only when every Date Cell it crosses fits at true lane positions with no rows and no overflow beneath it; otherwise it counts into the overflow of every cell it crosses. Rows and the marker never paint past the fixed Week Row.
 - Event items render 14 points tall with 10-point text and do not scale with Dynamic Type.
-- The Events Overflow marker is inert: it reads the hidden count and summons nothing. Date Cells remain inert — scrolling and Today Jump remain the only product interactions.
+- The Events Overflow marker is inert: it reads the hidden count and summons nothing. Date Cells are otherwise inert — beyond Calendar Event Bars and Rows summoning the Event Detail Popover (§ Event Detail Popover below), scrolling and Today Jump remain the only product interactions.
 - A missing or blank event summary presents as “Busy”.
+
+### Event Detail Popover
+
+- Tapping a Calendar Event Bar — any segment of a multiday bar — or a Calendar Event Row summons the Event Detail Popover (Planning glossary; ADR 0005): a native anchored popover adapting to a sheet on compact widths, with a small close affordance. It dismisses by outside tap, the affordance, or the platform gesture — never by surface scroll.
+- The popover presents the event's title with an Event Color accent and a localized timing line: “All day · date” for a single all-day event, “All day · start – end” for a multiday one, and “date · start – end” for a timed one, with a timed multiday event carrying date and time on both ends.
+- The popover renders from the published layout state — bar segments and row items carry their event's presentation payload — so Disconnect on This Device dismisses an open popover as a consequence of clearing events (ADR 0005), not as a special case.
+- The popover is the surface's single read-only exception: it carries no edit affordances, the Events Overflow marker stays inert, and Date Cells are otherwise inert.
 
 ### Availability and status
 
-- Calendar Events are memory-only (ADR 0003): they are never persisted, they vanish on Disconnect on This Device, and they refetch per process run. There are no offline placeholders.
+- Calendar Events are memory-only (ADR 0003): they are never persisted, they vanish on Disconnect on This Device, and they refetch per process run. There are no offline placeholders. Every detail the Event Detail Popover presents shares this boundary.
 - The iOS Header Status presents fetch progress, fetch failures, and offline conditions in Planner-owned copy; raw Google errors never reach it. Connection warnings and errors lead; event-fetch progress and issues override resting connection information.
 - An offline initial fetch leaves the bare, usable Calendar Grid with a warning and retries event-driven on connectivity return; an initial fetch that fails for any other reason reports an error. A failed slab keeps already-fetched events visible with a fetch-issue message and recovers on connectivity return or the next edge approach.
 
 ## Interaction and product exclusions
 
-Scrolling and Today Jump are the only product interactions. _Superseded for builds with the Google connection release gate enabled (development only): Connect, Disconnect on This Device, and the first-connect explanation actions are additional product interactions; the gate keeps them inactive in committed and production builds._ This slice contains no:
+Scrolling and Today Jump are the only product interactions. _Superseded for builds with the Google connection release gate enabled (development only): Connect, Disconnect on This Device, the first-connect explanation actions, and summoning the read-only Event Detail Popover are additional product interactions; the gate keeps them inactive in committed and production builds._ This slice contains no:
 
 - Calendar Event type, event renderer, event placeholder, busy block, or overflow control. _Superseded for builds with the Google connection release gate enabled (development only): enabled builds present Calendar Events per § Calendar Events (release gate); the Events Overflow marker is an inert indicator, not a control, and no busy block exists. The gate keeps them inactive in committed and production builds._
 - Google Account Connection or Source Calendar. _Superseded only for development builds with the Google connection release gate enabled, which present the gated iOS Account Control and iOS Header Status with launch restoration, the first-connect explanation, Connect, offline recovery, the installation boundary, and Disconnect on This Device._
-- Date selection, detail view, navigation route, tab, sheet, toolbar, menu, onboarding, or settings. _Superseded only for the gated first-connect explanation: builds with the Google connection release gate enabled present one compact native sheet explaining read-only Calendar access before the first Connect; every other listed exclusion remains in force._
+- Date selection, detail view, navigation route, tab, sheet, toolbar, menu, onboarding, or settings. _Superseded only for the gated first-connect explanation and the Event Detail Popover: builds with the Google connection release gate enabled present one compact native sheet explaining read-only Calendar access before the first Connect, and the read-only Event Detail Popover (a sheet on compact widths) summoned from Calendar Event Bars and Rows; every other listed exclusion remains in force._
 - Persistence, restoration state, networking, permission, analytics, user notification, or extension. _Superseded only as needed by the gated Google Account Connection and Calendar Events: enabled builds persist the non-identifying disclosure acknowledgement and installation markers, reach Google for authorization, the profile image, and the primary Source Calendar's events, request Calendar read authorization, and keep Calendar Events memory-only; no other persistence, networking, permission, analytics, notification, or extension exists, and the gate keeps the additions inactive in committed and production builds._
 - Background-processing entitlement, continuously running timer, widget, or alternate scene
 - Web font, project generator, or executable dependency on `web/`
@@ -117,7 +124,7 @@ The shared Planner scheme builds the application and runs Swift Testing against 
 - Foreground, midnight, timezone, and locale refreshes
 - Topmost Week Row preservation and both-boundary clamping
 
-The gated Calendar Events are covered through the observable Calendar Events model seam with a fake Google Calendar API adapter, a fake connectivity monitor, and fixed instants, Gregorian calendars, locales, and timezones: Fetched Window expansion and once-per-range fetching, normalization and classification, lane ordering and the visible cap with Events Overflow counts, Header Status messaging and resolution between the two publishers, offline recovery, and stale-completion guarding. Deterministic SwiftUI previews cover bars spanning Date Cells, rows, Month Marker cells, dense days, compact and wide widths, and right-to-left layouts.
+The gated Calendar Events are covered through the observable Calendar Events model seam with a fake Google Calendar API adapter, a fake connectivity monitor, and fixed instants, Gregorian calendars, locales, and timezones: Fetched Window expansion and once-per-range fetching, normalization and classification, lane ordering and the visible cap with Events Overflow counts, Header Status messaging and resolution between the two publishers, offline recovery, and stale-completion guarding. The Event Detail Popover's payload is covered through the same seam: the timing line for every event shape under fixed locale and timezone, detail carriage on bars and rows, and disconnect clearing. Deterministic SwiftUI previews cover bars spanning Date Cells, rows, Month Marker cells, dense days, compact and wide widths, and right-to-left layouts, and the popover across compact and wide widths and right-to-left layouts.
 
 See [`../../README.md`](../../README.md) for copyable build and test commands. CI runs only for this delivery stack and shared Planning/context changes; it performs no signing, archive, App Store, TestFlight, or deployment work.
 
@@ -142,6 +149,7 @@ See [`../../README.md`](../../README.md) for copyable build and test commands. C
 | Product Version | iPhone SE (3rd generation), iOS 18.5 Simulator, English and Arabic runs | Pass: `v1.0.1` beneath the Product Name, trailing-aligned and mirrored, header height unchanged |
 | App icon | iPhone home screen | Pass: opaque beige icon, unchanged centered glyph, system corner mask |
 | Calendar Events presentation | Deterministic SwiftUI previews (gate on) | Preview compile pass: bars spanning cells, dotted rows, dense day with inert Events Overflow, Month Marker cell, compact/wide/RTL layouts; visual inspection run pending |
+| Event Detail Popover | Deterministic SwiftUI previews (gate on) | Preview compile pass: title with Event Color accent, timing line, compact and wide widths, RTL layout; tap, dismissal, and sheet-adaptation runs pending |
 | Real-OAuth event fetching and offline recovery | Production-like OAuth configuration | Pending — external OAuth configuration required |
 
 ## Deferred validation and release work

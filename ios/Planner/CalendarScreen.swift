@@ -338,9 +338,37 @@ private enum CalendarEventLayoutMetrics {
     static let rowSpacing: CGFloat = 2
 }
 
+/// The tappable wrapper that summons the Event Detail Popover from a
+/// Calendar Event Bar or Calendar Event Row (iOS ADR 0005). It owns the
+/// presentation flag and renders the popover from the payload the layout
+/// item carries, so Disconnect on This Device dismisses an open popover
+/// as a consequence of clearing events: the published layout — and with
+/// it this anchor — simply disappears. Everything else on the surface
+/// stays inert.
+private struct CalendarEventDetailTrigger<Label: View>: View {
+    let detail: CalendarEventDetail
+    @ViewBuilder let label: () -> Label
+
+    @State private var isPresenting = false
+
+    var body: some View {
+        Button {
+            isPresenting = true
+        } label: {
+            label()
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isPresenting) {
+            IOSEventDetailPopover(detail: detail) {
+                isPresenting = false
+            }
+        }
+    }
+}
+
 /// The Calendar Event Bar layer for one Week Row: continuous colored strips
-/// spanning Date Cells in their lanes. Bars are pure paint — the layer is
-/// inert, keeping Date Cells free of gestures.
+/// spanning Date Cells in their lanes. Each bar summons the Event Detail
+/// Popover; the layer's empty space never intercepts touches.
 private struct CalendarEventBarsOverlay: View {
     @Environment(\.layoutDirection) private var layoutDirection
 
@@ -362,37 +390,38 @@ private struct CalendarEventBarsOverlay: View {
                 let y = CalendarEventLayoutMetrics.barsTop
                     + CGFloat(bar.lane) * CalendarEventLayoutMetrics.lanePitch
 
-                Text(bar.title)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(
-                        bar.textTone == .dark ? PlannerPalette.ink : Color.white
-                    )
-                    .lineLimit(1)
-                    .padding(.leading, 4)
-                    .padding(.trailing, 2)
-                    .frame(
-                        width: width,
-                        height: CalendarEventLayoutMetrics.itemHeight,
-                        alignment: .leading
-                    )
-                    .background(
-                        Color(eventHex: bar.colorHex),
-                        in: UnevenRoundedRectangle(
-                            cornerRadii: .init(
-                                topLeading: bar.isStartTruncated ? 0 : 3,
-                                bottomLeading: bar.isStartTruncated ? 0 : 3,
-                                bottomTrailing: bar.isEndTruncated ? 0 : 3,
-                                topTrailing: bar.isEndTruncated ? 0 : 3
+                CalendarEventDetailTrigger(detail: bar.detail) {
+                    Text(bar.title)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(
+                            bar.textTone == .dark ? PlannerPalette.ink : Color.white
+                        )
+                        .lineLimit(1)
+                        .padding(.leading, 4)
+                        .padding(.trailing, 2)
+                        .frame(
+                            width: width,
+                            height: CalendarEventLayoutMetrics.itemHeight,
+                            alignment: .leading
+                        )
+                        .background(
+                            Color(eventHex: bar.colorHex),
+                            in: UnevenRoundedRectangle(
+                                cornerRadii: .init(
+                                    topLeading: bar.isStartTruncated ? 0 : 3,
+                                    bottomLeading: bar.isStartTruncated ? 0 : 3,
+                                    bottomTrailing: bar.isEndTruncated ? 0 : 3,
+                                    topTrailing: bar.isEndTruncated ? 0 : 3
+                                )
                             )
                         )
-                    )
-                    .position(
-                        x: x + width / 2,
-                        y: y + CalendarEventLayoutMetrics.itemHeight / 2
-                    )
+                }
+                .position(
+                    x: x + width / 2,
+                    y: y + CalendarEventLayoutMetrics.itemHeight / 2
+                )
             }
         }
-        .allowsHitTesting(false)
         .clipped()
     }
 }
@@ -524,7 +553,9 @@ struct DateCellView: View {
                     spacing: CalendarEventLayoutMetrics.rowSpacing
                 ) {
                     ForEach(rows) { row in
-                        CalendarEventRowView(row: row)
+                        CalendarEventDetailTrigger(detail: row.detail) {
+                            CalendarEventRowView(row: row)
+                        }
                     }
                     if let overflowCount {
                         // The inert Events Overflow marker: it reads the
@@ -539,7 +570,6 @@ struct DateCellView: View {
                 }
                 .padding(.horizontal, 3)
                 .padding(.top, rowsTop)
-                .allowsHitTesting(false)
                 // Rows never paint past the fixed 96-point Week Row; the
                 // visible cap already bounds what may appear.
                 .clipped()
