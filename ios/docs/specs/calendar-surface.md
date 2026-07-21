@@ -6,7 +6,7 @@
 
 ## Purpose and ownership
 
-The **iOS Calendar Surface** is the event-free native presentation of Planning's **Calendar Grid**. The **iOS Calendar Header** remains fixed above it. The iOS Experience owns this presentation while Planning owns the shared **Product Name**, **Today**, **Week Row**, **Date Cell**, **Extended Calendar Range**, **Month Marker**, **Visible Month**, and **Today Jump** language.
+The **iOS Calendar Surface** is the event-free native presentation of Planning's **Calendar Grid**. _Superseded for builds with the Google connection release gate enabled (development only): the enabled iOS Calendar Surface presents the user's Calendar Events as described in § Calendar Events (release gate) below. The gate stays off in all committed and production configurations, where the event-free presentation remains in force._ The **iOS Calendar Header** remains fixed above it. The iOS Experience owns this presentation while Planning owns the shared **Product Name**, **Today**, **Week Row**, **Date Cell**, **Extended Calendar Range**, **Month Marker**, **Visible Month**, and **Today Jump** language.
 
 The iOS delivery stack is independent from the Web Experience. It shares vocabulary and behavior, not executable code, generated source, packages, or build commands.
 
@@ -44,7 +44,7 @@ The iOS delivery stack is independent from the Web Experience. It shares vocabul
 
 ### Date Cell presentation
 
-- An ordinary Date Cell contains only its compact localized day number, aligned top-trailing with monospaced system digits.
+- An ordinary Date Cell contains only its compact localized day number, aligned top-trailing with monospaced system digits. _Superseded for builds with the Google connection release gate enabled (development only): an ordinary Date Cell additionally presents its Calendar Event Bars, Calendar Event Rows, and Events Overflow marker below the day number as described in § Calendar Events (release gate). The gate stays off in all committed and production configurations, where this statement remains in force._
 - Today uses a compact filled olive circle around the number. It has no whole-cell Today tint or textual label.
 - Locale-defined weekend Date Cells and weekday labels use a subtle warm tint.
 - The first Date Cell of each month adds an uppercase localized short Month Marker at the leading side of the same top row as the equally sized day number, plus a three-point olive rule on the cell's leading edge.
@@ -65,14 +65,41 @@ The iOS delivery stack is independent from the Web Experience. It shares vocabul
 - Launch on a static opaque `#F5F1E6` background with no title, glyph, animation, loading state, or progress.
 - Use the unchanged web calendar glyph, centered on an opaque `#F5F1E6` app-icon background. Let the operating system apply the corner mask.
 
+## Calendar Events (release gate)
+
+_Development-only: every statement in this section applies only to builds with the Google connection release gate enabled. The gate stays off in all committed and production configurations, where none of this behavior exists._
+
+### Sources and fetching
+
+- While the Google Account Connection is connected, the iOS Calendar Surface presents Calendar Events from the primary Source Calendar only. No Source Calendar selection exists; any future picker is purely additive.
+- Calendar Events are fetched directly from the Google Calendar API with the SDK-managed access token (ADR 0001); Planner's backend is never involved.
+- The initial Fetched Window covers Today ± 3 months. When the visible range comes within one month of a Fetched Window edge, a two-month slab fetch extends the window in that direction. Each range is fetched once per process run; a failed slab leaves its range empty and retries on the next approach.
+- Recurring events arrive expanded into per-date instances; cancelled events and events the user declined are hidden.
+- There is no revalidation: already-fetched ranges are never refetched within a process run, and no polling, timers, or background processing exist.
+
+### Presentation
+
+- An all-day event of any length and a timed event spanning multiple local days present as a Calendar Event Bar in the Source Calendar's background color with contrast-safe text, lane-ordered by start date, then start time, then longer duration first. The title begins in the leading-edge Date Cell and continues across subsequent cells, mirrored for right-to-left; a bar crossing a Week Row boundary splits into truncated segments with square continuing edges.
+- A timed single-day event presents as a Calendar Event Row — a dot in the Source Calendar's color, a localized start time, and a title — ordered by start time within its Date Cell.
+- A Date Cell presents at most four event slots at the fixed 96-point Week Row height; beyond the cap it shows three items plus the inert Events Overflow marker carrying the hidden count, in bars-then-rows order. A bar lane deeper than the second renders only when every Date Cell it crosses fits at true lane positions with no rows and no overflow beneath it; otherwise it counts into the overflow of every cell it crosses. Rows and the marker never paint past the fixed Week Row.
+- Event items render 14 points tall with 10-point text and do not scale with Dynamic Type.
+- The Events Overflow marker is inert: it reads the hidden count and summons nothing. Date Cells remain inert — scrolling and Today Jump remain the only product interactions.
+- A missing or blank event summary presents as “Busy”.
+
+### Availability and status
+
+- Calendar Events are memory-only (ADR 0003): they are never persisted, they vanish on Disconnect on This Device, and they refetch per process run. There are no offline placeholders.
+- The iOS Header Status presents fetch progress, fetch failures, and offline conditions in Planner-owned copy; raw Google errors never reach it. Connection warnings and errors lead; event-fetch progress and issues override resting connection information.
+- An offline initial fetch leaves the bare, usable Calendar Grid with a warning and retries event-driven on connectivity return. A failed slab keeps already-fetched events visible with a fetch-issue message and recovers on connectivity return or the next edge approach.
+
 ## Interaction and product exclusions
 
 Scrolling and Today Jump are the only product interactions. _Superseded for builds with the Google connection release gate enabled (development only): Connect, Disconnect on This Device, and the first-connect explanation actions are additional product interactions; the gate keeps them inactive in committed and production builds._ This slice contains no:
 
-- Calendar Event type, event renderer, event placeholder, busy block, or overflow control
+- Calendar Event type, event renderer, event placeholder, busy block, or overflow control. _Superseded for builds with the Google connection release gate enabled (development only): enabled builds present Calendar Events per § Calendar Events (release gate); the Events Overflow marker is an inert indicator, not a control, and no busy block exists. The gate keeps them inactive in committed and production builds._
 - Google Account Connection or Source Calendar. _Superseded only for development builds with the Google connection release gate enabled, which present the gated iOS Account Control and iOS Header Status with launch restoration, the first-connect explanation, Connect, offline recovery, the installation boundary, and Disconnect on This Device._
 - Date selection, detail view, navigation route, tab, sheet, toolbar, menu, onboarding, or settings. _Superseded only for the gated first-connect explanation: builds with the Google connection release gate enabled present one compact native sheet explaining read-only Calendar access before the first Connect; every other listed exclusion remains in force._
-- Persistence, restoration state, networking, permission, analytics, user notification, or extension. _Superseded only as needed by the gated Google Account Connection: enabled builds persist the non-identifying disclosure acknowledgement and installation markers, reach Google for authorization and the profile image, and request Calendar read authorization; no other persistence, networking, permission, analytics, notification, or extension exists, and the gate keeps the addition inactive in committed and production builds._
+- Persistence, restoration state, networking, permission, analytics, user notification, or extension. _Superseded only as needed by the gated Google Account Connection: enabled builds persist the non-identifying disclosure acknowledgement and installation markers, reach Google for authorization and the profile image, and request Calendar read authorization; no other persistence, networking, permission, analytics, notification, or extension exists, and the gate keeps the addition inactive in committed and production builds._ _Superseded further for the gated Calendar Events: enabled builds additionally reach the Google Calendar API for the primary Source Calendar's events, keep them memory-only, and persist no Calendar data; the gate keeps the addition inactive in committed and production builds._
 - Background-processing entitlement, continuously running timer, widget, or alternate scene
 - Web font, project generator, or executable dependency on `web/`
 - Third-party packages, with one reviewed exception: the pinned Google Sign-In for iOS SDK behind the build-time Google connection release gate. _Superseded only as recorded in the native-authentication ADR; the gate keeps the addition inactive in committed and production builds._
@@ -88,6 +115,8 @@ The shared Planner scheme builds the application and runs Swift Testing against 
 - Localized text, Monday-first semantics, weekend classification, and right-to-left direction
 - Foreground, midnight, timezone, and locale refreshes
 - Topmost Week Row preservation and both-boundary clamping
+
+The gated Calendar Events are covered through the observable Calendar Events model seam with a fake Google Calendar API adapter, a fake connectivity monitor, and fixed instants, Gregorian calendars, locales, and timezones: Fetched Window expansion and once-per-range fetching, normalization and classification, lane ordering and the visible cap with Events Overflow counts, Header Status messaging and resolution between the two publishers, offline recovery, and stale-completion guarding. Deterministic SwiftUI previews cover bars spanning Date Cells, rows, Month Marker cells, dense days, compact and wide widths, and right-to-left layouts.
 
 See [`../../README.md`](../../README.md) for copyable build and test commands. CI runs only for this delivery stack and shared Planning/context changes; it performs no signing, archive, App Store, TestFlight, or deployment work.
 
@@ -111,6 +140,8 @@ See [`../../README.md`](../../README.md) for copyable build and test commands. C
 | Locale and direction | Spanish and Arabic iPhone/iPad runs | Pass: localized labels/numerals, mirrored placement, locale weekend tint |
 | Product Version | iPhone SE (3rd generation), iOS 18.5 Simulator, English and Arabic runs | Pass: `v1.0.1` beneath the Product Name, trailing-aligned and mirrored, header height unchanged |
 | App icon | iPhone home screen | Pass: opaque beige icon, unchanged centered glyph, system corner mask |
+| Calendar Events presentation | Deterministic SwiftUI previews (gate on) | Preview compile pass: bars spanning cells, dotted rows, dense day with inert Events Overflow, Month Marker cell, compact/wide/RTL layouts; visual inspection run pending |
+| Real-OAuth event fetching and offline recovery | Production-like OAuth configuration | Pending — external OAuth configuration required |
 
 ## Deferred validation and release work
 

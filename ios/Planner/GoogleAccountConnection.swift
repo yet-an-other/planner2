@@ -209,7 +209,7 @@ final class GoogleAccountConnection {
     /// behavior. Increment it when the copy's data-behavior claims change,
     /// so installations that acknowledged an earlier version see the
     /// revised sheet again.
-    static let currentDisclosureVersion = 1
+    static let currentDisclosureVersion = 2
 
     /// The scopes Connect requests in one authorization flow: Google identity
     /// plus read-only Calendar access.
@@ -683,10 +683,11 @@ extension GoogleAccountConnectionCopy {
     /// The first-connect explanation: read-only purpose, no-write
     /// assurance, and this build's actual Calendar-data behavior.
     static let explanationBody =
-        "Planner requests read-only access to Google Calendar so future "
-        + "features can show your calendars and events. Planner cannot "
-        + "create, edit, or delete anything in your Google Calendar. "
-        + "This build downloads no Calendar data."
+        "Planner requests read-only access to Google Calendar to show "
+        + "your primary calendar\u{2019}s events on the Calendar Surface. "
+        + "Planner cannot create, edit, or delete anything in your Google "
+        + "Calendar. This build downloads your primary calendar\u{2019}s "
+        + "events to show them and stores no Calendar data."
 
     /// The explanation action that acknowledges and resumes Connect.
     static let explanationContinue = "Continue"

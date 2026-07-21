@@ -16,7 +16,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 ### Release gate and configuration
 
 - A build-time release gate controls the entire addition. While off — every committed and production configuration — the app initializes no connection behavior, mounts neither the iOS Account Control nor the iOS Header Status, and renders the accepted 100-point iOS Calendar Header.
-- The gate remains off for production until a Calendar-data feature provides visible value for the sensitive scope.
+- The gate remains off for production until a Calendar-data feature provides visible value for the sensitive scope. That feature has landed behind the gate: Calendar Events on the iOS Calendar Surface, with the explanation's data-behavior copy updated and the disclosure version incremented to 2. The production flip remains coupled to the external release inputs below.
 - With the gate on, the iOS OAuth client ID, reversed callback scheme, and HTTPS Privacy Policy URL arrive as environment-specific build settings substituted into the app bundle. No client secret setting exists anywhere.
 - A gate-on build with missing or invalid values leaves the iOS Calendar Surface usable, disables Connect through the control's dimmed, non-interactive state, and reports "Google connection is not configured".
 - Ordinary builds, previews, tests, and CI require no Google credentials, account, callback, or network access.
@@ -35,7 +35,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 
 ### Connect
 
-- The first Connect for the current disclosure version presents a compact native explanation before any Google authorization UI: read-only purpose, inability to modify Calendar data, and the enabled build's actual Calendar-data behavior (a connection-only build downloads no Calendar data), with Continue, Cancel, and Privacy Policy actions. The Privacy Policy action opens the configured HTTPS URL.
+- The first Connect for the current disclosure version presents a compact native explanation before any Google authorization UI: read-only purpose, inability to modify Calendar data, and the enabled build's actual Calendar-data behavior (gate-on builds download the primary Source Calendar's events to show them and store no Calendar data), with Continue, Cancel, and Privacy Policy actions. The Privacy Policy action opens the configured HTTPS URL.
 - Continue acknowledges the disclosure version through an install-local, non-identifying marker and resumes the same Connect flow; acknowledging suppresses the sheet until the version increments. Cancel or interactive dismissal opens no Google UI and reports "Google connection cancelled".
 - One authorization request obtains `openid`, `email`, `profile`, and `https://www.googleapis.com/auth/calendar.readonly` through the configured iOS OAuth client, so existing project-wide consent is reused without a redundant prompt. The reversed-client-ID callback route returns through the app's URL handling to the SDK.
 - Connected state is published only when the Calendar scope is present. Identity without it clears the partial local sign-in, remains disconnected, and reports "Calendar read access is required".
@@ -130,7 +130,7 @@ These gates are deliberately **not complete** and are not reported as such:
 - Google Calendar API enabled and the OAuth consent screen production-ready with the sensitive `calendar.readonly` scope verified as Google requires.
 - A public HTTPS Privacy Policy URL whose content covers current and intended Calendar-data handling.
 - App Privacy answers covering Planner's and the SDK's account and Calendar data behavior.
-- A first user-visible Calendar-data consumer, which alone justifies enabling the production release gate.
+- A first user-visible Calendar-data consumer, which alone justifies enabling the production release gate. Delivered behind the gate: Calendar Events on the iOS Calendar Surface.
 
 ## Compliance validation
 
@@ -140,4 +140,4 @@ These gates are deliberately **not complete** and are not reported as such:
 
 ## Deferred validation and release work
 
-Real-OAuth acceptance per the matrix above, Google OAuth verification administration, App Store submission, TestFlight distribution, signing administration, and release rollout remain outside implementation. Enabling the production gate is coupled to the first user-visible Calendar-data feature and must update the explanation's data-behavior copy and disclosure version at that time.
+Real-OAuth acceptance per the matrix above, Google OAuth verification administration, App Store submission, TestFlight distribution, signing administration, and release rollout remain outside implementation. Enabling the production gate is coupled to the first user-visible Calendar-data feature; that feature has landed behind the gate, and the explanation's data-behavior copy and disclosure version were updated with it (version 2), so the remaining coupling is the external release inputs above.

@@ -732,6 +732,43 @@ struct GoogleAccountConnectionTests {
         #expect(store.acknowledgedVersion == updatedVersion)
     }
 
+    @Test("The current disclosure re-presents to version-one acknowledgers")
+    func versionOneAcknowledgersSeeTheSheetAgain() async {
+        let (connection, adapter, store, _) = makeConnection(
+            disclosureStore: FakeGoogleConnectionDisclosureStore(
+                acknowledgedVersion: 1
+            )
+        )
+        // The event-downloading disclosure bumped the version.
+        #expect(GoogleAccountConnection.currentDisclosureVersion == 2)
+        #expect(await settledDisconnected(connection))
+        adapter.signInHandler = { .connected(Self.authorizedAccount()) }
+
+        connection.connect()
+        #expect(connection.explanation != nil)
+        #expect(adapter.signInCallCount == 0)
+
+        connection.continueConnect()
+        #expect(
+            await controlEventuallyEquals(
+                .connected(Self.profile),
+                in: connection
+            )
+        )
+        #expect(
+            store.acknowledgedVersion
+                == GoogleAccountConnection.currentDisclosureVersion
+        )
+    }
+
+    @Test("The explanation states events are downloaded and nothing stored")
+    func explanationCopyStatesDownloadingAndNoStorage() {
+        let body = GoogleAccountConnectionCopy.explanationBody
+        #expect(body.contains("downloads"))
+        #expect(body.contains("stores no Calendar data"))
+        #expect(!body.contains("downloads no Calendar data"))
+    }
+
     @Test("A repeated Connect while explaining presents one sheet")
     func duplicateConnectWhileExplaining() async {
         let (connection, adapter, _, _) = makeConnection(
