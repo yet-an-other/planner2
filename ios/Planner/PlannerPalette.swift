@@ -18,4 +18,8 @@ enum PlannerPalette {
     static let emphasizedControl = Color(red: 0.922, green: 0.890, blue: 0.820)
     static let statusWarning = Color(red: 0.541, green: 0.353, blue: 0.0)
     static let statusError = Color(red: 0.639, green: 0.176, blue: 0.129)
+    /// The actionable-link blue, matching the Web Experience's Event
+    /// Detail Popover links (#2952a3) — the one cool accent in the warm
+    /// palette, reserved for outbound affordances.
+    static let link = Color(red: 0.161, green: 0.322, blue: 0.639)
 }

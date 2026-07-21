@@ -28,6 +28,10 @@ struct GoogleCalendarEvent: Equatable, Sendable {
     let end: GoogleCalendarEventTime
     let isCancelled: Bool
     let isDeclinedByViewer: Bool
+    /// Google's link to the event in Google Calendar, when provided.
+    let googleLink: String?
+    /// Google's free-form location string, when provided.
+    let location: String?
 
     init(
         id: String,
@@ -36,7 +40,9 @@ struct GoogleCalendarEvent: Equatable, Sendable {
         start: GoogleCalendarEventTime,
         end: GoogleCalendarEventTime,
         isCancelled: Bool,
-        isDeclinedByViewer: Bool
+        isDeclinedByViewer: Bool,
+        googleLink: String? = nil,
+        location: String? = nil
     ) {
         self.id = id
         self.summary = summary
@@ -45,6 +51,8 @@ struct GoogleCalendarEvent: Equatable, Sendable {
         self.end = end
         self.isCancelled = isCancelled
         self.isDeclinedByViewer = isDeclinedByViewer
+        self.googleLink = googleLink
+        self.location = location
     }
 }
 
@@ -664,6 +672,13 @@ final class CalendarEventsModel {
                 ?? sourceCalendar.backgroundColorHex
             let textTone = CalendarEventsModel.textTone(forHexColor: colorHex)
 
+            // The Event Detail Popover's optional fields, mapped once so
+            // every classification branch publishes the same omission
+            // rules: blank locations are absent.
+            let trimmedLocation = event.location?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let location = trimmedLocation.isEmpty ? nil : trimmedLocation
+
             let locale = environment.locale
             let timeZone = environment.timeZone
             let timingLine = { (timing: CalendarEventTiming) in
@@ -720,7 +735,9 @@ final class CalendarEventsModel {
                                 isAllDay: true,
                                 isMultiday: endDate > startDate
                             )
-                        )
+                        ),
+                        location: location,
+                        googleLink: event.googleLink
                     )
                 )
             case (.timed(let startsAt), .timed(let endsAt)):
@@ -747,7 +764,9 @@ final class CalendarEventsModel {
                                     isAllDay: false,
                                     isMultiday: true
                                 )
-                            )
+                            ),
+                            location: location,
+                            googleLink: event.googleLink
                         )
                     )
                 }
@@ -771,7 +790,9 @@ final class CalendarEventsModel {
                                 isAllDay: false,
                                 isMultiday: false
                             )
-                        )
+                        ),
+                        location: location,
+                        googleLink: event.googleLink
                     )
                 )
             default:

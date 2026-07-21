@@ -15,6 +15,28 @@ struct CalendarEventDetail: Equatable, Sendable {
     /// all-day event, "All day · start – end" for a multiday one, and
     /// "date · start – end" for a timed one.
     let timingText: String
+    /// The event's location, trimmed, or `nil` when Google provides none
+    /// or a blank one — the Where section is omitted rather than shown
+    /// empty.
+    let location: String?
+    /// Google's link to the event in Google Calendar, or `nil` when
+    /// Google provides none — the footer is omitted rather than shown
+    /// empty.
+    let googleLink: String?
+
+    init(
+        title: String,
+        colorHex: String,
+        timingText: String,
+        location: String? = nil,
+        googleLink: String? = nil
+    ) {
+        self.title = title
+        self.colorHex = colorHex
+        self.timingText = timingText
+        self.location = location
+        self.googleLink = googleLink
+    }
 }
 
 /// One event's display timing in Planner's uniform shape, so the timing

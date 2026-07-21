@@ -2172,6 +2172,75 @@ struct CalendarEventsModelTests {
         #expect(model.layout(forWeekStarting: Self.gmt(2026, 7, 20)) == nil)
     }
 
+    @Test("An event's detail carries its trimmed location and its Google link")
+    func detailCarriesLocationAndGoogleLink() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "review",
+                        summary: "Design Review",
+                        start: .timed(Self.gmt(2026, 7, 22, 13, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 14, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        googleLink: "https://www.google.com/calendar/event?eid=abc123",
+                        location: "  Studio 4, King Street  "
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        let detail = layout?.cells[2].rows.first?.detail
+        #expect(detail?.location == "Studio 4, King Street")
+        #expect(
+            detail?.googleLink
+                == "https://www.google.com/calendar/event?eid=abc123"
+        )
+    }
+
+    @Test("Absent or blank location and Google link stay absent from the detail")
+    func absentLocationAndGoogleLinkStayAbsent() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "sparse",
+                        summary: "Sparse",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "blank-location",
+                        summary: "Blank Location",
+                        start: .timed(Self.gmt(2026, 7, 22, 11, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 12, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        location: "   "
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        let details = layout?.cells[2].rows.map(\.detail) ?? []
+        // Sparse events stay clean: no Where section, no footer.
+        #expect(details.map(\.location) == [nil, nil])
+        #expect(details.map(\.googleLink) == [nil, nil])
+    }
+
     // MARK: Helpers
 
     private static var initialEvent: GoogleCalendarEvent {

@@ -91,6 +91,8 @@ _Development-only: every statement in this section applies only to builds with t
 
 - Tapping a Calendar Event Bar — any segment of a multiday bar — or a Calendar Event Row summons the Event Detail Popover (Planning glossary; ADR 0005): a native anchored popover adapting to a sheet on compact widths, with a small close affordance. It dismisses by outside tap, the affordance, or the platform gesture — never by surface scroll.
 - The popover presents the event's title with an Event Color accent and a localized timing line: “All day · date” for a single all-day event, “All day · start – end” for a multiday one, and “date · start – end” for a timed one, with a timed multiday event carrying date and time on both ends.
+- A Where section presents the event's location when Google provides one: a place string renders as text with a Google Maps search link on its pin affordance, and a location that is itself an http(s) URL renders as a direct link. The location stays a plain string in the data model; linkification is presentation-only.
+- An “Open in Google Calendar →” footer links to the event in Google Calendar when Google provides the link. Sections and the footer are omitted when their data is absent, so a sparse event stays clean.
 - The popover renders from the published layout state — bar segments and row items carry their event's presentation payload — so Disconnect on This Device dismisses an open popover as a consequence of clearing events (ADR 0005), not as a special case.
 - The popover is the surface's single read-only exception: it carries no edit affordances, the Events Overflow marker stays inert, and Date Cells are otherwise inert.
 

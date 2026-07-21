@@ -16,37 +16,61 @@ struct IOSEventDetailPopover: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 8) {
-                    // The Event Color accent: the same event the user
-                    // tapped, read at a glance (the Web Experience's
-                    // leading stripe).
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color(eventHex: detail.colorHex))
-                        .frame(width: 4)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 8) {
+                        // The Event Color accent: the same event the user
+                        // tapped, read at a glance (the Web Experience's
+                        // leading stripe).
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color(eventHex: detail.colorHex))
+                            .frame(width: 4)
 
-                    Text(detail.title)
-                        .font(.headline)
-                        .foregroundStyle(PlannerPalette.ink)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(detail.title)
+                            .font(.headline)
+                            .foregroundStyle(PlannerPalette.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(PlannerPalette.olive)
-                            .padding(6)
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(PlannerPalette.olive)
+                                .padding(6)
+                        }
+                        .accessibilityLabel(Self.closeAccessibilityLabel)
                     }
-                    .accessibilityLabel(Self.closeAccessibilityLabel)
-                }
 
-                IOSEventDetailPopoverSection(title: Self.whenSectionTitle) {
-                    Text(detail.timingText)
-                        .font(.subheadline)
-                        .foregroundStyle(PlannerPalette.ink)
+                    IOSEventDetailPopoverSection(title: Self.whenSectionTitle) {
+                        Text(detail.timingText)
+                            .font(.subheadline)
+                            .foregroundStyle(PlannerPalette.ink)
+                    }
+
+                    if let location = detail.location {
+                        IOSEventDetailPopoverSection(title: Self.whereSectionTitle) {
+                            IOSEventDetailLocationText(location: location)
+                        }
+                    }
+                }
+                .padding(16)
+
+                if let googleLink = detail.googleLink,
+                   let url = URL(string: googleLink)
+                {
+                    Rectangle()
+                        .fill(PlannerPalette.separator)
+                        .frame(height: 1)
+
+                    Link(destination: url) {
+                        Text(Self.openInGoogleCalendarTitle)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(PlannerPalette.ink)
+                            .underline()
+                    }
+                    .padding(16)
                 }
             }
-            .padding(16)
         }
         .frame(maxWidth: Self.maxWidth)
         .background(PlannerPalette.canvas)
@@ -62,6 +86,90 @@ struct IOSEventDetailPopover: View {
 
     private static let closeAccessibilityLabel = "Close"
     private static let whenSectionTitle = "When"
+    private static let whereSectionTitle = "Where"
+    private static let openInGoogleCalendarTitle = "Open in Google Calendar →"
+}
+
+/// The Where line as an actionable link, presentation-only: the location
+/// data model stays a plain string (memory-only, iOS ADR 0003). A place
+/// or address string renders as text with a Google Maps search link on
+/// the pin affordance; a location that is itself an http(s) URL renders
+/// as a direct link. Mirrors the Web Experience's location-links module.
+private struct IOSEventDetailLocationText: View {
+    let location: String
+
+    var body: some View {
+        if Self.isWholeURL(location), let url = URL(string: location) {
+            Link(destination: url) {
+                Text(location)
+                    .font(.subheadline)
+                    .foregroundStyle(PlannerPalette.link)
+                    .underline()
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else if let mapsURL = Self.mapsURL(for: location) {
+            HStack(alignment: .top, spacing: 6) {
+                Link(destination: mapsURL) {
+                    Image(systemName: "mappin")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(PlannerPalette.link)
+                        .padding(.top, 2)
+                }
+                .accessibilityLabel(Self.mapsAccessibilityLabel)
+
+                Text(location)
+                    .font(.subheadline)
+                    .foregroundStyle(PlannerPalette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            // An unbuildable Maps URL (a location that cannot percent-
+            // encode) degrades to plain text rather than a dead link.
+            Text(location)
+                .font(.subheadline)
+                .foregroundStyle(PlannerPalette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private static let mapsAccessibilityLabel = "Open in Google Maps"
+
+    /// Whether the whole location string is exactly one http(s) URL —
+    /// deliberately excluding other schemes and URLs embedded in prose,
+    /// so a malicious location can never become a script URL and
+    /// prose-with-a-URL honestly goes to Maps search as a whole string.
+    private static func isWholeURL(_ location: String) -> Bool {
+        let lowered = location.lowercased()
+        guard lowered.hasPrefix("http://") || lowered.hasPrefix("https://")
+        else {
+            return false
+        }
+        return !location.contains(where: \.isWhitespace)
+    }
+
+    /// The documented Google Maps search URL for arbitrary free text,
+    /// letting Maps geocode and interpret the place string.
+    private static func mapsURL(for location: String) -> URL? {
+        let collapsed = location
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=")
+        guard
+            let query = collapsed.addingPercentEncoding(
+                withAllowedCharacters: allowed
+            )
+        else {
+            return nil
+        }
+        return URL(
+            string: "https://www.google.com/maps/search/?api=1&query=\(query)"
+        )
+    }
 }
 
 /// One labelled section of the Event Detail Popover: a small uppercase
@@ -100,28 +208,44 @@ private extension Color {
 }
 
 #if DEBUG
-#Preview("Full Width · iPhone Sheet") {
+#Preview("Where and Google Link · iPhone Sheet") {
     IOSEventDetailPopover(
         detail: CalendarEventDetail(
             title: "Design Review",
             colorHex: "#039BE5",
-            timingText: "All day · Wed, Jul 22, 2026"
+            timingText: "Wed, Jul 22, 2026 · 1:00 PM – 2:00 PM",
+            location: "Studio 4, King Street, Copenhagen",
+            googleLink: "https://www.google.com/calendar/event?eid=abc123"
         ),
         onClose: {}
     )
-    .frame(width: 393, height: 300)
+    .frame(width: 393, height: 320)
 }
 
-#Preview("Popover Width · iPad") {
+#Preview("URL Location · iPad") {
     IOSEventDetailPopover(
         detail: CalendarEventDetail(
             title: "Team Offsite — Summer Edition with a Deliberately Long Title",
             colorHex: "#5484ED",
-            timingText: "All day · Jul 14, 2026 – Jul 16, 2026"
+            timingText: "All day · Jul 14, 2026 – Jul 16, 2026",
+            location: "https://meet.example.com/offsite-room",
+            googleLink: "https://www.google.com/calendar/event?eid=def456"
         ),
         onClose: {}
     )
-    .frame(width: 360, height: 300)
+    .frame(width: 360, height: 320)
+}
+
+#Preview("Minimal · No Optional Sections") {
+    IOSEventDetailPopover(
+        detail: CalendarEventDetail(
+            title: "Dentist",
+            colorHex: "#33B679",
+            timingText: "All day · Wed, Jul 22, 2026"
+        ),
+        onClose: {}
+    )
+    .frame(width: 360, height: 240)
 }
 
 #Preview("Right to Left") {
@@ -129,11 +253,13 @@ private extension Color {
         detail: CalendarEventDetail(
             title: "مراجعة التصميم",
             colorHex: "#039BE5",
-            timingText: "All day · Wed, Jul 22, 2026"
+            timingText: "All day · Wed, Jul 22, 2026",
+            location: "شارع الملك، الاستوديو ٤",
+            googleLink: "https://www.google.com/calendar/event?eid=abc123"
         ),
         onClose: {}
     )
     .environment(\.layoutDirection, .rightToLeft)
-    .frame(width: 360, height: 300)
+    .frame(width: 360, height: 320)
 }
 #endif
