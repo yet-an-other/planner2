@@ -2228,6 +2228,15 @@ struct CalendarEventsModelTests {
                         isDeclinedByViewer: false,
                         location: "   "
                     ),
+                    GoogleCalendarEvent(
+                        id: "blank-link",
+                        summary: "Blank Link",
+                        start: .timed(Self.gmt(2026, 7, 22, 13, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 14, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        googleLink: "  "
+                    ),
                 ]
             )
         }
@@ -2237,8 +2246,8 @@ struct CalendarEventsModelTests {
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
         let details = layout?.cells[2].rows.map(\.detail) ?? []
         // Sparse events stay clean: no Where section, no footer.
-        #expect(details.map(\.location) == [nil, nil])
-        #expect(details.map(\.googleLink) == [nil, nil])
+        #expect(details.map(\.location) == [nil, nil, nil])
+        #expect(details.map(\.googleLink) == [nil, nil, nil])
     }
 
     @Test("HTML notes render as plain text with tags and entities resolved")

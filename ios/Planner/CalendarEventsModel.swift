@@ -693,11 +693,15 @@ final class CalendarEventsModel {
 
             // The Event Detail Popover's optional fields, mapped once so
             // every classification branch publishes the same omission
-            // rules: blank locations are absent; HTML notes render plain
-            // and blank out to absence.
+            // rules: blank locations and Google links are absent; HTML
+            // notes render plain and blank out to absence.
             let trimmedLocation = event.location?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let location = trimmedLocation.isEmpty ? nil : trimmedLocation
+            let trimmedGoogleLink = event.googleLink?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let googleLink = trimmedGoogleLink.isEmpty
+                ? nil : trimmedGoogleLink
             let notes = CalendarEventPlainTextNotes.plainText(
                 fromHTML: event.notes
             )
@@ -763,7 +767,7 @@ final class CalendarEventsModel {
                             )
                         ),
                         location: location,
-                        googleLink: event.googleLink,
+                        googleLink: googleLink,
                         notes: notes,
                         attendees: attendees.visible,
                         hiddenAttendeeCount: attendees.hiddenCount
@@ -795,7 +799,7 @@ final class CalendarEventsModel {
                                 )
                             ),
                             location: location,
-                            googleLink: event.googleLink,
+                            googleLink: googleLink,
                             notes: notes,
                             attendees: attendees.visible,
                             hiddenAttendeeCount: attendees.hiddenCount
@@ -824,7 +828,7 @@ final class CalendarEventsModel {
                             )
                         ),
                         location: location,
-                        googleLink: event.googleLink,
+                        googleLink: googleLink,
                         notes: notes,
                         attendees: attendees.visible,
                         hiddenAttendeeCount: attendees.hiddenCount
