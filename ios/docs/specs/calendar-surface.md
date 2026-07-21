@@ -49,7 +49,7 @@ The iOS delivery stack is independent from the Web Experience. It shares vocabul
 - Locale-defined weekend Date Cells and weekday labels use a subtle warm tint.
 - The first Date Cell of each month adds an uppercase localized short Month Marker at the leading side of the same top row as the equally sized day number, plus a three-point olive rule on the cell's leading edge.
 - Thin beige separators divide Date Cells and Week Rows. There is no outer card, shadow, rounded Calendar Grid container, or grid margin.
-- Date Cells are inert: no selection, navigation, menu, gesture, haptic, or placeholder action.
+- Date Cells are inert: no selection, navigation, menu, gesture, haptic, or placeholder action. _Superseded for builds with the Google connection release gate enabled (development only): Calendar Event Bars and Rows summon the read-only Event Detail Popover (§ Event Detail Popover below); Date Cells and the Events Overflow marker are otherwise inert. The gate keeps the statement here in force in committed and production builds._
 
 ### Live system changes
 
@@ -93,7 +93,7 @@ _Development-only: every statement in this section applies only to builds with t
 - The popover presents the event's title with an Event Color accent and a localized timing line: “All day · date” for a single all-day event, “All day · start – end” for a multiday one, and “date · start – end” for a timed one, with a timed multiday event carrying date and time on both ends.
 - A Where section presents the event's location when Google provides one: a place string renders as text with a Google Maps search link on its pin affordance, and a location that is itself an http(s) URL renders as a direct link. The location stays a plain string in the data model; linkification is presentation-only.
 - A Notes section presents the event's notes as plain text — HTML stripped at normalization, Google's auto-created-event boilerplate removed — with http(s) URLs tappable; long notes scroll within the section. The notes stay plain text in the data model; linkification is presentation-only.
-- An Attendees section presents the invitees when the event has them: display name when present, email otherwise, each with the response status as text — accepted, declined, tentative, invited, or unknown, never color alone — capped at five with a “+N more” line for the rest.
+- An Attendees section presents the event's attendees when it has them: display name when present, email otherwise, each with the response status as text — accepted, declined, tentative, invited, or unknown, never color alone — capped at five with a “+N more” line for the rest.
 - An “Open in Google Calendar →” footer links to the event in Google Calendar when Google provides the link. Sections and the footer are omitted when their data is absent, so a sparse event stays clean.
 - The popover renders from the published layout state — bar segments and row items carry their event's presentation payload — so Disconnect on This Device dismisses an open popover as a consequence of clearing events (ADR 0005), not as a special case.
 - The popover is the surface's single read-only exception: it carries no edit affordances, the Events Overflow marker stays inert, and Date Cells are otherwise inert.
@@ -146,7 +146,7 @@ See [`../../README.md`](../../README.md) for copyable build and test commands. C
 | Compact iPad width | Deterministic 507-point Arabic preview | Preview pass: full-width RTL reflow without a sidebar or alternate layout; actual Split View runtime check remains pending |
 | Native scrolling | iPhone 16 Pro, iOS 18.5 Simulator | Pass: native movement, transient indicator, immediate Visible Month; end-of-range boundary bounce was not separately re-run |
 | Today Jump | iPhone 16 Pro plus deterministic model coverage | Pass: animated return and no-op state; manual Reduce Motion setting remains pending |
-| Inert Date Cells | Simulator inspection and scope audit | Pass: no selection, navigation, menu, haptic, or gesture response |
+| Inert Date Cells | Simulator inspection and scope audit | Pass: no selection, navigation, menu, haptic, or gesture response; gate-on builds except bars and rows summoning the Event Detail Popover (see the popover row) |
 | Foreground refresh | Deterministic model coverage and scene-adapter build | Automated pass: Today and browsing position refresh correctly; manual background/foreground run remains pending |
 | Midnight refresh | Deterministic controlled-clock model coverage | Automated pass: Today moves without moving a browsing user; live controlled-clock run remains pending where practical |
 | Locale and direction | Spanish and Arabic iPhone/iPad runs | Pass: localized labels/numerals, mirrored placement, locale weekend tint |
