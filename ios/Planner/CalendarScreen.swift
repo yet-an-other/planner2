@@ -328,8 +328,9 @@ private enum CalendarEventLayoutMetrics {
     /// The first lane's distance from the row's top: below the day-number
     /// area (6pt padding + 18pt label + 2pt gap).
     static let barsTop: CGFloat = 26
-    /// An event item's height: the platform fitting of the Web
-    /// Experience's denser presentation (ticket #75).
+    /// The height of one Calendar Event Bar or Calendar Event Row: the
+    /// platform fitting of the Web Experience's denser presentation
+    /// (ticket #75).
     static let itemHeight: CGFloat = 14
     /// The distance between lane origins.
     static let lanePitch: CGFloat = 16
@@ -396,7 +397,7 @@ private struct CalendarEventBarsOverlay: View {
     }
 }
 
-/// A Calendar Event Row: a Source Calendar colored dot, the localized start
+/// A Calendar Event Row: an Event Color dot, the localized start
 /// time, and the title, truncating at the cell's trailing edge.
 private struct CalendarEventRowView: View {
     let row: CalendarEventRowItem
@@ -424,24 +425,17 @@ private struct CalendarEventRowView: View {
 }
 
 private extension Color {
-    /// A Source Calendar color from its `#RRGGBB` hex form; unparsable
+    /// An Event Color from its `#RRGGBB` hex form; unparsable
     /// values fall back to the palette's olive.
     init(eventHex hex: String) {
-        var hex = hex
-        if hex.hasPrefix("#") {
-            hex.removeFirst()
-        }
-        guard hex.count == 6 else {
+        guard let color = EventColorRGB(hex: hex) else {
             self = PlannerPalette.olive
             return
         }
-        let red = Int(hex.prefix(2), radix: 16) ?? 0
-        let green = Int(hex.dropFirst(2).prefix(2), radix: 16) ?? 0
-        let blue = Int(hex.dropFirst(4).prefix(2), radix: 16) ?? 0
         self = Color(
-            red: Double(red) / 255,
-            green: Double(green) / 255,
-            blue: Double(blue) / 255
+            red: Double(color.red) / 255,
+            green: Double(color.green) / 255,
+            blue: Double(color.blue) / 255
         )
     }
 }
@@ -1199,7 +1193,8 @@ private struct PreviewGoogleCalendarEventsAdapter: GoogleCalendarEventsAdapting 
                     isCancelled: true,
                     isDeclinedByViewer: false
                 ),
-            ]
+            ],
+            eventColorBackgrounds: [:]
         )
     }
 }

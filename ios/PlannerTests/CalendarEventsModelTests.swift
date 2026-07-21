@@ -29,6 +29,17 @@ final class FakeGoogleCalendarEventsAdapter: GoogleCalendarEventsAdapting {
     }
 }
 
+/// Test convenience: a success without event color metadata, so the many
+/// tests that never exercise explicit Google event colors stay terse.
+extension GoogleCalendarEventsOutcome {
+    static func success(
+        calendar: GoogleSourceCalendar,
+        events: [GoogleCalendarEvent]
+    ) -> GoogleCalendarEventsOutcome {
+        .success(calendar: calendar, events: events, eventColorBackgrounds: [:])
+    }
+}
+
 private final class FakeEventsConnectivityMonitor:
     GoogleConnectionConnectivityMonitoring
 {
@@ -203,7 +214,8 @@ struct CalendarEventsModelTests {
                     id: "holiday",
                     title: "Holiday",
                     colorHex: "#039BE5",
-                    textTone: .light,
+                    // Planner's ink out-contrasts white on this blue.
+                    textTone: .dark,
                     lane: 0,
                     startColumn: 2,
                     endColumn: 2,
@@ -648,6 +660,120 @@ struct CalendarEventsModelTests {
         )
         #expect(darkLayout?.bars.first?.textTone == .light)
         #expect(lightLayout?.bars.first?.textTone == .dark)
+    }
+
+    // MARK: Event Color
+
+    @Test("An explicit Google event color wins over the Source Calendar color")
+    func explicitEventColorWins() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: GoogleSourceCalendar(backgroundColorHex: "#039BE5"),
+                events: [
+                    GoogleCalendarEvent(
+                        id: "recolored",
+                        summary: "Recolored",
+                        colorId: "9",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ],
+                eventColorBackgrounds: ["9": "#5484ED"]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.bars.first?.colorHex == "#5484ED")
+    }
+
+    @Test("A colors-metadata failure silently degrades to the Source Calendar color")
+    func colorsMetadataFailureDegradesSilently() async {
+        let (model, adapter) = makeModel()
+        // The adapter maps a failed colors fetch to empty metadata.
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: GoogleSourceCalendar(backgroundColorHex: "#039BE5"),
+                events: [
+                    GoogleCalendarEvent(
+                        id: "recolored",
+                        summary: "Recolored",
+                        colorId: "9",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ],
+                eventColorBackgrounds: [:]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.bars.first?.colorHex == "#039BE5")
+        // Silent: the cosmetic degradation never reaches the iOS Header
+        // Status.
+        #expect(model.status.message == nil)
+    }
+
+    @Test("An intraday row's dot carries the explicit Google event color")
+    func rowDotCarriesExplicitEventColor() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: GoogleSourceCalendar(backgroundColorHex: "#039BE5"),
+                events: [
+                    GoogleCalendarEvent(
+                        id: "recolored",
+                        summary: "Recolored",
+                        colorId: "9",
+                        start: .timed(Self.gmt(2026, 7, 20, 9, 30)),
+                        end: .timed(Self.gmt(2026, 7, 20, 10, 15)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ],
+                eventColorBackgrounds: ["9": "#5484ED"]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.cells[0].rows.first?.colorHex == "#5484ED")
+    }
+
+    @Test("Bar text tone picks the higher-contrast candidate for the Event Color")
+    func textTonePicksHigherContrastCandidate() async {
+        let (model, adapter) = makeModel()
+        // Google palette Blueberry: the old YIQ rule rendered white text at
+        // 3.2:1; Planner's ink stands at over 4.5:1 (WCAG AA).
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: GoogleSourceCalendar(backgroundColorHex: "#5484ED"),
+                events: [
+                    GoogleCalendarEvent(
+                        id: "event",
+                        summary: "Event",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.bars.first?.textTone == .dark)
     }
 
     // MARK: Connection lifecycle

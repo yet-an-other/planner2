@@ -37,15 +37,24 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
         }
 
         do {
-            let calendar = try await fetchPrimaryCalendar(
-                token: user.accessToken.tokenString
-            )
-            let events = try await fetchAllEvents(
-                token: user.accessToken.tokenString,
+            // Event content and calendar attributes must all arrive; the
+            // color metadata is cosmetic, so its failure degrades to
+            // Source Calendar colors instead of failing the fetch. The
+            // token crosses the concurrent requests; the SDK user does
+            // not.
+            let token = user.accessToken.tokenString
+            async let calendar = fetchPrimaryCalendar(token: token)
+            async let events = fetchAllEvents(
+                token: token,
                 from: start,
                 to: end
             )
-            return .success(calendar: calendar, events: events)
+            async let colors = fetchEventColorBackgrounds(token: token)
+            return .success(
+                calendar: try await calendar,
+                events: try await events,
+                eventColorBackgrounds: (try? await colors) ?? [:]
+            )
         } catch {
             return Self.classify(error)
         }
@@ -64,6 +73,19 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
         return GoogleSourceCalendar(
             backgroundColorHex: entry.backgroundColor ?? "#039BE5"
         )
+    }
+
+    /// Google's event color metadata: each explicit event color id to its
+    /// background `#RRGGBB` hex, from the account-wide colors resource.
+    private func fetchEventColorBackgrounds(
+        token: String
+    ) async throws -> [String: String] {
+        let dto: ColorsDTO = try await get(
+            path: "/calendar/v3/colors",
+            query: [],
+            token: token
+        )
+        return (dto.event ?? [:]).compactMapValues(\.background)
     }
 
     private func fetchAllEvents(
@@ -147,6 +169,14 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
         let nextPageToken: String?
     }
 
+    private struct ColorsDTO: Decodable, Sendable {
+        struct ColorDefinition: Decodable, Sendable {
+            let background: String?
+        }
+
+        let event: [String: ColorDefinition]?
+    }
+
     private struct EventDTO: Decodable, Sendable {
         struct Point: Decodable, Sendable {
             let date: String?
@@ -167,6 +197,7 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
         let iCalUID: String?
         let status: String?
         let summary: String?
+        let colorId: String?
         let start: Point?
         let end: Point?
         let attendees: [Attendee]?
@@ -187,6 +218,7 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
         return GoogleCalendarEvent(
             id: dto.id ?? dto.iCalUID ?? "\(start)-\(summary ?? "")",
             summary: summary,
+            colorId: dto.colorId,
             start: start,
             end: end,
             isCancelled: dto.status == "cancelled",

@@ -22,10 +22,30 @@ enum GoogleCalendarEventTime: Equatable, Sendable {
 struct GoogleCalendarEvent: Equatable, Sendable {
     let id: String
     let summary: String?
+    /// Google's explicit event color id, when the event carries one.
+    let colorId: String?
     let start: GoogleCalendarEventTime
     let end: GoogleCalendarEventTime
     let isCancelled: Bool
     let isDeclinedByViewer: Bool
+
+    init(
+        id: String,
+        summary: String?,
+        colorId: String? = nil,
+        start: GoogleCalendarEventTime,
+        end: GoogleCalendarEventTime,
+        isCancelled: Bool,
+        isDeclinedByViewer: Bool
+    ) {
+        self.id = id
+        self.summary = summary
+        self.colorId = colorId
+        self.start = start
+        self.end = end
+        self.isCancelled = isCancelled
+        self.isDeclinedByViewer = isDeclinedByViewer
+    }
 }
 
 /// Planner-relevant event-fetch failure kinds.
@@ -39,9 +59,15 @@ enum GoogleCalendarEventsFailure: Equatable, Sendable {
 
 /// The product-oriented outcome of one Google Calendar events fetch.
 enum GoogleCalendarEventsOutcome: Equatable, Sendable {
-    /// The primary Source Calendar's attributes plus its decoded events for
-    /// the requested range.
-    case success(calendar: GoogleSourceCalendar, events: [GoogleCalendarEvent])
+    /// The primary Source Calendar's attributes, its decoded events for
+    /// the requested range, and Google's event color metadata — the
+    /// explicit-event-color backgrounds keyed by color id, possibly empty
+    /// when their cosmetic fetch failed.
+    case success(
+        calendar: GoogleSourceCalendar,
+        events: [GoogleCalendarEvent],
+        eventColorBackgrounds: [String: String]
+    )
 
     /// The fetch could not complete.
     case unavailable(GoogleCalendarEventsFailure)
@@ -101,10 +127,59 @@ extension CalendarEventsCopy {
     static let failedPartial = "Couldn\u{2019}t load more events. Will retry"
 }
 
-/// The readable text tone on top of a Source Calendar colored event.
+/// The readable text tone on top of an Event Color.
 enum CalendarEventTextTone: Equatable, Sendable {
     case dark
     case light
+}
+
+/// An Event Color decomposed from its `#RRGGBB` hex form. A component
+/// that fails to parse reads as zero.
+struct EventColorRGB: Equatable, Sendable {
+    let red: Int
+    let green: Int
+    let blue: Int
+
+    /// Decomposes a `#RRGGBB` hex string, returning `nil` when it is not
+    /// exactly six pairs after one optional leading `#`.
+    init?(hex: String) {
+        var hex = hex
+        if hex.hasPrefix("#") {
+            hex.removeFirst()
+        }
+        guard hex.count == 6 else {
+            return nil
+        }
+        red = Int(hex.prefix(2), radix: 16) ?? 0
+        green = Int(hex.dropFirst(2).prefix(2), radix: 16) ?? 0
+        blue = Int(hex.dropFirst(4).prefix(2), radix: 16) ?? 0
+    }
+
+    /// The WCAG 2.x relative luminance of the color.
+    var relativeLuminance: Double {
+        Self.relativeLuminance(
+            red: Double(red) / 255,
+            green: Double(green) / 255,
+            blue: Double(blue) / 255
+        )
+    }
+
+    /// The WCAG 2.x relative luminance of sRGB channels in 0...1.
+    static func relativeLuminance(
+        red: Double,
+        green: Double,
+        blue: Double
+    ) -> Double {
+        0.2126 * linearized(red) + 0.7152 * linearized(green)
+            + 0.0722 * linearized(blue)
+    }
+
+    /// One sRGB channel's linear form per the WCAG threshold.
+    private static func linearized(_ channel: Double) -> Double {
+        channel <= 0.04045
+            ? channel / 12.92
+            : pow((channel + 0.055) / 1.055, 2.4)
+    }
 }
 
 /// One week's segment of a Calendar Event Bar: a multiday or all-day event
@@ -331,9 +406,17 @@ final class CalendarEventsModel {
             isFetchingInitialWindow = false
 
             switch outcome {
-            case .success(let sourceCalendar, let events):
+            case .success(
+                let sourceCalendar,
+                let events,
+                let eventColorBackgrounds
+            ):
                 fetchedWindow = (windowStart, windowEnd)
-                normalizedEvents = normalize(events, calendar: sourceCalendar)
+                normalizedEvents = normalize(
+                    events,
+                    calendar: sourceCalendar,
+                    eventColorBackgrounds: eventColorBackgrounds
+                )
                 weekLayouts = [:]
                 publishWeeks(covering: (start: windowStart, end: windowEnd))
                 clearStatusIfIdle()
@@ -478,13 +561,21 @@ final class CalendarEventsModel {
             }
 
             switch outcome {
-            case .success(let sourceCalendar, let events):
+            case .success(
+                let sourceCalendar,
+                let events,
+                let eventColorBackgrounds
+            ):
                 // Google delivers every event overlapping the requested
                 // range, so an event spanning a previously fetched range's
                 // boundary arrives again here. The fresh copy replaces the
                 // retained one: one entry per event id keeps every Week
                 // Row to one segment per event.
-                let slabEvents = normalize(events, calendar: sourceCalendar)
+                let slabEvents = normalize(
+                    events,
+                    calendar: sourceCalendar,
+                    eventColorBackgrounds: eventColorBackgrounds
+                )
                 let redeliveredIds = Set(slabEvents.map(\.id))
                 normalizedEvents.removeAll { redeliveredIds.contains($0.id) }
                 normalizedEvents.append(contentsOf: slabEvents)
@@ -539,7 +630,8 @@ final class CalendarEventsModel {
     /// dates.
     private func normalize(
         _ events: [GoogleCalendarEvent],
-        calendar sourceCalendar: GoogleSourceCalendar
+        calendar sourceCalendar: GoogleSourceCalendar,
+        eventColorBackgrounds: [String: String]
     ) -> [NormalizedEvent] {
         let calendar = environment.calendar
         let timeFormatter = DateFormatter()
@@ -556,9 +648,13 @@ final class CalendarEventsModel {
             let trimmed = event.summary?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let title = trimmed.isEmpty ? "Busy" : trimmed
-            let textTone = CalendarEventsModel.textTone(
-                forHexColor: sourceCalendar.backgroundColorHex
-            )
+            // The Event Color (Planning glossary): the explicit Google
+            // event color when one is set and known, otherwise the Source
+            // Calendar's background color.
+            let colorHex = event.colorId
+                .flatMap { eventColorBackgrounds[$0] }
+                ?? sourceCalendar.backgroundColorHex
+            let textTone = CalendarEventsModel.textTone(forHexColor: colorHex)
 
             switch (event.start, event.end) {
             case (
@@ -588,7 +684,7 @@ final class CalendarEventsModel {
                 return NormalizedEvent(
                     id: event.id,
                     title: title,
-                    colorHex: sourceCalendar.backgroundColorHex,
+                    colorHex: colorHex,
                     textTone: textTone,
                     kind: .bar(
                         startDate: startDate,
@@ -603,7 +699,7 @@ final class CalendarEventsModel {
                     return NormalizedEvent(
                         id: event.id,
                         title: title,
-                        colorHex: sourceCalendar.backgroundColorHex,
+                        colorHex: colorHex,
                         textTone: textTone,
                         kind: .bar(
                             startDate: startDate,
@@ -615,7 +711,7 @@ final class CalendarEventsModel {
                 return NormalizedEvent(
                     id: event.id,
                     title: title,
-                    colorHex: sourceCalendar.backgroundColorHex,
+                    colorHex: colorHex,
                     textTone: textTone,
                     kind: .row(
                         date: startDate,
@@ -917,21 +1013,30 @@ final class CalendarEventsModel {
     /// of rendering.
     private static let maxVisibleBarLanes = 3
 
-    /// The readable text tone on a Source Calendar color, from the same YIQ
-    /// luminance rule the Web Experience uses: dark text on light colors,
-    /// light text on dark colors.
+    /// The readable text tone on an Event Color: whichever of Planner's
+    /// ink or white yields the higher WCAG contrast ratio against it —
+    /// the most readable pair the palette can offer, always above WCAG AA
+    /// (4.5:1) for Google's fixed event and calendar palettes. This
+    /// deliberately replaces the YIQ luminance rule the Web Experience
+    /// still uses, which renders low-contrast white text on several
+    /// Google palette colors.
     static func textTone(forHexColor hexColor: String) -> CalendarEventTextTone {
-        var hex = hexColor
-        if hex.hasPrefix("#") {
-            hex.removeFirst()
-        }
-        guard hex.count == 6 else {
+        guard let color = EventColorRGB(hex: hexColor) else {
             return .light
         }
-        let red = Int(hex.prefix(2), radix: 16) ?? 0
-        let green = Int(hex.dropFirst(2).prefix(2), radix: 16) ?? 0
-        let blue = Int(hex.dropFirst(4).prefix(2), radix: 16) ?? 0
-        let yiq = (red * 299 + green * 587 + blue * 100) / 1000
-        return yiq >= 128 ? .dark : .light
+        let luminance = color.relativeLuminance
+        let darkContrast = (luminance + 0.05)
+            / (Self.darkTextRelativeLuminance + 0.05)
+        let lightContrast = (1.0 + 0.05) / (luminance + 0.05)
+        return darkContrast >= lightContrast ? .dark : .light
     }
+
+    /// The WCAG relative luminance of the dark text candidate, Planner's
+    /// ink (PlannerPalette.ink: sRGB 0.114, 0.129, 0.071).
+    private static let darkTextRelativeLuminance =
+        EventColorRGB.relativeLuminance(
+            red: 0.114,
+            green: 0.129,
+            blue: 0.071
+        )
 }

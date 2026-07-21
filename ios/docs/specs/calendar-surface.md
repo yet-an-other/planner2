@@ -79,8 +79,9 @@ _Development-only: every statement in this section applies only to builds with t
 
 ### Presentation
 
-- An all-day event of any length and a timed event spanning multiple local days present as a Calendar Event Bar in the Source Calendar's background color with contrast-safe text, lane-ordered by start date, then start time, then longer duration first. The title begins in the leading-edge Date Cell and continues across subsequent cells, mirrored for right-to-left; a bar crossing a Week Row boundary splits into truncated segments with square continuing edges.
-- A timed single-day event presents as a Calendar Event Row — a dot in the Source Calendar's color, a localized start time, and a title — ordered by start time within its Date Cell.
+- An all-day event of any length and a timed event spanning multiple local days present as a Calendar Event Bar in its Event Color — its explicit Google event color when one is set, otherwise the Source Calendar's background color — with contrast-safe text, lane-ordered by start date, then start time, then longer duration first. The title begins in the leading-edge Date Cell and continues across subsequent cells, mirrored for right-to-left; a bar crossing a Week Row boundary splits into truncated segments with square continuing edges.
+- A timed single-day event presents as a Calendar Event Row — a dot in its Event Color, a localized start time, and a title — ordered by start time within its Date Cell.
+- Explicit Google event colors resolve through Google's colors metadata, fetched alongside event fetches; when it is unavailable, affected events silently use the Source Calendar's background color and the iOS Header Status says nothing. Bar titles use whichever of Planner's ink or white yields the higher WCAG contrast ratio against the Event Color.
 - A Date Cell presents at most four event slots at the fixed 96-point Week Row height; beyond the cap it shows three items plus the inert Events Overflow marker carrying the hidden count, in bars-then-rows order. A bar lane deeper than the third renders only when every Date Cell it crosses fits at true lane positions with no rows and no overflow beneath it; otherwise it counts into the overflow of every cell it crosses. Rows and the marker never paint past the fixed Week Row.
 - Event items render 14 points tall with 10-point text and do not scale with Dynamic Type.
 - The Events Overflow marker is inert: it reads the hidden count and summons nothing. Date Cells remain inert — scrolling and Today Jump remain the only product interactions.
@@ -90,7 +91,7 @@ _Development-only: every statement in this section applies only to builds with t
 
 - Calendar Events are memory-only (ADR 0003): they are never persisted, they vanish on Disconnect on This Device, and they refetch per process run. There are no offline placeholders.
 - The iOS Header Status presents fetch progress, fetch failures, and offline conditions in Planner-owned copy; raw Google errors never reach it. Connection warnings and errors lead; event-fetch progress and issues override resting connection information.
-- An offline initial fetch leaves the bare, usable Calendar Grid with a warning and retries event-driven on connectivity return. A failed slab keeps already-fetched events visible with a fetch-issue message and recovers on connectivity return or the next edge approach.
+- An offline initial fetch leaves the bare, usable Calendar Grid with a warning and retries event-driven on connectivity return; an initial fetch that fails for any other reason reports an error. A failed slab keeps already-fetched events visible with a fetch-issue message and recovers on connectivity return or the next edge approach.
 
 ## Interaction and product exclusions
 
