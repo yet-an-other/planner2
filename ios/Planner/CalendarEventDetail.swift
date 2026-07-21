@@ -23,19 +23,25 @@ struct CalendarEventDetail: Equatable, Sendable {
     /// Google provides none — the footer is omitted rather than shown
     /// empty.
     let googleLink: String?
+    /// The event's notes as plain text (HTML stripped at
+    /// normalization), or `nil` when the event has none — the Notes
+    /// section is omitted rather than shown empty.
+    let notes: String?
 
     init(
         title: String,
         colorHex: String,
         timingText: String,
         location: String? = nil,
-        googleLink: String? = nil
+        googleLink: String? = nil,
+        notes: String? = nil
     ) {
         self.title = title
         self.colorHex = colorHex
         self.timingText = timingText
         self.location = location
         self.googleLink = googleLink
+        self.notes = notes
     }
 }
 
@@ -138,6 +144,67 @@ enum CalendarEventTimingLine {
         formatter.setLocalizedDateFormatFromTemplate(template)
         return formatter.string(from: date)
     }
+}
+
+import Foundation
+import UIKit
+
+/// Plain-text notes from Google's HTML event description, isolated so
+/// the invariant stays pinned at the seam: HTML is stripped at
+/// normalization via `NSAttributedString(documentType: .html)` — tags
+/// and entities resolved, anchor text kept, never markup — and Google's
+/// auto-created-event boilerplate is removed, matching the Web
+/// Experience's invariant. Plain text avoids rendering organizer
+/// markup and any tracking beacons it may embed.
+enum CalendarEventPlainTextNotes {
+    /// Renders Google's HTML description into plain text, or returns
+    /// `nil` when nothing readable remains — absent, blank, or
+    /// markup-only notes omit the Notes section rather than show it
+    /// empty.
+    static func plainText(fromHTML html: String?) -> String? {
+        guard let html,
+              let data = html.data(using: .utf8),
+              let attributed = try? NSAttributedString(
+                  data: data,
+                  options: [
+                      .documentType: NSAttributedString.DocumentType.html,
+                      .characterEncoding: String.Encoding.utf8.rawValue,
+                  ],
+                  documentAttributes: nil
+              )
+        else {
+            return nil
+        }
+
+        let text = attributed.string as NSString
+        let stripped = googleAutoEventBoilerplate.stringByReplacingMatches(
+            in: text as String,
+            range: NSRange(location: 0, length: text.length),
+            withTemplate: ""
+        )
+        // The HTML conversion emits Unicode line/paragraph separators for
+        // <br> and block breaks; plain text keeps ordinary newlines.
+        let newlined = stripped
+            .replacingOccurrences(of: "\u{2028}", with: "\n")
+            .replacingOccurrences(of: "\u{2029}", with: "\n")
+        let trimmed = newlined.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Google auto-appends this boilerplate to events it creates
+    /// automatically (flights, hotel reservations, etc.). It carries no
+    /// user value, so it is stripped at normalization. The g.co/calendar
+    /// link may sit on the same line or wrap; `\s*` tolerates either.
+    /// Mirrors the Web Experience's pattern.
+    private static let googleAutoEventBoilerplate: NSRegularExpression = {
+        guard let regex = try? NSRegularExpression(
+            pattern:
+                "To see detailed information for automatically created events like this one, use the official Google Calendar app\\.\\s*https://g\\.co/calendar"
+        ) else {
+            preconditionFailure("The boilerplate pattern must compile")
+        }
+        return regex
+    }()
 }
 
 extension CalendarEventsCopy {

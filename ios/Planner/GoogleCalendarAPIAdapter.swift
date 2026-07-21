@@ -203,6 +203,7 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
         let attendees: [Attendee]?
         let htmlLink: String?
         let location: String?
+        let description: String?
     }
 
     /// Maps one decoded event into the seam's Google-shaped value, dropping
@@ -228,7 +229,8 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
                 $0.isSelf == true && $0.responseStatus == "declined"
             } ?? false,
             googleLink: dto.htmlLink,
-            location: dto.location
+            location: dto.location,
+            notes: dto.description
         )
     }
 

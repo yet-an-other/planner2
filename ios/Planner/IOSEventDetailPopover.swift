@@ -52,6 +52,21 @@ struct IOSEventDetailPopover: View {
                             IOSEventDetailLocationText(location: location)
                         }
                     }
+
+                    if let notes = detail.notes {
+                        IOSEventDetailPopoverSection(title: Self.notesSectionTitle) {
+                            // Plain text with tappable http(s) URLs;
+                            // long notes scroll within the section.
+                            ScrollView {
+                                Text(Self.linkedNotes(notes))
+                                    .font(.subheadline)
+                                    .foregroundStyle(PlannerPalette.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: Self.notesMaxHeight)
+                        }
+                    }
                 }
                 .padding(16)
 
@@ -87,7 +102,60 @@ struct IOSEventDetailPopover: View {
     private static let closeAccessibilityLabel = "Close"
     private static let whenSectionTitle = "When"
     private static let whereSectionTitle = "Where"
+    private static let notesSectionTitle = "Notes"
     private static let openInGoogleCalendarTitle = "Open in Google Calendar →"
+
+    /// The Notes section's height cap, the web popover's 10-rem cap.
+    private static let notesMaxHeight: CGFloat = 160
+
+    /// The notes as an attributed string with http(s) URLs turned into
+    /// tappable links — presentation-only linkification, so the
+    /// plain-text data model never carries markup. Only http(s) URLs
+    /// linkify: a crafted scheme can never become a script URL.
+    private static func linkedNotes(_ notes: String) -> AttributedString {
+        var result = AttributedString()
+        var cursor = notes.startIndex
+        while cursor < notes.endIndex {
+            guard
+                let schemeRange = notes.range(
+                    of: "https?://",
+                    options: [.regularExpression, .caseInsensitive],
+                    range: cursor..<notes.endIndex
+                )
+            else {
+                result.append(AttributedString(notes[cursor...]))
+                break
+            }
+            if schemeRange.lowerBound > cursor {
+                result.append(
+                    AttributedString(notes[cursor..<schemeRange.lowerBound])
+                )
+            }
+
+            // The URL runs to the first whitespace or bracketing
+            // character, mirroring the Web Experience's pattern.
+            let terminators: Set<Character> = ["<", ">", "\"", "'", ")"]
+            var end = schemeRange.upperBound
+            while end < notes.endIndex {
+                let character = notes[end]
+                if character.isWhitespace || terminators.contains(character) {
+                    break
+                }
+                end = notes.index(after: end)
+            }
+
+            let urlText = String(notes[schemeRange.lowerBound..<end])
+            var segment = AttributedString(urlText)
+            if let url = URL(string: urlText) {
+                segment.link = url
+                segment.foregroundColor = PlannerPalette.link
+                segment.underlineStyle = .single
+            }
+            result.append(segment)
+            cursor = end
+        }
+        return result
+    }
 }
 
 /// The Where line as an actionable link, presentation-only: the location
@@ -234,6 +302,21 @@ private extension Color {
         onClose: {}
     )
     .frame(width: 360, height: 320)
+}
+
+#Preview("Long Notes") {
+    IOSEventDetailPopover(
+        detail: CalendarEventDetail(
+            title: "Planning Offsite",
+            colorHex: "#D50000",
+            timingText: "Thu, Jul 23, 2026 · 9:00 AM – 5:00 PM",
+            location: "Harbor House",
+            googleLink: "https://www.google.com/calendar/event?eid=ghi789",
+            notes: "Agenda and logistics at https://example.com/offsite-agenda.\n\n09:00 — Arrival and coffee\n09:30 — Retrospective on the spring release\n11:00 — Roadmap workshop, part one\n12:30 — Lunch at the harbor\n13:30 — Roadmap workshop, part two\n15:00 — Break\n15:30 — Unconference sessions\n16:45 — Wrap-up and next steps"
+        ),
+        onClose: {}
+    )
+    .frame(width: 360, height: 420)
 }
 
 #Preview("Minimal · No Optional Sections") {

@@ -32,6 +32,9 @@ struct GoogleCalendarEvent: Equatable, Sendable {
     let googleLink: String?
     /// Google's free-form location string, when provided.
     let location: String?
+    /// Google's HTML description, when provided; normalization renders
+    /// it plain.
+    let notes: String?
 
     init(
         id: String,
@@ -42,7 +45,8 @@ struct GoogleCalendarEvent: Equatable, Sendable {
         isCancelled: Bool,
         isDeclinedByViewer: Bool,
         googleLink: String? = nil,
-        location: String? = nil
+        location: String? = nil,
+        notes: String? = nil
     ) {
         self.id = id
         self.summary = summary
@@ -53,6 +57,7 @@ struct GoogleCalendarEvent: Equatable, Sendable {
         self.isDeclinedByViewer = isDeclinedByViewer
         self.googleLink = googleLink
         self.location = location
+        self.notes = notes
     }
 }
 
@@ -674,10 +679,14 @@ final class CalendarEventsModel {
 
             // The Event Detail Popover's optional fields, mapped once so
             // every classification branch publishes the same omission
-            // rules: blank locations are absent.
+            // rules: blank locations are absent; HTML notes render plain
+            // and blank out to absence.
             let trimmedLocation = event.location?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let location = trimmedLocation.isEmpty ? nil : trimmedLocation
+            let notes = CalendarEventPlainTextNotes.plainText(
+                fromHTML: event.notes
+            )
 
             let locale = environment.locale
             let timeZone = environment.timeZone
@@ -737,7 +746,8 @@ final class CalendarEventsModel {
                             )
                         ),
                         location: location,
-                        googleLink: event.googleLink
+                        googleLink: event.googleLink,
+                        notes: notes
                     )
                 )
             case (.timed(let startsAt), .timed(let endsAt)):
@@ -766,7 +776,8 @@ final class CalendarEventsModel {
                                 )
                             ),
                             location: location,
-                            googleLink: event.googleLink
+                            googleLink: event.googleLink,
+                            notes: notes
                         )
                     )
                 }
@@ -792,7 +803,8 @@ final class CalendarEventsModel {
                             )
                         ),
                         location: location,
-                        googleLink: event.googleLink
+                        googleLink: event.googleLink,
+                        notes: notes
                     )
                 )
             default:

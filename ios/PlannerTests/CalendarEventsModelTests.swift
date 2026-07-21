@@ -2241,6 +2241,100 @@ struct CalendarEventsModelTests {
         #expect(details.map(\.googleLink) == [nil, nil])
     }
 
+    @Test("HTML notes render as plain text with tags and entities resolved")
+    func htmlNotesRenderAsPlainText() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "picnic",
+                        summary: "Picnic",
+                        start: .timed(Self.gmt(2026, 7, 22, 12, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 13, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        notes:
+                            "<p>Bring <b>snacks</b> &amp; water.<br>See https://example.com/plan</p>"
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(
+            layout?.cells[2].rows.first?.detail.notes
+                == "Bring snacks & water.\nSee https://example.com/plan"
+        )
+    }
+
+    @Test("Google's auto-created-event boilerplate is stripped from notes")
+    func autoCreatedBoilerplateIsStripped() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "flight",
+                        summary: "Flight to Copenhagen",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 11, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        notes:
+                            "Flight to Copenhagen, CPH arrival 11:05.<br><br>To see detailed information for automatically created events like this one, use the official Google Calendar app. https://g.co/calendar"
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(
+            layout?.cells[2].rows.first?.detail.notes
+                == "Flight to Copenhagen, CPH arrival 11:05."
+        )
+    }
+
+    @Test("Absent, blank, or markup-only notes stay absent from the detail")
+    func emptyNotesStayAbsent() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "no-notes",
+                        summary: "No Notes",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "markup-only",
+                        summary: "Markup Only",
+                        start: .timed(Self.gmt(2026, 7, 22, 11, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 12, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        notes: "<p><br></p>"
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.cells[2].rows.map(\.detail.notes) == [nil, nil])
+    }
+
     // MARK: Helpers
 
     private static var initialEvent: GoogleCalendarEvent {
