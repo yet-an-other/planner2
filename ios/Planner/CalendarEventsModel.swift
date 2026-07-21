@@ -200,7 +200,9 @@ final class CalendarEventsModel {
 
     /// Every fetched event in normalized form, retained so a slab can
     /// recompute its boundary Week Row from old and new events together.
-    /// Memory-only: cleared on Disconnect on This Device (ADR 0003).
+    /// At most one entry per event id: slabs redeliver events spanning a
+    /// fetched range's boundary, and the fresh copy replaces the retained
+    /// one. Memory-only: cleared on Disconnect on This Device (ADR 0003).
     @ObservationIgnored
     private var normalizedEvents: [NormalizedEvent] = []
 
@@ -477,9 +479,15 @@ final class CalendarEventsModel {
 
             switch outcome {
             case .success(let sourceCalendar, let events):
-                normalizedEvents.append(
-                    contentsOf: normalize(events, calendar: sourceCalendar)
-                )
+                // Google delivers every event overlapping the requested
+                // range, so an event spanning a previously fetched range's
+                // boundary arrives again here. The fresh copy replaces the
+                // retained one: one entry per event id keeps every Week
+                // Row to one segment per event.
+                let slabEvents = normalize(events, calendar: sourceCalendar)
+                let redeliveredIds = Set(slabEvents.map(\.id))
+                normalizedEvents.removeAll { redeliveredIds.contains($0.id) }
+                normalizedEvents.append(contentsOf: slabEvents)
                 switch direction {
                 case .forward:
                     fetchedWindow?.end = fetchEnd

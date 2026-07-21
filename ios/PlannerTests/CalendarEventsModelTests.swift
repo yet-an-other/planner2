@@ -955,6 +955,59 @@ struct CalendarEventsModelTests {
         )
     }
 
+    @Test("A slab re-delivering a boundary-spanning event keeps one bar per Week Row")
+    func boundarySpanningEventKeepsOneBarPerWeek() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            // Google returns every event overlapping the requested range,
+            // so an event spanning the initial-window/slab boundary
+            // arrives in both responses.
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "spanning-event",
+                        summary: "Spanning Event",
+                        start: .allDay(year: 2026, month: 10, day: 14),
+                        end: .allDay(year: 2026, month: 10, day: 21),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        // Before the slab, the boundary Week Row holds the event's one
+        // segment.
+        _ = await layoutEventually(model, weekStart: Self.gmt(2026, 10, 12))
+        #expect(
+            model.layout(forWeekStarting: Self.gmt(2026, 10, 12))?
+                .bars.map(\.id) == ["spanning-event"]
+        )
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        // The slab's completion clears the loading status, so a nil
+        // message proves the model has processed the slab.
+        #expect(await eventually { model.status.message == nil })
+
+        // The re-delivered event must not duplicate: duplicate segment ids
+        // break SwiftUI's ForEach identity within the Week Row.
+        #expect(
+            model.layout(forWeekStarting: Self.gmt(2026, 10, 12))?
+                .bars.map(\.id) == ["spanning-event"]
+        )
+        #expect(
+            model.layout(forWeekStarting: Self.gmt(2026, 10, 19))?
+                .bars.map(\.id) == ["spanning-event"]
+        )
+    }
+
     @Test("A failed slab leaves the range empty and retries on the next approach")
     func failedSlabRetriesOnNextApproach() async {
         let (model, adapter) = makeModel()
