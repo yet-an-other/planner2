@@ -768,6 +768,271 @@ struct CalendarEventsModelTests {
         #expect(layout?.cells[2].rows.map(\.id) == ["island-time"])
     }
 
+    // MARK: Fetched Window expansion
+
+    @Test("Approaching the latest edge fetches a two-month forward slab")
+    func forwardEdgeApproachFetchesSlab() async {
+        let (model, adapter) = makeModel()
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        // Initial window: [2026-04-15, 2026-10-16).
+
+        // Visible through early October: within one month of the last
+        // fetched day (2026-10-15).
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        let slab = adapter.fetchedRanges.last
+        #expect(slab?.start == Self.gmt(2026, 10, 16))
+        #expect(slab?.end == Self.gmt(2026, 12, 16))
+    }
+
+    @Test("Approaching the earliest edge fetches a two-month backward slab")
+    func backwardEdgeApproachFetchesSlab() async {
+        let (model, adapter) = makeModel()
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        // Visible from early May: within one month of the first fetched
+        // day (2026-04-15).
+        model.showVisibleRange(
+            from: Self.gmt(2026, 5, 4),
+            through: Self.gmt(2026, 6, 1)
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        let slab = adapter.fetchedRanges.last
+        #expect(slab?.start == Self.gmt(2026, 2, 15))
+        #expect(slab?.end == Self.gmt(2026, 4, 15))
+    }
+
+    @Test("Browsing far from the edges fetches nothing more")
+    func middleRangeFetchesNothingMore() async {
+        let (model, adapter) = makeModel()
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 8, 17)
+        )
+
+        #expect(await neverHappens { adapter.fetchCallCount > 1 })
+    }
+
+    @Test("A fetched range is never refetched while scrolling back and forth")
+    func fetchedRangeNeverRefetches() async {
+        let (model, adapter) = makeModel()
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+
+        // Same approach again, plus one deep into the new window: no more
+        // fetches until the new edge comes within one month.
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+        model.showVisibleRange(
+            from: Self.gmt(2026, 10, 12),
+            through: Self.gmt(2026, 11, 9)
+        )
+
+        #expect(await neverHappens { adapter.fetchCallCount > 2 })
+    }
+
+    @Test("Repeated approaches while a slab is in flight fetch once")
+    func inFlightSlabDoesNotDuplicate() async {
+        let (model, adapter) = makeModel()
+        var release: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { release = $0 }
+        }
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        model.showVisibleRange(
+            from: Self.gmt(2026, 9, 7),
+            through: Self.gmt(2026, 10, 12)
+        )
+
+        #expect(await neverHappens { adapter.fetchCallCount > 2 })
+        release?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        )
+    }
+
+    @Test("Slab events merge into the boundary Week Row")
+    func slabEventsMergeIntoBoundaryWeek() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { start, _ in
+            // The initial window carries an event on its last day; the slab
+            // carries one three days later — both land in the same
+            // Monday-first Week Row (2026-10-12 … 2026-10-18).
+            if start == Self.gmt(2026, 4, 15) {
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "initial-event",
+                            summary: "Initial Event",
+                            start: .timed(Self.gmt(2026, 10, 15, 9, 0)),
+                            end: .timed(Self.gmt(2026, 10, 15, 10, 0)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            }
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "slab-event",
+                        summary: "Slab Event",
+                        start: .timed(Self.gmt(2026, 10, 18, 9, 0)),
+                        end: .timed(Self.gmt(2026, 10, 18, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+        model.setConnected(true)
+        #expect(await layoutEventually(model, weekStart: Self.gmt(2026, 10, 12)) != nil)
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 10, 12))?
+                    .cells.flatMap(\.rows).map(\.id)
+                    == ["initial-event", "slab-event"]
+            }
+        )
+    }
+
+    @Test("A failed slab leaves the range empty and retries on the next approach")
+    func failedSlabRetriesOnNextApproach() async {
+        let (model, adapter) = makeModel()
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        adapter.fetchHandler = { _, _ in .unavailable(.failed) }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(model.layout(forWeekStarting: Self.gmt(2026, 11, 2)) == nil)
+
+        // The window never grew, so the next approach retries the slab.
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "recovered",
+                        summary: "Recovered",
+                        start: .timed(Self.gmt(2026, 11, 4, 9, 0)),
+                        end: .timed(Self.gmt(2026, 11, 4, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 9, 7),
+            through: Self.gmt(2026, 10, 12)
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 11, 2)) != nil
+            }
+        )
+    }
+
+    @Test("A slab completing after Disconnect on This Device stays cleared")
+    func staleSlabCompletionStaysCleared() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "initial-event",
+                        summary: "Initial Event",
+                        start: .timed(Self.gmt(2026, 7, 15, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 15, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+        model.setConnected(true)
+        #expect(
+            await layoutEventually(model, weekStart: Self.gmt(2026, 7, 13))
+                != nil
+        )
+
+        var release: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { release = $0 }
+        }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+
+        model.setConnected(false)
+        release?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "stale-slab",
+                        summary: "Stale Slab",
+                        start: .timed(Self.gmt(2026, 11, 4, 9, 0)),
+                        end: .timed(Self.gmt(2026, 11, 4, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        )
+
+        #expect(
+            await neverHappens {
+                model.layout(forWeekStarting: Self.gmt(2026, 11, 2)) != nil
+            }
+        )
+    }
+
     // MARK: Helpers
 
     private func makeModel(

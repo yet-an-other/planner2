@@ -135,6 +135,20 @@ final class CalendarEventsModel {
     @ObservationIgnored
     private var fetchedWindow: (start: Date, end: Date)?
 
+    /// Every fetched event in normalized form, retained so a slab can
+    /// recompute its boundary Week Row from old and new events together.
+    /// Memory-only: cleared on Disconnect on This Device (ADR 0003).
+    @ObservationIgnored
+    private var normalizedEvents: [NormalizedEvent] = []
+
+    /// In-flight slab directions, so repeated edge approaches can never
+    /// duplicate a fetch.
+    @ObservationIgnored
+    private var isExtendingForward = false
+
+    @ObservationIgnored
+    private var isExtendingBackward = false
+
     /// Monotonic marker of the latest connection decision, so a stale
     /// asynchronous fetch completion can never overwrite newer user intent
     /// — the same discipline the connection module keeps.
@@ -171,6 +185,9 @@ final class CalendarEventsModel {
 
         guard connected else {
             fetchedWindow = nil
+            normalizedEvents = []
+            isExtendingForward = false
+            isExtendingBackward = false
             weekLayouts = [:]
             return
         }
@@ -210,15 +227,118 @@ final class CalendarEventsModel {
             switch outcome {
             case .success(let sourceCalendar, let events):
                 fetchedWindow = (windowStart, windowEnd)
-                publish(
-                    normalize(events, calendar: sourceCalendar),
-                    windowStart: windowStart,
-                    windowEnd: windowEnd
-                )
+                normalizedEvents = normalize(events, calendar: sourceCalendar)
+                weekLayouts = [:]
+                publishWeeks(covering: (start: windowStart, end: windowEnd))
             case .unavailable:
                 // A failed fetch publishes nothing and leaves the window
                 // unfetched; messaging and retries arrive with the status
                 // slice.
+                break
+            }
+        }
+    }
+
+    /// Reports the currently visible local-date range (as Week Row start
+    /// instants) and grows the Fetched Window when either edge comes within
+    /// one month of it: a two-month slab fetch in that direction, once per
+    /// range per process run. A failed slab leaves the window unchanged, so
+    /// the next approach retries it. Approaches before the initial window
+    /// lands do nothing — the initial fetch owns that range.
+    func showVisibleRange(from visibleStart: Date, through visibleEnd: Date) {
+        guard let adapter, let window = fetchedWindow else {
+            return
+        }
+
+        let calendar = environment.calendar
+
+        if !isExtendingForward,
+           let lastFetchedDay = calendar.date(
+               byAdding: .day,
+               value: -1,
+               to: window.end
+           ),
+           let forwardTrigger = addMonthsClamped(-1, to: lastFetchedDay),
+           visibleEnd >= forwardTrigger,
+           let newLastDay = addMonthsClamped(2, to: lastFetchedDay),
+           let newEnd = calendar.date(
+               byAdding: .day,
+               value: 1,
+               to: newLastDay
+           )
+        {
+            isExtendingForward = true
+            extend(
+                adapter: adapter,
+                from: window.end,
+                to: newEnd,
+                direction: .forward
+            )
+        }
+
+        if !isExtendingBackward,
+           let backwardTrigger = addMonthsClamped(1, to: window.start),
+           visibleStart <= backwardTrigger,
+           let newStart = addMonthsClamped(-2, to: window.start)
+        {
+            isExtendingBackward = true
+            extend(
+                adapter: adapter,
+                from: newStart,
+                to: window.start,
+                direction: .backward
+            )
+        }
+    }
+
+    /// One slab direction of the Fetched Window.
+    private enum ExtensionDirection {
+        case forward
+        case backward
+    }
+
+    /// Fetches one slab and, on success, grows the window over it and
+    /// republishes the affected Week Rows — including the boundary row,
+    /// which is recomputed from every fetched event so old and new events
+    /// merge. Failures leave the window unchanged for the next approach to
+    /// retry; stale completions (a newer connection decision) discard.
+    private func extend(
+        adapter: any GoogleCalendarEventsAdapting,
+        from fetchStart: Date,
+        to fetchEnd: Date,
+        direction: ExtensionDirection
+    ) {
+        let attempt = connectionGeneration
+        Task { [weak self] in
+            let outcome = await adapter.fetchEvents(
+                from: fetchStart,
+                to: fetchEnd
+            )
+
+            guard let self, attempt == self.connectionGeneration else {
+                return
+            }
+
+            switch direction {
+            case .forward:
+                isExtendingForward = false
+            case .backward:
+                isExtendingBackward = false
+            }
+
+            switch outcome {
+            case .success(let sourceCalendar, let events):
+                normalizedEvents.append(
+                    contentsOf: normalize(events, calendar: sourceCalendar)
+                )
+                switch direction {
+                case .forward:
+                    fetchedWindow?.end = fetchEnd
+                case .backward:
+                    fetchedWindow?.start = fetchStart
+                }
+                publishWeeks(covering: (start: fetchStart, end: fetchEnd))
+            case .unavailable:
                 break
             }
         }
@@ -343,25 +463,21 @@ final class CalendarEventsModel {
 
     // MARK: Layout
 
-    /// Computes and publishes the layout of every Week Row intersecting the
-    /// Fetched Window.
-    private func publish(
-        _ events: [NormalizedEvent],
-        windowStart: Date,
-        windowEnd: Date
-    ) {
+    /// Computes and publishes the layout of every non-empty Week Row
+    /// intersecting the given local-date range, recomputed from every
+    /// fetched event so slabs merge into already-published boundary rows.
+    private func publishWeeks(covering range: (start: Date, end: Date)) {
         let calendar = environment.calendar
-        var layouts: [Date: CalendarEventWeekLayout] = [:]
 
-        var weekStart = startOfMondayWeek(containing: windowStart)
-        while weekStart < windowEnd {
-            let layout = layoutWeek(events, weekStart: weekStart)
+        var weekStart = startOfMondayWeek(containing: range.start)
+        while weekStart < range.end {
+            let layout = layoutWeek(normalizedEvents, weekStart: weekStart)
             // Weeks without events publish no layout at all, so the view
             // renders them exactly as an event-free surface.
             if !layout.bars.isEmpty
                 || layout.cells.contains(where: { !$0.rows.isEmpty })
             {
-                layouts[weekStart] = layout
+                weekLayouts[weekStart] = layout
             }
             guard
                 let next = calendar.date(byAdding: .day, value: 7, to: weekStart)
@@ -370,8 +486,6 @@ final class CalendarEventsModel {
             }
             weekStart = next
         }
-
-        weekLayouts = layouts
     }
 
     /// Lays out one Week Row: bars clipped to the row in globally ordered

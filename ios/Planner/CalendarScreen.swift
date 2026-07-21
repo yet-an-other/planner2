@@ -7,6 +7,7 @@ struct CalendarScreen: View {
     @State private var model: CalendarGridModel
     @State private var scrollPosition: WeekRow.ID?
     @State private var midnightScheduleGeneration = 0
+    @State private var scrollViewportHeight: CGFloat = 0
 
     private let currentEnvironment: @MainActor () -> CalendarEnvironment
     private let connection: GoogleAccountConnection?
@@ -51,6 +52,13 @@ struct CalendarScreen: View {
             .coordinateSpace(name: CalendarSurfaceCoordinateSpace.name)
             .scrollPosition(id: $scrollPosition, anchor: .top)
             .onPreferenceChange(WeekRowOffsetsKey.self, perform: updateTopWeek)
+            .onGeometryChange(
+                for: CGFloat.self,
+                of: { $0.size.height }
+            ) { height in
+                scrollViewportHeight = height
+                reportVisibleRange()
+            }
             .background(PlannerPalette.grid)
         }
         .background(PlannerPalette.canvas)
@@ -225,6 +233,34 @@ struct CalendarScreen: View {
         if let topWeekStart, topWeekStart != model.topWeekStart {
             model.showWeek(starting: topWeekStart)
         }
+
+        reportVisibleRange()
+    }
+
+    /// Tells the Calendar Events module which local dates are on screen so
+    /// it can grow the Fetched Window ahead of the user's scrolling. The
+    /// bottom of the visible range is estimated from the viewport height
+    /// and the fixed 96-point Week Row.
+    private func reportVisibleRange() {
+        guard let events else {
+            return
+        }
+
+        let visibleWeeks = max(1, Int(ceil(scrollViewportHeight / 96)) + 1)
+        guard
+            let bottomWeek = currentEnvironment().calendar.date(
+                byAdding: .day,
+                value: 7 * visibleWeeks,
+                to: model.topWeekStart
+            )
+        else {
+            return
+        }
+
+        events.showVisibleRange(
+            from: model.topWeekStart,
+            through: bottomWeek
+        )
     }
 }
 
