@@ -581,23 +581,6 @@ final class CalendarEventsModel {
             )
         }
 
-        var maxBarLaneByColumn = [Int](repeating: -1, count: 7)
-        var crossingLaneCountByColumn = [Int](repeating: 0, count: 7)
-        for segment in segments {
-            for column in segment.startColumn...segment.endColumn {
-                crossingLaneCountByColumn[column] += 1
-                // A Week Row renders at most three bar lanes at the fixed
-                // 96-point height (lanes 0...2); further lanes count into
-                // the cell's Events Overflow instead of rendering.
-                if segment.lane < Self.maxVisibleBarLanes {
-                    maxBarLaneByColumn[column] = max(
-                        maxBarLaneByColumn[column],
-                        segment.lane
-                    )
-                }
-            }
-        }
-
         var rowsByColumn: [[(startsAt: Date, item: CalendarEventRowItem)]] =
             (0..<7).map { _ in [] }
         for event in events {
@@ -627,16 +610,52 @@ final class CalendarEventsModel {
             )
         }
 
+        var maxCrossingLaneByColumn = [Int](repeating: -1, count: 7)
+        var crossingLaneCountByColumn = [Int](repeating: 0, count: 7)
+        for segment in segments {
+            for column in segment.startColumn...segment.endColumn {
+                crossingLaneCountByColumn[column] += 1
+                maxCrossingLaneByColumn[column] = max(
+                    maxCrossingLaneByColumn[column],
+                    segment.lane
+                )
+            }
+        }
+
+        let rowCountByColumn = rowsByColumn.map(\.count)
+
+        // Lane visibility: the first three lanes always render. A deeper
+        // segment renders only when every Date Cell it crosses still fits
+        // the four 14-point slots at true lane positions — no rows below
+        // the deepest lane and no overflow — so a strip never collides
+        // with a row or the Events Overflow marker; otherwise the segment
+        // counts into the overflow of every cell it crosses.
+        let visibleSegments = segments.filter { segment in
+            if segment.lane < Self.maxVisibleBarLanes {
+                return true
+            }
+            return (segment.startColumn...segment.endColumn).allSatisfy {
+                column in
+                maxCrossingLaneByColumn[column] + rowCountByColumn[column] <= 3
+                    && crossingLaneCountByColumn[column]
+                        + rowCountByColumn[column] <= 4
+            }
+        }
+
+        var maxBarLaneByColumn = [Int](repeating: -1, count: 7)
+        var visibleLaneCountByColumn = [Int](repeating: 0, count: 7)
+        for segment in visibleSegments {
+            for column in segment.startColumn...segment.endColumn {
+                visibleLaneCountByColumn[column] += 1
+                maxBarLaneByColumn[column] = max(
+                    maxBarLaneByColumn[column],
+                    segment.lane
+                )
+            }
+        }
+
         let cells = (0..<7).map { column in
-            let visibleLanes = maxBarLaneByColumn[column]
-            let visibleLaneCount =
-                visibleLanes >= 0
-                ? segments.filter {
-                    $0.lane < Self.maxVisibleBarLanes
-                        && $0.startColumn <= column
-                        && column <= $0.endColumn
-                }.count
-                : 0
+            let visibleLaneCount = visibleLaneCountByColumn[column]
             let hiddenBarCount =
                 crossingLaneCountByColumn[column] - visibleLaneCount
             let orderedRows = rowsByColumn[column]
@@ -645,28 +664,34 @@ final class CalendarEventsModel {
 
             // The visible cap: four slots per Date Cell — visible lanes,
             // then rows — beyond which the cell shows three items and the
-            // inert Events Overflow marker counts the rest.
+            // inert Events Overflow marker counts the rest. Rows and the
+            // marker only appear while they fit below the deepest visible
+            // lane inside the fixed 96-point Week Row.
             let rowSlots = 4 - visibleLaneCount
-            if hiddenBarCount == 0 && orderedRows.count <= rowSlots {
+            let rowsFit = maxBarLaneByColumn[column] + orderedRows.count <= 3
+            if hiddenBarCount == 0 && orderedRows.count <= rowSlots && rowsFit {
                 return CalendarEventCellLayout(
-                    maxBarLane: visibleLanes,
+                    maxBarLane: maxBarLaneByColumn[column],
                     rows: orderedRows,
                     overflowCount: nil
                 )
             }
-            let visibleRowCount = max(0, 3 - visibleLaneCount)
+            let visibleRowCount = max(
+                0,
+                min(
+                    3 - visibleLaneCount,
+                    2 - maxBarLaneByColumn[column]
+                )
+            )
             return CalendarEventCellLayout(
-                maxBarLane: visibleLanes,
+                maxBarLane: maxBarLaneByColumn[column],
                 rows: Array(orderedRows.prefix(visibleRowCount)),
                 overflowCount: hiddenBarCount
                     + (orderedRows.count - visibleRowCount)
             )
         }
 
-        return CalendarEventWeekLayout(
-            bars: segments.filter { $0.lane < Self.maxVisibleBarLanes },
-            cells: cells
-        )
+        return CalendarEventWeekLayout(bars: visibleSegments, cells: cells)
     }
 
     // MARK: Local dates

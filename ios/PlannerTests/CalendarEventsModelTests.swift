@@ -1259,8 +1259,8 @@ struct CalendarEventsModelTests {
         #expect(layout?.cells[2].overflowCount == 2)
     }
 
-    @Test("A fourth bar lane joins the overflow instead of rendering")
-    func fourthLaneJoinsOverflow() async {
+    @Test("A fourth bar lane renders when every crossed Date Cell fits")
+    func fourthLaneRendersWhenCellsFit() async {
         let (model, adapter) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
@@ -1268,9 +1268,7 @@ struct CalendarEventsModelTests {
                 events: (0..<4).map { index in
                     GoogleCalendarEvent(
                         id: "bar-\(index)",
-
                         summary: "Bar \(index)",
-
                         start: .allDay(year: 2026, month: 7, day: 22),
                         end: .allDay(year: 2026, month: 7, day: 23),
                         isCancelled: false,
@@ -1283,12 +1281,51 @@ struct CalendarEventsModelTests {
         model.setConnected(true)
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        // The Week Row renders at most three lanes at the fixed 96-point
-        // height; the fourth lane counts into the cell's overflow.
+        // Four bars, nothing else: the fourth lane fits the fixed 96-point
+        // Week Row, so the cell shows all four events.
+        #expect(layout?.bars.map(\.lane) == [0, 1, 2, 3])
+        #expect(layout?.cells[2].maxBarLane == 3)
+        #expect(layout?.cells[2].rows == [])
+        #expect(layout?.cells[2].overflowCount == nil)
+    }
+
+    @Test("A fourth lane joins the overflow when a crossed Date Cell overflows")
+    func fourthLaneJoinsOverflowWhenCellsOverflow() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: (0..<4).map { index in
+                    GoogleCalendarEvent(
+                        id: "bar-\(index)",
+                        summary: "Bar \(index)",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    )
+                } + [
+                    GoogleCalendarEvent(
+                        id: "row-a",
+                        summary: "Row A",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        // Five items in the cell: three lanes render, the fourth lane and
+        // the row count into the overflow.
         #expect(layout?.bars.map(\.lane) == [0, 1, 2])
         #expect(layout?.cells[2].maxBarLane == 2)
         #expect(layout?.cells[2].rows == [])
-        #expect(layout?.cells[2].overflowCount == 1)
+        #expect(layout?.cells[2].overflowCount == 2)
     }
 
     @Test("Three lanes and one row fit without overflow")
@@ -1376,6 +1413,73 @@ struct CalendarEventsModelTests {
         #expect(layout?.cells[2].overflowCount == 2)
         #expect(layout?.cells[3].rows.map(\.id) == ["quiet"])
         #expect(layout?.cells[3].overflowCount == nil)
+    }
+
+    @Test("Gapped lanes never push rows or the marker past the Week Row")
+    func gappedLanesKeepMarkerInsideRow() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    // Starts the day before, so it takes lane 0, clipped
+                    // to Monday and Tuesday of this Week Row.
+                    GoogleCalendarEvent(
+                        id: "early",
+                        summary: "Early",
+                        start: .timed(Self.gmt(2026, 7, 19, 23, 0)),
+                        end: .timed(Self.gmt(2026, 7, 21, 12, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    // Lane 1 across the whole week.
+                    GoogleCalendarEvent(
+                        id: "long",
+                        summary: "Long",
+                        start: .allDay(year: 2026, month: 7, day: 20),
+                        end: .allDay(year: 2026, month: 7, day: 25),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    // Lane 2 across Monday through Wednesday, leaving a
+                    // lane-0 gap at Wednesday.
+                    GoogleCalendarEvent(
+                        id: "mid",
+                        summary: "Mid",
+                        start: .allDay(year: 2026, month: 7, day: 20),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "row-a",
+                        summary: "Row A",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "row-b",
+                        summary: "Row B",
+                        start: .timed(Self.gmt(2026, 7, 22, 11, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 12, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        // Wednesday crosses lanes 0 and 2 with a gap at lane 1; rows would
+        // paint past the 96-point Week Row, so both join the overflow
+        // instead, leaving the marker as the cell's last visible item.
+        #expect(layout?.cells[2].maxBarLane == 2)
+        #expect(layout?.cells[2].rows == [])
+        #expect(layout?.cells[2].overflowCount == 2)
     }
 
     // MARK: Helpers
