@@ -67,4 +67,43 @@ extension IOSHeaderStatus.Tone {
             self = .error
         }
     }
+
+    /// Maps the events module's status tone onto the status row's
+    /// presentation tone; the view layer owns the palette mapping.
+    init(_ tone: CalendarEventsStatus.Tone) {
+        switch tone {
+        case .info:
+            self = .info
+        case .warning:
+            self = .warning
+        case .error:
+            self = .error
+        }
+    }
+}
+
+/// Resolves the single iOS Header Status content from its two publishers.
+/// The connection's warnings and errors — authorization and connectivity
+/// problems — lead; event-fetch progress and issues override the
+/// connection's resting information; the connection's own information
+/// shows when neither has anything to say.
+func resolveHeaderStatus(
+    connection: GoogleAccountConnection.Status?,
+    events: CalendarEventsStatus?
+) -> (message: String?, tone: IOSHeaderStatus.Tone) {
+    if let connection, connection.message != nil,
+       connection.tone != .info
+    {
+        return (connection.message, IOSHeaderStatus.Tone(connection.tone))
+    }
+
+    if let events, events.message != nil {
+        return (events.message, IOSHeaderStatus.Tone(events.tone))
+    }
+
+    if let connection {
+        return (connection.message, IOSHeaderStatus.Tone(connection.tone))
+    }
+
+    return (nil, .info)
 }

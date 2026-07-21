@@ -60,6 +60,47 @@ protocol GoogleCalendarEventsAdapting {
     ) async -> GoogleCalendarEventsOutcome
 }
 
+/// The iOS Header Status content published by the Calendar Events model:
+/// fetch progress, fetch failures, and offline conditions in Planner-owned
+/// copy. A `nil` message leaves the row to the connection's own status.
+struct CalendarEventsStatus: Equatable, Sendable {
+    let message: String?
+    let tone: Tone
+
+    /// Severity mapped to palette tones by the view layer.
+    enum Tone: Equatable, Sendable {
+        case info
+        case warning
+        case error
+    }
+}
+
+/// The Planner-owned iOS Header Status copy for Calendar Events,
+/// English-only like the connection copy; raw Google errors never surface.
+enum CalendarEventsCopy {}
+
+extension CalendarEventsCopy {
+    /// Shown while the initial window or a slab fetch is in flight.
+    static let loading = "Loading events…"
+
+    /// Shown when the initial fetch cannot complete offline; the Calendar
+    /// Grid stays usable and the fetch retries when connectivity returns.
+    static let offline =
+        "You\u{2019}re offline. Events will load when online"
+
+    /// Shown when a slab fetch cannot complete offline; already-fetched
+    /// events stay visible and the slab retries when connectivity returns.
+    static let offlinePartial =
+        "You\u{2019}re offline. More events will load when online"
+
+    /// Shown when the initial fetch fails for any other reason.
+    static let failed = "Couldn\u{2019}t load events"
+
+    /// Shown when a slab fetch fails for any other reason; the range
+    /// retries on the next edge approach.
+    static let failedPartial = "Couldn\u{2019}t load more events. Will retry"
+}
+
 /// The readable text tone on top of a Source Calendar colored event.
 enum CalendarEventTextTone: Equatable, Sendable {
     case dark
@@ -128,11 +169,29 @@ final class CalendarEventsModel {
     /// The laid-out Week Rows keyed by their Monday-first local start dates.
     private(set) var weekLayouts: [Date: CalendarEventWeekLayout] = [:]
 
+    /// The iOS Header Status content: the latest events message and its
+    /// tone, or a `nil` message while nothing needs saying.
+    private(set) var status = CalendarEventsStatus(message: nil, tone: .info)
+
     @ObservationIgnored
     private let adapter: (any GoogleCalendarEventsAdapting)?
 
+    /// The connectivity observer behind offline recovery, when configured;
+    /// the same seam the connection module uses.
+    @ObservationIgnored
+    private let connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)?
+
     @ObservationIgnored
     private var environment: CalendarEnvironment
+
+    /// The last visible range reported by the Calendar Screen, re-checked
+    /// when connectivity returns so owed slabs retry.
+    @ObservationIgnored
+    private var lastVisibleRange: (start: Date, end: Date)?
+
+    /// Whether the initial Fetched Window fetch is in flight.
+    @ObservationIgnored
+    private var isFetchingInitialWindow = false
 
     /// The local-date bounds of the Fetched Window, when it has been
     /// fetched: `[windowStart, windowEnd)` as start-of-day instants.
@@ -166,13 +225,26 @@ final class CalendarEventsModel {
     private var connectionGeneration = 0
 
     /// Builds the module. A `nil` adapter leaves the module permanently
-    /// inert: nothing fetches and nothing renders.
+    /// inert: nothing fetches and nothing renders. The connectivity
+    /// monitor, when provided, drives offline recovery event-driven.
     init(
         environment: CalendarEnvironment,
-        adapter: (any GoogleCalendarEventsAdapting)?
+        adapter: (any GoogleCalendarEventsAdapting)?,
+        connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)? = nil
     ) {
         self.environment = environment
         self.adapter = adapter
+        self.connectivityMonitor = connectivityMonitor
+        connectivityMonitor?.start { [weak self] in
+            self?.handleConnectivityReturn()
+        }
+    }
+
+    /// The module's lifetime end stops connectivity observation; in-flight
+    /// asynchronous work captures the module weakly and is ignored once the
+    /// module is gone.
+    isolated deinit {
+        connectivityMonitor?.stop()
     }
 
     /// The laid-out events for the Week Row starting on the given local
@@ -197,13 +269,26 @@ final class CalendarEventsModel {
         guard connected else {
             fetchedWindow = nil
             normalizedEvents = []
+            isFetchingInitialWindow = false
             isExtendingForward = false
             isExtendingBackward = false
+            lastVisibleRange = nil
             weekLayouts = [:]
+            status = CalendarEventsStatus(message: nil, tone: .info)
             return
         }
 
-        guard fetchedWindow == nil else {
+        beginInitialFetch(adapter: adapter)
+    }
+
+    /// Fetches the initial Fetched Window — three months before Today
+    /// through three months after — announcing progress in the iOS Header
+    /// Status. A failure reports Planner-owned copy and leaves the window
+    /// unfetched: an offline failure retries when connectivity returns.
+    private func beginInitialFetch(
+        adapter: any GoogleCalendarEventsAdapting
+    ) {
+        guard fetchedWindow == nil, !isFetchingInitialWindow else {
             return
         }
 
@@ -221,6 +306,12 @@ final class CalendarEventsModel {
             return
         }
 
+        isFetchingInitialWindow = true
+        status = CalendarEventsStatus(
+            message: CalendarEventsCopy.loading,
+            tone: .info
+        )
+
         let attempt = connectionGeneration
         Task { [weak self] in
             let outcome = await adapter.fetchEvents(
@@ -235,19 +326,60 @@ final class CalendarEventsModel {
                 return
             }
 
+            isFetchingInitialWindow = false
+
             switch outcome {
             case .success(let sourceCalendar, let events):
                 fetchedWindow = (windowStart, windowEnd)
                 normalizedEvents = normalize(events, calendar: sourceCalendar)
                 weekLayouts = [:]
                 publishWeeks(covering: (start: windowStart, end: windowEnd))
-            case .unavailable:
-                // A failed fetch publishes nothing and leaves the window
-                // unfetched; messaging and retries arrive with the status
-                // slice.
-                break
+                clearStatusIfIdle()
+            case .unavailable(let failure):
+                status = switch failure {
+                case .offline:
+                    CalendarEventsStatus(
+                        message: CalendarEventsCopy.offline,
+                        tone: .warning
+                    )
+                case .failed:
+                    CalendarEventsStatus(
+                        message: CalendarEventsCopy.failed,
+                        tone: .error
+                    )
+                }
             }
         }
+    }
+
+    /// Handles connectivity returning after an offline period, event-driven
+    /// with no polling: an unfetched initial window retries, and otherwise
+    /// the last reported visible range is re-checked so failed slabs retry.
+    private func handleConnectivityReturn() {
+        guard isConnected, let adapter else {
+            return
+        }
+
+        if fetchedWindow == nil {
+            beginInitialFetch(adapter: adapter)
+        } else if let lastVisibleRange {
+            showVisibleRange(
+                from: lastVisibleRange.start,
+                through: lastVisibleRange.end
+            )
+        }
+    }
+
+    /// Clears the status once no fetch work remains in flight; failure
+    /// copy stays until fresh progress or a success supersedes it.
+    private func clearStatusIfIdle() {
+        guard !isFetchingInitialWindow,
+              !isExtendingForward,
+              !isExtendingBackward
+        else {
+            return
+        }
+        status = CalendarEventsStatus(message: nil, tone: .info)
     }
 
     /// Reports the currently visible local-date range (as Week Row start
@@ -260,6 +392,8 @@ final class CalendarEventsModel {
         guard let adapter, let window = fetchedWindow else {
             return
         }
+
+        lastVisibleRange = (visibleStart, visibleEnd)
 
         let calendar = environment.calendar
 
@@ -320,6 +454,10 @@ final class CalendarEventsModel {
         direction: ExtensionDirection
     ) {
         let attempt = connectionGeneration
+        status = CalendarEventsStatus(
+            message: CalendarEventsCopy.loading,
+            tone: .info
+        )
         Task { [weak self] in
             let outcome = await adapter.fetchEvents(
                 from: fetchStart,
@@ -349,8 +487,20 @@ final class CalendarEventsModel {
                     fetchedWindow?.start = fetchStart
                 }
                 publishWeeks(covering: (start: fetchStart, end: fetchEnd))
-            case .unavailable:
-                break
+                clearStatusIfIdle()
+            case .unavailable(let failure):
+                status = switch failure {
+                case .offline:
+                    CalendarEventsStatus(
+                        message: CalendarEventsCopy.offlinePartial,
+                        tone: .warning
+                    )
+                case .failed:
+                    CalendarEventsStatus(
+                        message: CalendarEventsCopy.failedPartial,
+                        tone: .warning
+                    )
+                }
             }
         }
     }

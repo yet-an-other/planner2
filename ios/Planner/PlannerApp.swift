@@ -34,7 +34,8 @@ struct PlannerApp: App {
             )
             calendarEvents = CalendarEventsModel(
                 environment: .current(),
-                adapter: GoogleCalendarAPIAdapter()
+                adapter: GoogleCalendarAPIAdapter(),
+                connectivityMonitor: NWPathConnectivityMonitor()
             )
         }
     }

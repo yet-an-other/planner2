@@ -29,6 +29,29 @@ final class FakeGoogleCalendarEventsAdapter: GoogleCalendarEventsAdapting {
     }
 }
 
+private final class FakeEventsConnectivityMonitor:
+    GoogleConnectionConnectivityMonitoring
+{
+    private var onConnectivityReturn: (@MainActor () -> Void)?
+    var startCallCount = 0
+    var stopCallCount = 0
+
+    func start(onConnectivityReturn: @escaping @MainActor () -> Void) {
+        startCallCount += 1
+        self.onConnectivityReturn = onConnectivityReturn
+    }
+
+    func stop() {
+        stopCallCount += 1
+        onConnectivityReturn = nil
+    }
+
+    @MainActor
+    func simulateConnectivityReturn() {
+        onConnectivityReturn?()
+    }
+}
+
 @Suite("Calendar Events Model")
 @MainActor
 struct CalendarEventsModelTests {
@@ -1482,7 +1505,244 @@ struct CalendarEventsModelTests {
         #expect(layout?.cells[2].overflowCount == 2)
     }
 
+    // MARK: Header Status messaging and offline recovery
+
+    @Test("Fetching the initial window announces progress and clears on success")
+    func initialFetchAnnouncesProgress() async {
+        let (model, adapter) = makeModel()
+
+        model.setConnected(true)
+
+        #expect(
+            model.status
+                == CalendarEventsStatus(
+                    message: CalendarEventsCopy.loading,
+                    tone: .info
+                )
+        )
+        #expect(
+            await eventually {
+                adapter.fetchCallCount == 1
+                    && model.status.message == nil
+            }
+        )
+    }
+
+    @Test("An offline initial fetch warns and retries on connectivity return")
+    func offlineInitialFetchWarnsAndRetries() async {
+        let (model, adapter, monitor) = makeModelWithMonitor()
+        adapter.fetchHandler = { _, _ in .unavailable(.offline) }
+
+        model.setConnected(true)
+
+        #expect(
+            await eventually {
+                model.status
+                    == CalendarEventsStatus(
+                        message: CalendarEventsCopy.offline,
+                        tone: .warning
+                    )
+            }
+        )
+        #expect(model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) == nil)
+
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "event",
+                        summary: "Event",
+                        start: .timed(Self.gmt(2026, 7, 15, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 15, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+        monitor.simulateConnectivityReturn()
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil
+                    && model.status.message == nil
+            }
+        )
+    }
+
+    @Test("A failed initial fetch reports an error and keeps the bare grid")
+    func failedInitialFetchReportsError() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in .unavailable(.failed) }
+
+        model.setConnected(true)
+
+        #expect(
+            await eventually {
+                model.status
+                    == CalendarEventsStatus(
+                        message: CalendarEventsCopy.failed,
+                        tone: .error
+                    )
+            }
+        )
+        #expect(model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) == nil)
+    }
+
+    @Test("A slab fetch announces progress and clears on success")
+    func slabFetchAnnouncesProgress() async {
+        let (model, adapter) = makeModel()
+        model.setConnected(true)
+        #expect(await eventually { model.status.message == nil })
+
+        var release: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { release = $0 }
+        }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+
+        #expect(
+            await eventually {
+                model.status
+                    == CalendarEventsStatus(
+                        message: CalendarEventsCopy.loading,
+                        tone: .info
+                    )
+            }
+        )
+        // The status flips synchronously; the fetch itself lands a turn
+        // later, so wait for it before releasing.
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+
+        release?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        )
+        #expect(await eventually { model.status.message == nil })
+    }
+
+    @Test("An offline slab failure keeps events, warns, and recovers on return")
+    func offlineSlabKeepsEventsAndRecovers() async {
+        let (model, adapter, monitor) = makeModelWithMonitor()
+        adapter.fetchHandler = { _, _ in .success(calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar, events: [Self.initialEvent]) }
+        model.setConnected(true)
+        #expect(
+            await layoutEventually(model, weekStart: Self.gmt(2026, 7, 13))
+                != nil
+        )
+
+        adapter.fetchHandler = { _, _ in .unavailable(.offline) }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+
+        #expect(
+            await eventually {
+                model.status
+                    == CalendarEventsStatus(
+                        message: CalendarEventsCopy.offlinePartial,
+                        tone: .warning
+                    )
+            }
+        )
+        // Already-fetched events stay visible.
+        #expect(model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil)
+
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "slab-event",
+                        summary: "Slab Event",
+                        start: .timed(Self.gmt(2026, 11, 4, 9, 0)),
+                        end: .timed(Self.gmt(2026, 11, 4, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+        monitor.simulateConnectivityReturn()
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 11, 2)) != nil
+                    && model.status.message == nil
+            }
+        )
+    }
+
+    @Test("A failed slab warns without hiding fetched events")
+    func failedSlabWarns() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in .success(calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar, events: [Self.initialEvent]) }
+        model.setConnected(true)
+        #expect(
+            await layoutEventually(model, weekStart: Self.gmt(2026, 7, 13))
+                != nil
+        )
+
+        adapter.fetchHandler = { _, _ in .unavailable(.failed) }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+
+        #expect(
+            await eventually {
+                model.status
+                    == CalendarEventsStatus(
+                        message: CalendarEventsCopy.failedPartial,
+                        tone: .warning
+                    )
+            }
+        )
+        #expect(model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil)
+    }
+
+    @Test("Disconnect on This Device clears the events status")
+    func disconnectClearsStatus() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in .unavailable(.failed) }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                model.status
+                    == CalendarEventsStatus(
+                        message: CalendarEventsCopy.failed,
+                        tone: .error
+                    )
+            }
+        )
+
+        model.setConnected(false)
+
+        #expect(model.status.message == nil)
+    }
+
     // MARK: Helpers
+
+    private static var initialEvent: GoogleCalendarEvent {
+        GoogleCalendarEvent(
+            id: "initial-event",
+            summary: "Initial Event",
+            start: .timed(gmt(2026, 7, 15, 9, 0)),
+            end: .timed(gmt(2026, 7, 15, 10, 0)),
+            isCancelled: false,
+            isDeclinedByViewer: false
+        )
+    }
 
     private func makeModel(
         environment: CalendarEnvironment = Self.makeEnvironment()
@@ -1490,6 +1750,23 @@ struct CalendarEventsModelTests {
         let adapter = FakeGoogleCalendarEventsAdapter()
         let model = CalendarEventsModel(environment: environment, adapter: adapter)
         return (model, adapter)
+    }
+
+    private func makeModelWithMonitor(
+        environment: CalendarEnvironment = Self.makeEnvironment()
+    ) -> (
+        CalendarEventsModel,
+        FakeGoogleCalendarEventsAdapter,
+        FakeEventsConnectivityMonitor
+    ) {
+        let adapter = FakeGoogleCalendarEventsAdapter()
+        let monitor = FakeEventsConnectivityMonitor()
+        let model = CalendarEventsModel(
+            environment: environment,
+            adapter: adapter,
+            connectivityMonitor: monitor
+        )
+        return (model, adapter, monitor)
     }
 
     private func layoutEventually(
