@@ -131,14 +131,18 @@ struct CalendarScreen: View {
 
     /// The iOS Header Status mounted through the header's status seam. While
     /// the gate is on, the row always reserves its 20 points so messages
-    /// never move the Calendar Grid; the module owns the latest message and
-    /// its tone.
+    /// never move the Calendar Grid; the connection and the events module
+    /// publish into it through the shared resolution.
     @ViewBuilder
     private var headerStatus: some View {
         if let connection {
+            let content = resolveHeaderStatus(
+                connection: connection.status,
+                events: events?.status
+            )
             IOSHeaderStatus(
-                message: connection.status.message,
-                tone: IOSHeaderStatus.Tone(connection.status.tone)
+                message: content.message,
+                tone: content.tone
             )
         }
     }
