@@ -22,7 +22,7 @@ _Avoid_: Toast, banner, notification bar, status bar
 
 ## Relationships
 
-- **iOS Experience → Planning**: Uses Planning's Calendar Grid, Product Name, Product Version, Today, Week Row, Date Cell, Extended Calendar Range, Month Marker, Visible Month, Today Jump, Google Authorization Grant, Google Account Connection, Disconnect on This Device, Source Calendar, Selected Source Calendars, Calendar Event, Fetched Window, Calendar Event Bar, Calendar Event Row, and Events Overflow language.
+- **iOS Experience → Planning**: Uses Planning's Calendar Grid, Product Name, Product Version, Today, Week Row, Date Cell, Extended Calendar Range, Month Marker, Visible Month, Today Jump, Google Authorization Grant, Google Account Connection, Disconnect on This Device, Source Calendar, Calendar Event, Event Color, Fetched Window, Calendar Event Bar, Calendar Event Row, and Events Overflow language.
 - **iOS Experience ∥ Web Experience**: The native and web delivery stacks are peers. They share vocabulary but no executable code, packages, generated source, or build tooling.
 
 ## Delivery documentation

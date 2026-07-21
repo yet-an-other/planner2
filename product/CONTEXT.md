@@ -68,6 +68,10 @@ _Avoid_: Calendar sync, selection reset, calendar reload
 A Google Calendar event available to Planner from one of the Selected Source Calendars.
 _Avoid_: Event item, schedule entry, appointment
 
+**Event Color**:
+The color of a Calendar Event: its explicit Google event color when one is set, otherwise the background color of its Source Calendar.
+_Avoid_: Event tint, calendar color, event background
+
 **Fetched Window**:
 The continuous date range bounded by the earliest and latest dates fetched from Google Calendar.
 _Avoid_: Fetched cache, loaded range, data window
@@ -81,7 +85,7 @@ A visual representation of an intraday Calendar Event rendered inside a single D
 _Avoid_: Event chip, pill, card
 
 **Events Overflow**:
-The “+N more” marker shown in a Date Cell when its Calendar Events exceed the visible cap.
+The “+N more” indicator shown in a Date Cell when its Calendar Events exceed the visible cap. Each delivery experience decides whether it summons anything.
 _Avoid_: More link, +x item, extra events, expand button, overflow menu
 
 **Today**:
