@@ -130,7 +130,7 @@ These gates are deliberately **not complete** and are not reported as such:
 - Google Calendar API enabled and the OAuth consent screen production-ready with the sensitive `calendar.readonly` scope verified as Google requires.
 - A public HTTPS Privacy Policy URL whose content covers current and intended Calendar-data handling.
 - App Privacy answers covering Planner's and the SDK's account and Calendar data behavior.
-- A first user-visible Calendar-data consumer, which alone justifies enabling the production release gate. Delivered behind the gate: Calendar Events on the iOS Calendar Surface.
+- A first user-visible Calendar-data consumer, which alone justifies enabling the production release gate. Delivered behind the gate: Calendar Events on the iOS Calendar Surface. The production flip itself remains open.
 
 ## Compliance validation
 
