@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// The Event Detail Popover's presentation payload for one Calendar Event
 /// (Planning glossary). The published layout items — Calendar Event Bar
@@ -157,9 +158,6 @@ enum CalendarEventTimingLine {
     }
 }
 
-import Foundation
-import UIKit
-
 /// Plain-text notes from Google's HTML event description, isolated so
 /// the invariant stays pinned at the seam: HTML is stripped at
 /// normalization via `NSAttributedString(documentType: .html)` — tags
@@ -222,7 +220,10 @@ enum CalendarEventPlainTextNotes {
 /// Google provides one, the email otherwise, and the response status as
 /// a closed union rendered as text — never color alone.
 struct CalendarEventAttendee: Equatable, Sendable {
+    /// The attendee's display name when Google provides one, their
+    /// email otherwise — the single line the popover shows.
     let label: String
+    /// The attendee's response status in Planner's closed union.
     let status: CalendarEventResponseStatus
 }
 /// An attendee's response status in Planner's closed union; Google's

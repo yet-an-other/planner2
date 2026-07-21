@@ -23,3 +23,19 @@ enum PlannerPalette {
     /// palette, reserved for outbound affordances.
     static let link = Color(red: 0.161, green: 0.322, blue: 0.639)
 }
+
+extension Color {
+    /// An Event Color from its `#RRGGBB` hex form; unparsable
+    /// values fall back to the palette's olive.
+    init(eventHex hex: String) {
+        guard let color = EventColorRGB(hex: hex) else {
+            self = PlannerPalette.olive
+            return
+        }
+        self = Color(
+            red: Double(color.red) / 255,
+            green: Double(color.green) / 255,
+            blue: Double(color.blue) / 255
+        )
+    }
+}

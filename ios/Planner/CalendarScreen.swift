@@ -453,22 +453,6 @@ private struct CalendarEventRowView: View {
     }
 }
 
-private extension Color {
-    /// An Event Color from its `#RRGGBB` hex form; unparsable
-    /// values fall back to the palette's olive.
-    init(eventHex hex: String) {
-        guard let color = EventColorRGB(hex: hex) else {
-            self = PlannerPalette.olive
-            return
-        }
-        self = Color(
-            red: Double(color.red) / 255,
-            green: Double(color.green) / 255,
-            blue: Double(color.blue) / 255
-        )
-    }
-}
-
 private enum CalendarSurfaceCoordinateSpace {
     static let name = "iOS Calendar Surface"
 }

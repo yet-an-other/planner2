@@ -274,7 +274,7 @@ private struct IOSEventDetailLocationText: View {
 /// One labelled section of the Event Detail Popover: a small uppercase
 /// muted heading above its content, mirroring the Web Experience's
 /// section rhythm.
-struct IOSEventDetailPopoverSection<Content: View>: View {
+private struct IOSEventDetailPopoverSection<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
 
@@ -287,22 +287,6 @@ struct IOSEventDetailPopoverSection<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private extension Color {
-    /// An Event Color from its `#RRGGBB` hex form; unparsable
-    /// values fall back to the palette's olive.
-    init(eventHex hex: String) {
-        guard let color = EventColorRGB(hex: hex) else {
-            self = PlannerPalette.olive
-            return
-        }
-        self = Color(
-            red: Double(color.red) / 255,
-            green: Double(color.green) / 255,
-            blue: Double(color.blue) / 255
-        )
     }
 }
 
