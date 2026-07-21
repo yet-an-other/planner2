@@ -1014,21 +1014,53 @@ final class CalendarEventsModel {
     private static let maxVisibleBarLanes = 3
 
     /// The readable text tone on an Event Color: whichever of Planner's
-    /// ink or white yields the higher WCAG contrast ratio against it —
-    /// the most readable pair the palette can offer, always above WCAG AA
-    /// (4.5:1) for Google's fixed event and calendar palettes. This
-    /// deliberately replaces the YIQ luminance rule the Web Experience
-    /// still uses, which renders low-contrast white text on several
-    /// Google palette colors.
+    /// ink or white has the stronger APCA lightness contrast against it.
+    /// APCA — the W3C's perceptually calibrated WCAG 3 candidate — ranks
+    /// pairings the way the eye reads them; the WCAG 2.x ratio it
+    /// replaces overvalued dark text on mid-dark saturated colors,
+    /// rendering barely readable ink on Google's blues (iOS ADR 0004).
     static func textTone(forHexColor hexColor: String) -> CalendarEventTextTone {
         guard let color = EventColorRGB(hex: hexColor) else {
             return .light
         }
         let luminance = color.relativeLuminance
-        let darkContrast = (luminance + 0.05)
-            / (Self.darkTextRelativeLuminance + 0.05)
-        let lightContrast = (1.0 + 0.05) / (luminance + 0.05)
-        return darkContrast >= lightContrast ? .dark : .light
+        let darkLc = apcaContrast(
+            textLuminance: darkTextRelativeLuminance,
+            backgroundLuminance: luminance
+        )
+        let lightLc = apcaContrast(
+            textLuminance: 1.0,
+            backgroundLuminance: luminance
+        )
+        return abs(darkLc) >= abs(lightLc) ? .dark : .light
+    }
+
+    /// The APCA lightness contrast (Lc) of a text color on a background,
+    /// from their WCAG relative luminances: positive for dark text on a
+    /// light ground, negative for light text on a dark ground, with
+    /// polarity-dependent exponents modeling how the eye reads each
+    /// pairing; a pairing too weak to read clips to zero. Constants are
+    /// the published apca-w3 ones.
+    private static func apcaContrast(
+        textLuminance: Double,
+        backgroundLuminance: Double
+    ) -> Double {
+        let blackThreshold = 0.022
+        let text = textLuminance > blackThreshold
+            ? textLuminance
+            : textLuminance + pow(blackThreshold - textLuminance, 1.414)
+        let background = backgroundLuminance > blackThreshold
+            ? backgroundLuminance
+            : backgroundLuminance + pow(blackThreshold - backgroundLuminance, 1.414)
+        guard abs(background - text) >= 0.0005 else {
+            return 0
+        }
+        if background > text {
+            let contrast = pow(background, 0.56) - pow(text, 0.57)
+            return contrast < 0.1 ? 0 : contrast * 1.14 * 100
+        }
+        let contrast = pow(background, 0.62) - pow(text, 0.65)
+        return contrast > -0.1 ? 0 : contrast * 1.14 * 100
     }
 
     /// The WCAG relative luminance of the dark text candidate, Planner's

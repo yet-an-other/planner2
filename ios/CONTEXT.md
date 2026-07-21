@@ -33,4 +33,5 @@ _Avoid_: Toast, banner, notification bar, status bar
 - [`docs/adr/0001-use-google-sign-in-for-native-account-connection.md`](docs/adr/0001-use-google-sign-in-for-native-account-connection.md) — accepted native authentication boundary
 - [`docs/adr/0002-planner-owned-connect-control.md`](docs/adr/0002-planner-owned-connect-control.md) — accepted Planner-owned connect control presentation
 - [`docs/adr/0003-keep-calendar-events-memory-only.md`](docs/adr/0003-keep-calendar-events-memory-only.md) — accepted memory-only Calendar Events with no offline placeholders
+- [`docs/adr/0004-rank-bar-text-tone-by-apca.md`](docs/adr/0004-rank-bar-text-tone-by-apca.md) — accepted APCA ranking for bar title text tone
 - [`docs/research/google-account-connection-authentication.md`](docs/research/google-account-connection-authentication.md) — supporting primary-source authentication research

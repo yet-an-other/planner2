@@ -214,8 +214,8 @@ struct CalendarEventsModelTests {
                     id: "holiday",
                     title: "Holiday",
                     colorHex: "#039BE5",
-                    // Planner's ink out-contrasts white on this blue.
-                    textTone: .dark,
+                    // White out-reads Planner's ink on this blue (APCA).
+                    textTone: .light,
                     lane: 0,
                     startColumn: 2,
                     endColumn: 2,
@@ -752,8 +752,9 @@ struct CalendarEventsModelTests {
     @Test("Bar text tone picks the higher-contrast candidate for the Event Color")
     func textTonePicksHigherContrastCandidate() async {
         let (model, adapter) = makeModel()
-        // Google palette Blueberry: the old YIQ rule rendered white text at
-        // 3.2:1; Planner's ink stands at over 4.5:1 (WCAG AA).
+        // Google palette Blueberry: white out-reads Planner's ink on it
+        // (APCA Lc 66 vs 42) — the WCAG 2.x ratio ranks ink higher here,
+        // which is exactly the mis-ranking iOS ADR 0004 retires.
         adapter.fetchHandler = { _, _ in
             .success(
                 calendar: GoogleSourceCalendar(backgroundColorHex: "#5484ED"),
@@ -773,7 +774,34 @@ struct CalendarEventsModelTests {
         model.setConnected(true)
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        #expect(layout?.bars.first?.textTone == .dark)
+        #expect(layout?.bars.first?.textTone == .light)
+    }
+
+    @Test("A mid-dark blue Event Color takes light text")
+    func midDarkBlueTakesLightText() async {
+        let (model, adapter) = makeModel()
+        // The reported bar color: ink out-rates white on the WCAG 2.x
+        // ratio here yet visibly reads worse.
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: GoogleSourceCalendar(backgroundColorHex: "#5F83E6"),
+                events: [
+                    GoogleCalendarEvent(
+                        id: "event",
+                        summary: "Event",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.bars.first?.textTone == .light)
     }
 
     // MARK: Connection lifecycle
