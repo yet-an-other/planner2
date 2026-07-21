@@ -36,10 +36,6 @@ _Avoid_: Page refresh, reload, calendar refresh, sync
 A privacy-preserving placeholder persisted by the Web Experience for offline use that retains a Calendar Event's timing and color but not its title.
 _Avoid_: Cached event, local event, offline event
 
-**Event Detail Popover**:
-A transient, read-only overlay that presents the details of one Calendar Event, including a link to that event in Google Calendar.
-_Avoid_: Event modal, event popup, detail card, edit dialog
-
 **Day Events Popover**:
 A transient, read-only overlay that lists the Calendar Events for one Date Cell.
 _Avoid_: Day list, event popup, agenda, more-events modal, overflow menu
