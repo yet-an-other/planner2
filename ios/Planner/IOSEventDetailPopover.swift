@@ -67,6 +67,36 @@ struct IOSEventDetailPopover: View {
                             .frame(maxHeight: Self.notesMaxHeight)
                         }
                     }
+
+                    if !detail.attendees.isEmpty {
+                        IOSEventDetailPopoverSection(title: Self.attendeesSectionTitle) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(
+                                    Array(detail.attendees.enumerated()),
+                                    id: \.offset
+                                ) { _, attendee in
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text(attendee.label)
+                                            .font(.subheadline)
+                                            .foregroundStyle(PlannerPalette.ink)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                        Spacer(minLength: 8)
+                                        // The response status as text,
+                                        // never color alone.
+                                        Text(attendee.status.rawValue)
+                                            .font(.caption)
+                                            .foregroundStyle(PlannerPalette.monthText)
+                                    }
+                                }
+                                if detail.hiddenAttendeeCount > 0 {
+                                    Text("+\(detail.hiddenAttendeeCount) more")
+                                        .font(.caption)
+                                        .foregroundStyle(PlannerPalette.monthText)
+                                }
+                            }
+                        }
+                    }
                 }
                 .padding(16)
 
@@ -103,6 +133,7 @@ struct IOSEventDetailPopover: View {
     private static let whenSectionTitle = "When"
     private static let whereSectionTitle = "Where"
     private static let notesSectionTitle = "Notes"
+    private static let attendeesSectionTitle = "Attendees"
     private static let openInGoogleCalendarTitle = "Open in Google Calendar →"
 
     /// The Notes section's height cap, the web popover's 10-rem cap.
@@ -329,6 +360,27 @@ private extension Color {
         onClose: {}
     )
     .frame(width: 360, height: 240)
+}
+
+#Preview("Attendees · +N more") {
+    IOSEventDetailPopover(
+        detail: CalendarEventDetail(
+            title: "All Hands",
+            colorHex: "#8E24AA",
+            timingText: "Wed, Jul 22, 2026 · 4:00 PM – 5:00 PM",
+            googleLink: "https://www.google.com/calendar/event?eid=jkl012",
+            attendees: [
+                CalendarEventAttendee(label: "Ada Lovelace", status: .accepted),
+                CalendarEventAttendee(label: "grace@example.com", status: .declined),
+                CalendarEventAttendee(label: "Alan Turing", status: .tentative),
+                CalendarEventAttendee(label: "Edsger Dijkstra", status: .invited),
+                CalendarEventAttendee(label: "Katherine Johnson", status: .unknown),
+            ],
+            hiddenAttendeeCount: 3
+        ),
+        onClose: {}
+    )
+    .frame(width: 360, height: 340)
 }
 
 #Preview("Right to Left") {

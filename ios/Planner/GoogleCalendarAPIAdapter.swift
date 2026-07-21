@@ -186,10 +186,14 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
         struct Attendee: Decodable, Sendable {
             let isSelf: Bool?
             let responseStatus: String?
+            let displayName: String?
+            let email: String?
 
             enum CodingKeys: String, CodingKey {
                 case isSelf = "self"
                 case responseStatus
+                case displayName
+                case email
             }
         }
 
@@ -230,7 +234,14 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
             } ?? false,
             googleLink: dto.htmlLink,
             location: dto.location,
-            notes: dto.description
+            notes: dto.description,
+            attendees: (dto.attendees ?? []).map {
+                GoogleCalendarEventAttendee(
+                    displayName: $0.displayName,
+                    email: $0.email,
+                    responseStatus: $0.responseStatus
+                )
+            }
         )
     }
 

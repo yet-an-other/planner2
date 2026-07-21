@@ -16,6 +16,16 @@ enum GoogleCalendarEventTime: Equatable, Sendable {
     case timed(Date)
 }
 
+/// One decoded Google Calendar event attendee in Google-shaped form:
+/// raw display name, email, and response status strings exactly as
+/// Google delivers them; the display-name-primary label and the
+/// closed-union status live in the model's normalization.
+struct GoogleCalendarEventAttendee: Equatable, Sendable {
+    let displayName: String?
+    let email: String?
+    let responseStatus: String?
+}
+
 /// One decoded Google Calendar event crossing the adapter seam. The shape is
 /// Google's; classification, filtering, and presentation rules belong to the
 /// model, and raw Google errors never cross this boundary.
@@ -35,6 +45,8 @@ struct GoogleCalendarEvent: Equatable, Sendable {
     /// Google's HTML description, when provided; normalization renders
     /// it plain.
     let notes: String?
+    /// Google's attendee list, possibly empty.
+    let attendees: [GoogleCalendarEventAttendee]
 
     init(
         id: String,
@@ -46,7 +58,8 @@ struct GoogleCalendarEvent: Equatable, Sendable {
         isDeclinedByViewer: Bool,
         googleLink: String? = nil,
         location: String? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        attendees: [GoogleCalendarEventAttendee] = []
     ) {
         self.id = id
         self.summary = summary
@@ -58,6 +71,7 @@ struct GoogleCalendarEvent: Equatable, Sendable {
         self.googleLink = googleLink
         self.location = location
         self.notes = notes
+        self.attendees = attendees
     }
 }
 
@@ -687,6 +701,9 @@ final class CalendarEventsModel {
             let notes = CalendarEventPlainTextNotes.plainText(
                 fromHTML: event.notes
             )
+            let attendees = CalendarEventAttendeeNormalization.normalize(
+                event.attendees
+            )
 
             let locale = environment.locale
             let timeZone = environment.timeZone
@@ -747,7 +764,9 @@ final class CalendarEventsModel {
                         ),
                         location: location,
                         googleLink: event.googleLink,
-                        notes: notes
+                        notes: notes,
+                        attendees: attendees.visible,
+                        hiddenAttendeeCount: attendees.hiddenCount
                     )
                 )
             case (.timed(let startsAt), .timed(let endsAt)):
@@ -777,7 +796,9 @@ final class CalendarEventsModel {
                             ),
                             location: location,
                             googleLink: event.googleLink,
-                            notes: notes
+                            notes: notes,
+                            attendees: attendees.visible,
+                            hiddenAttendeeCount: attendees.hiddenCount
                         )
                     )
                 }
@@ -804,7 +825,9 @@ final class CalendarEventsModel {
                         ),
                         location: location,
                         googleLink: event.googleLink,
-                        notes: notes
+                        notes: notes,
+                        attendees: attendees.visible,
+                        hiddenAttendeeCount: attendees.hiddenCount
                     )
                 )
             default:

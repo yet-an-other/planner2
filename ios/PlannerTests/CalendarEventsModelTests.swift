@@ -2335,6 +2335,137 @@ struct CalendarEventsModelTests {
         #expect(layout?.cells[2].rows.map(\.detail.notes) == [nil, nil])
     }
 
+    @Test("Attendees map display-name primary with email fallback and status text")
+    func attendeesMapNamesAndStatuses() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "workshop",
+                        summary: "Workshop",
+                        start: .timed(Self.gmt(2026, 7, 22, 14, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 15, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        attendees: [
+                            GoogleCalendarEventAttendee(
+                                displayName: "Ada Lovelace",
+                                email: "ada@example.com",
+                                responseStatus: "accepted"
+                            ),
+                            // No display name: the email is the label.
+                            GoogleCalendarEventAttendee(
+                                displayName: nil,
+                                email: "grace@example.com",
+                                responseStatus: "declined"
+                            ),
+                            GoogleCalendarEventAttendee(
+                                displayName: "  ",
+                                email: "alan@example.com",
+                                responseStatus: "tentative"
+                            ),
+                            // Google's needsAction reads as invited.
+                            GoogleCalendarEventAttendee(
+                                displayName: "Edsger Dijkstra",
+                                email: nil,
+                                responseStatus: "needsAction"
+                            ),
+                            // An unrecognized status collapses to unknown.
+                            GoogleCalendarEventAttendee(
+                                displayName: "Katherine Johnson",
+                                email: "katherine@example.com",
+                                responseStatus: "maybe"
+                            ),
+                            // No displayable identity: dropped.
+                            GoogleCalendarEventAttendee(
+                                displayName: nil,
+                                email: nil,
+                                responseStatus: "accepted"
+                            ),
+                        ]
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(
+            layout?.cells[2].rows.first?.detail.attendees == [
+                CalendarEventAttendee(label: "Ada Lovelace", status: .accepted),
+                CalendarEventAttendee(label: "grace@example.com", status: .declined),
+                CalendarEventAttendee(label: "alan@example.com", status: .tentative),
+                CalendarEventAttendee(label: "Edsger Dijkstra", status: .invited),
+                CalendarEventAttendee(label: "Katherine Johnson", status: .unknown),
+            ]
+        )
+        #expect(layout?.cells[2].rows.first?.detail.hiddenAttendeeCount == 0)
+    }
+
+    @Test("Six or more attendees cap at five with a hidden count")
+    func attendeesCapAtFive() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "all-hands",
+                        summary: "All Hands",
+                        start: .timed(Self.gmt(2026, 7, 22, 16, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 17, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        attendees: (1...7).map { index in
+                            GoogleCalendarEventAttendee(
+                                displayName: "Person \(index)",
+                                email: "person\(index)@example.com",
+                                responseStatus: "accepted"
+                            )
+                        }
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        let detail = layout?.cells[2].rows.first?.detail
+        #expect(detail?.attendees.map(\.label) == (1...5).map { "Person \($0)" })
+        #expect(detail?.hiddenAttendeeCount == 2)
+    }
+
+    @Test("An event without attendees publishes no Attendees section")
+    func noAttendeesPublishesNoSection() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "focus",
+                        summary: "Focus Time",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        let detail = layout?.cells[2].rows.first?.detail
+        #expect(detail?.attendees == [])
+        #expect(detail?.hiddenAttendeeCount == 0)
+    }
+
     // MARK: Helpers
 
     private static var initialEvent: GoogleCalendarEvent {

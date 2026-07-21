@@ -27,6 +27,13 @@ struct CalendarEventDetail: Equatable, Sendable {
     /// normalization), or `nil` when the event has none — the Notes
     /// section is omitted rather than shown empty.
     let notes: String?
+    /// The first five attendees, display-name primary with the response
+    /// status as text; empty when the event has none — the Attendees
+    /// section is omitted rather than shown empty.
+    let attendees: [CalendarEventAttendee]
+    /// How many further attendees the five-attendee cap hides — the
+    /// "+N more" count; zero when the list fits.
+    let hiddenAttendeeCount: Int
 
     init(
         title: String,
@@ -34,7 +41,9 @@ struct CalendarEventDetail: Equatable, Sendable {
         timingText: String,
         location: String? = nil,
         googleLink: String? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        attendees: [CalendarEventAttendee] = [],
+        hiddenAttendeeCount: Int = 0
     ) {
         self.title = title
         self.colorHex = colorHex
@@ -42,6 +51,8 @@ struct CalendarEventDetail: Equatable, Sendable {
         self.location = location
         self.googleLink = googleLink
         self.notes = notes
+        self.attendees = attendees
+        self.hiddenAttendeeCount = hiddenAttendeeCount
     }
 }
 
@@ -205,6 +216,72 @@ enum CalendarEventPlainTextNotes {
         }
         return regex
     }()
+}
+
+/// One attendee in the Event Detail Popover: the display name when
+/// Google provides one, the email otherwise, and the response status as
+/// a closed union rendered as text — never color alone.
+struct CalendarEventAttendee: Equatable, Sendable {
+    let label: String
+    let status: CalendarEventResponseStatus
+}
+/// An attendee's response status in Planner's closed union; Google's
+/// `needsAction` reads as invited and any unrecognized value collapses
+/// to unknown, matching the Web Experience.
+enum CalendarEventResponseStatus: String, Equatable, Sendable {
+    case accepted
+    case declined
+    case tentative
+    case invited
+    case unknown
+
+    /// Maps Google's raw response status string into the closed union.
+    init(googleResponseStatus: String?) {
+        self = switch googleResponseStatus {
+        case "accepted": .accepted
+        case "declined": .declined
+        case "tentative": .tentative
+        case "needsAction": .invited
+        default: .unknown
+        }
+    }
+}
+
+/// Maps Google's attendees into the popover's presentation list:
+/// display-name primary with email fallback, trimmed; attendees with no
+/// displayable identity drop out; the list caps at five with the rest
+/// counted into the "+N more" line.
+enum CalendarEventAttendeeNormalization {
+    /// The normalized attendees and how many further attendees the cap
+    /// hides (zero when the list fits).
+    static func normalize(
+        _ attendees: [GoogleCalendarEventAttendee]
+    ) -> (visible: [CalendarEventAttendee], hiddenCount: Int) {
+        let mapped = attendees.compactMap { attendee -> CalendarEventAttendee? in
+            let displayName = attendee.displayName?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let email = attendee.email?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let label = displayName.isEmpty ? email : displayName
+            guard !label.isEmpty else {
+                return nil
+            }
+            return CalendarEventAttendee(
+                label: label,
+                status: CalendarEventResponseStatus(
+                    googleResponseStatus: attendee.responseStatus
+                )
+            )
+        }
+        return (
+            Array(mapped.prefix(Self.maxVisibleAttendees)),
+            max(0, mapped.count - Self.maxVisibleAttendees)
+        )
+    }
+
+    /// The popover shows at most this many attendees before the
+    /// "+N more" line, matching the Web Experience's cap.
+    private static let maxVisibleAttendees = 5
 }
 
 extension CalendarEventsCopy {
