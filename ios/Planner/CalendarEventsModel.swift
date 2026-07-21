@@ -149,6 +149,12 @@ final class CalendarEventsModel {
     @ObservationIgnored
     private var isExtendingBackward = false
 
+    /// Whether the module currently treats the Google Account Connection
+    /// as connected; repeated reports of the same state are no-ops, so a
+    /// republished connection can never wedge or duplicate a fetch.
+    @ObservationIgnored
+    private var isConnected = false
+
     /// Monotonic marker of the latest connection decision, so a stale
     /// asynchronous fetch completion can never overwrite newer user intent
     /// — the same discipline the connection module keeps.
@@ -177,10 +183,11 @@ final class CalendarEventsModel {
     /// every event and forgets the window, so a later connection fetches
     /// fresh data.
     func setConnected(_ connected: Bool) {
-        guard let adapter else {
+        guard let adapter, connected != isConnected else {
             return
         }
 
+        isConnected = connected
         connectionGeneration += 1
 
         guard connected else {
@@ -315,15 +322,15 @@ final class CalendarEventsModel {
                 to: fetchEnd
             )
 
-            guard let self, attempt == self.connectionGeneration else {
-                return
-            }
-
             switch direction {
             case .forward:
-                isExtendingForward = false
+                self?.isExtendingForward = false
             case .backward:
-                isExtendingBackward = false
+                self?.isExtendingBackward = false
+            }
+
+            guard let self, attempt == self.connectionGeneration else {
+                return
             }
 
             switch outcome {

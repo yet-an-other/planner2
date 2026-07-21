@@ -1033,6 +1033,93 @@ struct CalendarEventsModelTests {
         )
     }
 
+    @Test("A redundant connected report does not duplicate the initial fetch")
+    func redundantConnectedDoesNotDuplicateInitialFetch() async {
+        let (model, adapter) = makeModel()
+        var release: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { release = $0 }
+        }
+
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        // The Calendar Screen can report the same state again while the
+        // connection republishes; nothing about the fetch may change.
+        model.setConnected(true)
+        #expect(await neverHappens { adapter.fetchCallCount > 1 })
+
+        release?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "event",
+                        summary: "Event",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        )
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 20)) != nil
+            }
+        )
+    }
+
+    @Test("A redundant connected report leaves an in-flight slab applicable")
+    func redundantConnectedKeepsInFlightSlab() async {
+        let (model, adapter) = makeModel()
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        var release: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { release = $0 }
+        }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+
+        // A redundant report mid-slab must neither discard the slab nor
+        // wedge the direction.
+        model.setConnected(true)
+        release?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "slab-event",
+                        summary: "Slab Event",
+                        start: .timed(Self.gmt(2026, 11, 4, 9, 0)),
+                        end: .timed(Self.gmt(2026, 11, 4, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        )
+
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 11, 2)) != nil
+            }
+        )
+
+        // The direction keeps working: approaching the new edge fetches.
+        model.showVisibleRange(
+            from: Self.gmt(2026, 11, 2),
+            through: Self.gmt(2026, 12, 7)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+    }
+
     // MARK: Helpers
 
     private func makeModel(

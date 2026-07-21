@@ -246,7 +246,10 @@ struct CalendarScreen: View {
             return
         }
 
-        let visibleWeeks = max(1, Int(ceil(scrollViewportHeight / 96)) + 1)
+        let visibleWeeks = max(
+            1,
+            Int(ceil(scrollViewportHeight / WeekRowMetrics.height)) + 1
+        )
         guard
             let bottomWeek = currentEnvironment().calendar.date(
                 byAdding: .day,
@@ -281,7 +284,7 @@ private struct WeekRowView: View {
                 )
             }
         }
-        .frame(height: 96)
+        .frame(height: WeekRowMetrics.height)
         .background {
             GeometryReader { geometry in
                 Color.clear.preference(
@@ -305,6 +308,12 @@ private struct WeekRowView: View {
             }
         }
     }
+}
+
+/// The fixed Week Row dimensions shared by the row view and the
+/// visible-range estimate, so the two can never drift.
+private enum WeekRowMetrics {
+    static let height: CGFloat = 96
 }
 
 /// The shared vertical rhythm of Calendar Event presentation within a
