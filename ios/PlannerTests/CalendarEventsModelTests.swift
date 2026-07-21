@@ -1120,6 +1120,264 @@ struct CalendarEventsModelTests {
         #expect(await eventually { adapter.fetchCallCount == 3 })
     }
 
+    // MARK: Visible cap and Events Overflow
+
+    @Test("A Date Cell with four or fewer events shows all of them")
+    func fourOrFewerEventsShowAll() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "first",
+                        summary: "First",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "second",
+                        summary: "Second",
+                        start: .timed(Self.gmt(2026, 7, 22, 11, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 12, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "third",
+                        summary: "Third",
+                        start: .timed(Self.gmt(2026, 7, 22, 13, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 14, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "fourth",
+                        summary: "Fourth",
+                        start: .timed(Self.gmt(2026, 7, 22, 15, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 16, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.cells[2].rows.map(\.id) == ["first", "second", "third", "fourth"])
+        #expect(layout?.cells[2].overflowCount == nil)
+    }
+
+    @Test("A day beyond the cap shows three items and an inert count")
+    func beyondCapShowsThreePlusOverflow() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: (0..<5).map { index in
+                    GoogleCalendarEvent(
+                        id: "row-\(index)",
+                        summary: "Row \(index)",
+                        start: .timed(Self.gmt(2026, 7, 22, 9 + index, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10 + index, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    )
+                }
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.cells[2].rows.map(\.id) == ["row-0", "row-1", "row-2"])
+        #expect(layout?.cells[2].overflowCount == 2)
+    }
+
+    @Test("Bars and rows fill the cap in bar-then-row order")
+    func mixedItemsCapInBarThenRowOrder() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "bar-a",
+                        summary: "Bar A",
+                        start: .allDay(year: 2026, month: 7, day: 21),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "bar-b",
+                        summary: "Bar B",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 24),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "row-a",
+                        summary: "Row A",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "row-b",
+                        summary: "Row B",
+                        start: .timed(Self.gmt(2026, 7, 22, 11, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 12, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "row-c",
+                        summary: "Row C",
+                        start: .timed(Self.gmt(2026, 7, 22, 13, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 14, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        // Two lanes cross Wednesday, then rows: the cell shows one row and
+        // counts the remaining two.
+        #expect(layout?.cells[2].maxBarLane == 1)
+        #expect(layout?.cells[2].rows.map(\.id) == ["row-a"])
+        #expect(layout?.cells[2].overflowCount == 2)
+    }
+
+    @Test("A fourth bar lane joins the overflow instead of rendering")
+    func fourthLaneJoinsOverflow() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: (0..<4).map { index in
+                    GoogleCalendarEvent(
+                        id: "bar-\(index)",
+
+                        summary: "Bar \(index)",
+
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    )
+                }
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        // The Week Row renders at most three lanes at the fixed 96-point
+        // height; the fourth lane counts into the cell's overflow.
+        #expect(layout?.bars.map(\.lane) == [0, 1, 2])
+        #expect(layout?.cells[2].maxBarLane == 2)
+        #expect(layout?.cells[2].rows == [])
+        #expect(layout?.cells[2].overflowCount == 1)
+    }
+
+    @Test("Three lanes and one row fit without overflow")
+    func threeLanesAndOneRowFit() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "bar-a",
+                        summary: "Bar A",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "bar-b",
+                        summary: "Bar B",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "bar-c",
+                        summary: "Bar C",
+                        start: .allDay(year: 2026, month: 7, day: 22),
+                        end: .allDay(year: 2026, month: 7, day: 23),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "row-a",
+                        summary: "Row A",
+                        start: .timed(Self.gmt(2026, 7, 22, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.cells[2].maxBarLane == 2)
+        #expect(layout?.cells[2].rows.map(\.id) == ["row-a"])
+        #expect(layout?.cells[2].overflowCount == nil)
+    }
+
+    @Test("Overflow in one Date Cell leaves its neighbors untouched")
+    func overflowLeavesNeighborsUntouched() async {
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: (0..<5).map { index in
+                    GoogleCalendarEvent(
+                        id: "row-\(index)",
+                        summary: "Row \(index)",
+                        start: .timed(Self.gmt(2026, 7, 22, 9 + index, 0)),
+                        end: .timed(Self.gmt(2026, 7, 22, 10 + index, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    )
+                } + [
+                    GoogleCalendarEvent(
+                        id: "quiet",
+                        summary: "Quiet",
+                        start: .timed(Self.gmt(2026, 7, 23, 9, 0)),
+                        end: .timed(Self.gmt(2026, 7, 23, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.cells[2].overflowCount == 2)
+        #expect(layout?.cells[3].rows.map(\.id) == ["quiet"])
+        #expect(layout?.cells[3].overflowCount == nil)
+    }
+
     // MARK: Helpers
 
     private func makeModel(

@@ -95,13 +95,17 @@ struct CalendarEventRowItem: Equatable, Sendable, Identifiable {
     let colorHex: String
 }
 
-/// One Date Cell's event content: the deepest bar lane crossing the cell and
-/// the cell's intraday rows in start-time order.
+/// One Date Cell's event content: the deepest visible bar lane crossing
+/// the cell, the cell's visible intraday rows in start-time order, and the
+/// inert Events Overflow count when the visible cap hides items.
 struct CalendarEventCellLayout: Equatable, Sendable {
-    /// The highest lane index crossing this cell, or -1 when no bar does;
-    /// rows render below it.
+    /// The highest visible lane index crossing this cell, or -1 when no
+    /// visible bar does; rows and the overflow marker render below it.
     let maxBarLane: Int
     let rows: [CalendarEventRowItem]
+    /// The hidden item count for the "+N more" marker, or `nil` when every
+    /// item fits. The marker is inert: it summons nothing.
+    let overflowCount: Int?
 }
 
 /// One Week Row's laid-out Calendar Events: bar segments in an overlay and
@@ -578,12 +582,19 @@ final class CalendarEventsModel {
         }
 
         var maxBarLaneByColumn = [Int](repeating: -1, count: 7)
+        var crossingLaneCountByColumn = [Int](repeating: 0, count: 7)
         for segment in segments {
             for column in segment.startColumn...segment.endColumn {
-                maxBarLaneByColumn[column] = max(
-                    maxBarLaneByColumn[column],
-                    segment.lane
-                )
+                crossingLaneCountByColumn[column] += 1
+                // A Week Row renders at most three bar lanes at the fixed
+                // 96-point height (lanes 0...2); further lanes count into
+                // the cell's Events Overflow instead of rendering.
+                if segment.lane < Self.maxVisibleBarLanes {
+                    maxBarLaneByColumn[column] = max(
+                        maxBarLaneByColumn[column],
+                        segment.lane
+                    )
+                }
             }
         }
 
@@ -617,15 +628,45 @@ final class CalendarEventsModel {
         }
 
         let cells = (0..<7).map { column in
-            CalendarEventCellLayout(
-                maxBarLane: maxBarLaneByColumn[column],
-                rows: rowsByColumn[column]
-                    .sorted { $0.startsAt < $1.startsAt }
-                    .map(\.item)
+            let visibleLanes = maxBarLaneByColumn[column]
+            let visibleLaneCount =
+                visibleLanes >= 0
+                ? segments.filter {
+                    $0.lane < Self.maxVisibleBarLanes
+                        && $0.startColumn <= column
+                        && column <= $0.endColumn
+                }.count
+                : 0
+            let hiddenBarCount =
+                crossingLaneCountByColumn[column] - visibleLaneCount
+            let orderedRows = rowsByColumn[column]
+                .sorted { $0.startsAt < $1.startsAt }
+                .map(\.item)
+
+            // The visible cap: four slots per Date Cell — visible lanes,
+            // then rows — beyond which the cell shows three items and the
+            // inert Events Overflow marker counts the rest.
+            let rowSlots = 4 - visibleLaneCount
+            if hiddenBarCount == 0 && orderedRows.count <= rowSlots {
+                return CalendarEventCellLayout(
+                    maxBarLane: visibleLanes,
+                    rows: orderedRows,
+                    overflowCount: nil
+                )
+            }
+            let visibleRowCount = max(0, 3 - visibleLaneCount)
+            return CalendarEventCellLayout(
+                maxBarLane: visibleLanes,
+                rows: Array(orderedRows.prefix(visibleRowCount)),
+                overflowCount: hiddenBarCount
+                    + (orderedRows.count - visibleRowCount)
             )
         }
 
-        return CalendarEventWeekLayout(bars: segments, cells: cells)
+        return CalendarEventWeekLayout(
+            bars: segments.filter { $0.lane < Self.maxVisibleBarLanes },
+            cells: cells
+        )
     }
 
     // MARK: Local dates
@@ -687,6 +728,11 @@ final class CalendarEventsModel {
         target.day = min(day, validDays.count)
         return calendar.date(from: target)
     }
+
+    /// A Week Row renders at most this many bar lanes at the fixed
+    /// 96-point height; further lanes count into Events Overflow instead
+    /// of rendering.
+    private static let maxVisibleBarLanes = 3
 
     /// The readable text tone on a Source Calendar color, from the same YIQ
     /// luminance rule the Web Experience uses: dark text on light colors,

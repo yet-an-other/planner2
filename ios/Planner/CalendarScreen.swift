@@ -280,7 +280,8 @@ private struct WeekRowView: View {
                 DateCellView(
                     dateCell: dateCell,
                     rows: eventWeek?.cells[column].rows ?? [],
-                    maxBarLane: eventWeek?.cells[column].maxBarLane ?? -1
+                    maxBarLane: eventWeek?.cells[column].maxBarLane ?? -1,
+                    overflowCount: eventWeek?.cells[column].overflowCount
                 )
             }
         }
@@ -462,6 +463,7 @@ struct DateCellView: View {
     let dateCell: DateCell
     var rows: [CalendarEventRowItem] = []
     var maxBarLane: Int = -1
+    var overflowCount: Int?
 
     private var rowsTop: CGFloat {
         CalendarEventLayoutMetrics.barsTop
@@ -518,17 +520,30 @@ struct DateCellView: View {
                 .frame(width: 1)
         }
         .overlay(alignment: .topLeading) {
-            if !rows.isEmpty {
-                VStack(spacing: CalendarEventLayoutMetrics.rowSpacing) {
+            if !rows.isEmpty || overflowCount != nil {
+                VStack(
+                    alignment: .leading,
+                    spacing: CalendarEventLayoutMetrics.rowSpacing
+                ) {
                     ForEach(rows) { row in
                         CalendarEventRowView(row: row)
+                    }
+                    if let overflowCount {
+                        // The inert Events Overflow marker: it reads the
+                        // hidden count and summons nothing.
+                        Text("+\(overflowCount) more")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(PlannerPalette.monthText)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(height: CalendarEventLayoutMetrics.itemHeight)
                     }
                 }
                 .padding(.horizontal, 3)
                 .padding(.top, rowsTop)
                 .allowsHitTesting(false)
                 // Rows never paint past the fixed 96-point Week Row; the
-                // visible-cap slice decides how many may appear.
+                // visible cap already bounds what may appear.
                 .clipped()
             }
         }
@@ -998,6 +1013,20 @@ private struct PreviewGoogleSignInAdapter: GoogleSignInAdapting {
     .frame(width: 834, height: 1_194)
 }
 
+#Preview("Calendar Events · Dense Day") {
+    let environment = previewCalendarEnvironment(
+        localeIdentifier: "en_US_POSIX",
+        month: 7
+    )
+    CalendarScreen(
+        environment: environment,
+        currentEnvironment: { environment },
+        connection: previewConnectedConnection(),
+        events: previewEvents(environment: environment)
+    )
+    .frame(width: 393, height: 852)
+}
+
 #Preview("Calendar Events · Compact") {
     let environment = previewCalendarEnvironment(
         localeIdentifier: "en_US_POSIX",
@@ -1095,6 +1124,49 @@ private struct PreviewGoogleCalendarEventsAdapter: GoogleCalendarEventsAdapting 
                     summary: "Dentist",
                     start: .timed(previewInstant(2026, 7, 16, 11, 0)),
                     end: .timed(previewInstant(2026, 7, 16, 12, 0)),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                // A dense Thursday: six intraday events in one Date Cell,
+                // beyond the visible cap, so the inert Events Overflow
+                // marker appears.
+                GoogleCalendarEvent(
+                    id: "dense-1",
+                    summary: "Breakfast",
+                    start: .timed(previewInstant(2026, 7, 16, 8, 0)),
+                    end: .timed(previewInstant(2026, 7, 16, 8, 30)),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "dense-2",
+                    summary: "Standup",
+                    start: .timed(previewInstant(2026, 7, 16, 9, 30)),
+                    end: .timed(previewInstant(2026, 7, 16, 9, 45)),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "dense-3",
+                    summary: "Pairing",
+                    start: .timed(previewInstant(2026, 7, 16, 13, 0)),
+                    end: .timed(previewInstant(2026, 7, 16, 14, 0)),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "dense-4",
+                    summary: "Demo",
+                    start: .timed(previewInstant(2026, 7, 16, 15, 0)),
+                    end: .timed(previewInstant(2026, 7, 16, 16, 0)),
+                    isCancelled: false,
+                    isDeclinedByViewer: false
+                ),
+                GoogleCalendarEvent(
+                    id: "dense-5",
+                    summary: "Retro",
+                    start: .timed(previewInstant(2026, 7, 16, 16, 30)),
+                    end: .timed(previewInstant(2026, 7, 16, 17, 30)),
                     isCancelled: false,
                     isDeclinedByViewer: false
                 ),
