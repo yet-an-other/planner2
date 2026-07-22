@@ -84,7 +84,7 @@ struct IOSEventDetailPopover: View {
                                         Spacer(minLength: 8)
                                         // The response status as text,
                                         // never color alone.
-                                        Text(attendee.status.rawValue)
+                                        Text(attendee.status.displayText)
                                             .font(.caption)
                                             .foregroundStyle(PlannerPalette.monthText)
                                     }

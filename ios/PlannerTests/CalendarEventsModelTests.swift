@@ -2411,6 +2411,10 @@ struct CalendarEventsModelTests {
                 CalendarEventAttendee(label: "Katherine Johnson", status: .unknown),
             ]
         )
+        #expect(
+            layout?.cells[2].rows.first?.detail.attendees.map(\.status.displayText)
+                == ["accepted", "declined", "tentative", "invited", "unknown"]
+        )
         #expect(layout?.cells[2].rows.first?.detail.hiddenAttendeeCount == 0)
     }
 

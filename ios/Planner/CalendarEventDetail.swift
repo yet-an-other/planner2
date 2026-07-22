@@ -78,81 +78,79 @@ struct CalendarEventTiming: Equatable, Sendable {
 /// Planner's English-only copy; a timed multiday event carries its date
 /// and time on both ends, matching the Web Experience's popover.
 enum CalendarEventTimingLine {
+    /// The environment values every timing formatter needs, travelling as
+    /// one value so their date, locale, and timezone can never drift.
+    struct Context: Sendable {
+        let calendar: Calendar
+        let locale: Locale
+        let timeZone: TimeZone
+    }
+
     static func timingLine(
         for timing: CalendarEventTiming,
-        calendar: Calendar,
-        locale: Locale,
-        timeZone: TimeZone
+        context: Context
     ) -> String {
         if timing.isAllDay, !timing.isMultiday {
             return "\(CalendarEventsCopy.allDay) · "
-                + fullDate(timing.start, calendar: calendar, locale: locale, timeZone: timeZone)
+                + fullDate(timing.start, context: context)
         }
         if timing.isAllDay {
             return "\(CalendarEventsCopy.allDay) · "
-                + dayMonthYear(timing.start, calendar: calendar, locale: locale, timeZone: timeZone)
+                + dayMonthYear(timing.start, context: context)
                 + " – "
-                + dayMonthYear(timing.end, calendar: calendar, locale: locale, timeZone: timeZone)
+                + dayMonthYear(timing.end, context: context)
         }
         if !timing.isMultiday {
-            return fullDate(timing.start, calendar: calendar, locale: locale, timeZone: timeZone)
+            return fullDate(timing.start, context: context)
                 + " · "
-                + time(timing.start, calendar: calendar, locale: locale, timeZone: timeZone)
+                + time(timing.start, context: context)
                 + " – "
-                + time(timing.end, calendar: calendar, locale: locale, timeZone: timeZone)
+                + time(timing.end, context: context)
         }
-        return dayMonthYear(timing.start, calendar: calendar, locale: locale, timeZone: timeZone)
+        return dayMonthYear(timing.start, context: context)
             + ", "
-            + time(timing.start, calendar: calendar, locale: locale, timeZone: timeZone)
+            + time(timing.start, context: context)
             + " – "
-            + dayMonthYear(timing.end, calendar: calendar, locale: locale, timeZone: timeZone)
+            + dayMonthYear(timing.end, context: context)
             + ", "
-            + time(timing.end, calendar: calendar, locale: locale, timeZone: timeZone)
+            + time(timing.end, context: context)
     }
 
     /// The full date with weekday, as the Web Experience's popover shows
     /// it: "Wed, Jul 22, 2026" in en_US.
     private static func fullDate(
         _ date: Date,
-        calendar: Calendar,
-        locale: Locale,
-        timeZone: TimeZone
+        context: Context
     ) -> String {
-        format("yMMMEd", date, calendar: calendar, locale: locale, timeZone: timeZone)
+        format("yMMMEd", date, context: context)
     }
 
     /// The month, day, and year without weekday: "Jul 22, 2026" in en_US.
     private static func dayMonthYear(
         _ date: Date,
-        calendar: Calendar,
-        locale: Locale,
-        timeZone: TimeZone
+        context: Context
     ) -> String {
-        format("yMMMd", date, calendar: calendar, locale: locale, timeZone: timeZone)
+        format("yMMMd", date, context: context)
     }
 
     /// The localized short time form, the same template the Calendar
     /// Event Row start time uses.
     private static func time(
         _ date: Date,
-        calendar: Calendar,
-        locale: Locale,
-        timeZone: TimeZone
+        context: Context
     ) -> String {
-        format("jm", date, calendar: calendar, locale: locale, timeZone: timeZone)
+        format("jm", date, context: context)
     }
 
     private static func format(
         _ template: String,
         _ date: Date,
-        calendar: Calendar,
-        locale: Locale,
-        timeZone: TimeZone
+        context: Context
     ) -> String {
         let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = locale
-        formatter.timeZone = timeZone
+        formatter.calendar = context.calendar
+        formatter.locale = context.locale
+        formatter.timeZone = context.timeZone
         formatter.setLocalizedDateFormatFromTemplate(template)
         return formatter.string(from: date)
     }
@@ -229,12 +227,25 @@ struct CalendarEventAttendee: Equatable, Sendable {
 /// An attendee's response status in Planner's closed union; Google's
 /// `needsAction` reads as invited and any unrecognized value collapses
 /// to unknown, matching the Web Experience.
-enum CalendarEventResponseStatus: String, Equatable, Sendable {
+enum CalendarEventResponseStatus: Equatable, Sendable {
     case accepted
     case declined
     case tentative
     case invited
     case unknown
+
+    /// The English-only status copy the popover renders, separate from
+    /// the enum's identity so future copy can change without changing
+    /// the domain value.
+    var displayText: String {
+        switch self {
+        case .accepted: "accepted"
+        case .declined: "declined"
+        case .tentative: "tentative"
+        case .invited: "invited"
+        case .unknown: "unknown"
+        }
+    }
 
     /// Maps Google's raw response status string into the closed union.
     init(googleResponseStatus: String?) {

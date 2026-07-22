@@ -674,15 +674,18 @@ final class CalendarEventsModel {
         timeFormatter.locale = environment.locale
         timeFormatter.timeZone = environment.timeZone
         timeFormatter.setLocalizedDateFormatFromTemplate("jm")
+        let timingContext = CalendarEventTimingLine.Context(
+            calendar: calendar,
+            locale: environment.locale,
+            timeZone: environment.timeZone
+        )
 
         return events.compactMap { event in
             guard !event.isCancelled, !event.isDeclinedByViewer else {
                 return nil
             }
 
-            let trimmed = event.summary?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let title = trimmed.isEmpty ? "Busy" : trimmed
+            let title = event.summary?.trimmedToNil ?? "Busy"
             // The Event Color (Planning glossary): the explicit Google
             // event color when one is set and known, otherwise the Source
             // Calendar's background color.
@@ -695,13 +698,8 @@ final class CalendarEventsModel {
             // every classification branch publishes the same omission
             // rules: blank locations and Google links are absent; HTML
             // notes render plain and blank out to absence.
-            let trimmedLocation = event.location?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let location = trimmedLocation.isEmpty ? nil : trimmedLocation
-            let trimmedGoogleLink = event.googleLink?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let googleLink = trimmedGoogleLink.isEmpty
-                ? nil : trimmedGoogleLink
+            let location = event.location?.trimmedToNil
+            let googleLink = event.googleLink?.trimmedToNil
             let notes = CalendarEventPlainTextNotes.plainText(
                 fromHTML: event.notes
             )
@@ -709,14 +707,19 @@ final class CalendarEventsModel {
                 event.attendees
             )
 
-            let locale = environment.locale
-            let timeZone = environment.timeZone
-            let timingLine = { (timing: CalendarEventTiming) in
-                CalendarEventTimingLine.timingLine(
-                    for: timing,
-                    calendar: calendar,
-                    locale: locale,
-                    timeZone: timeZone
+            let makeDetail = { (timing: CalendarEventTiming) in
+                CalendarEventDetail(
+                    title: title,
+                    colorHex: colorHex,
+                    timingText: CalendarEventTimingLine.timingLine(
+                        for: timing,
+                        context: timingContext
+                    ),
+                    location: location,
+                    googleLink: googleLink,
+                    notes: notes,
+                    attendees: attendees.visible,
+                    hiddenAttendeeCount: attendees.hiddenCount
                 )
             }
 
@@ -755,22 +758,13 @@ final class CalendarEventsModel {
                         endDate: endDate,
                         startsAt: startDate
                     ),
-                    detail: CalendarEventDetail(
-                        title: title,
-                        colorHex: colorHex,
-                        timingText: timingLine(
-                            CalendarEventTiming(
-                                start: startDate,
-                                end: endDate,
-                                isAllDay: true,
-                                isMultiday: endDate > startDate
-                            )
-                        ),
-                        location: location,
-                        googleLink: googleLink,
-                        notes: notes,
-                        attendees: attendees.visible,
-                        hiddenAttendeeCount: attendees.hiddenCount
+                    detail: makeDetail(
+                        CalendarEventTiming(
+                            start: startDate,
+                            end: endDate,
+                            isAllDay: true,
+                            isMultiday: endDate > startDate
+                        )
                     )
                 )
             case (.timed(let startsAt), .timed(let endsAt)):
@@ -787,22 +781,13 @@ final class CalendarEventsModel {
                             endDate: endDate,
                             startsAt: startsAt
                         ),
-                        detail: CalendarEventDetail(
-                            title: title,
-                            colorHex: colorHex,
-                            timingText: timingLine(
-                                CalendarEventTiming(
-                                    start: startsAt,
-                                    end: endsAt,
-                                    isAllDay: false,
-                                    isMultiday: true
-                                )
-                            ),
-                            location: location,
-                            googleLink: googleLink,
-                            notes: notes,
-                            attendees: attendees.visible,
-                            hiddenAttendeeCount: attendees.hiddenCount
+                        detail: makeDetail(
+                            CalendarEventTiming(
+                                start: startsAt,
+                                end: endsAt,
+                                isAllDay: false,
+                                isMultiday: true
+                            )
                         )
                     )
                 }
@@ -816,22 +801,13 @@ final class CalendarEventsModel {
                         startsAt: startsAt,
                         startTimeText: timeFormatter.string(from: startsAt)
                     ),
-                    detail: CalendarEventDetail(
-                        title: title,
-                        colorHex: colorHex,
-                        timingText: timingLine(
-                            CalendarEventTiming(
-                                start: startsAt,
-                                end: endsAt,
-                                isAllDay: false,
-                                isMultiday: false
-                            )
-                        ),
-                        location: location,
-                        googleLink: googleLink,
-                        notes: notes,
-                        attendees: attendees.visible,
-                        hiddenAttendeeCount: attendees.hiddenCount
+                    detail: makeDetail(
+                        CalendarEventTiming(
+                            start: startsAt,
+                            end: endsAt,
+                            isAllDay: false,
+                            isMultiday: false
+                        )
                     )
                 )
             default:
@@ -1188,4 +1164,14 @@ final class CalendarEventsModel {
             green: 0.129,
             blue: 0.071
         )
+}
+
+private extension String {
+    /// Trims an optional Google string at the model seam, returning
+    /// `nil` when nothing but whitespace remains — the shared
+    /// blank-means-absent rule for titles and optional detail fields.
+    var trimmedToNil: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }
