@@ -8,6 +8,8 @@ import SwiftUI
 /// so Disconnect on This Device dismisses it as a consequence of clearing
 /// events. The surface stays write-read-only: no edit affordances exist.
 struct IOSEventDetailPopover: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     /// The tapped event's model-published presentation payload.
     let detail: CalendarEventDetail
 
@@ -31,6 +33,8 @@ struct IOSEventDetailPopover: View {
                             .foregroundStyle(PlannerPalette.ink)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 8)
+                            .padding(.bottom, 8)
 
                         Button(action: onClose) {
                             Image(systemName: "xmark")
@@ -117,17 +121,30 @@ struct IOSEventDetailPopover: View {
                 }
             }
         }
-        .frame(maxWidth: Self.maxWidth)
+        .frame(maxWidth: Self.contentMaxWidth(for: horizontalSizeClass))
         .background(PlannerPalette.canvas)
         // A native anchored popover on regular widths, a sheet on
         // compact ones; outside tap, the close affordance, and the
-        // platform gesture all dismiss.
+        // platform gesture all dismiss. Match the sheet chrome to the
+        // content so no system-white gutters show around compact content.
         .presentationCompactAdaptation(.sheet)
+        .presentationBackground(PlannerPalette.canvas)
+        .presentationDetents(Self.compactDetents)
     }
 
     /// The web popover's maximum width, kept so the two experiences read
-    /// alike; compact sheet widths stretch within it.
+    /// alike.
     private static let maxWidth: CGFloat = 360
+
+    static func contentMaxWidth(
+        for horizontalSizeClass: UserInterfaceSizeClass?
+    ) -> CGFloat? {
+        horizontalSizeClass == .compact ? .infinity : maxWidth
+    }
+
+    /// Compact sheets open at half height for ordinary event detail and remain
+    /// user-expandable when long notes or attendee lists need more room.
+    static let compactDetents: Set<PresentationDetent> = [.medium, .large]
 
     private static let closeAccessibilityLabel = "Close"
     private static let whenSectionTitle = "When"
@@ -221,10 +238,11 @@ private struct IOSEventDetailPopoverSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(1.8)
+                .font(.system(size: 14, weight: .semibold))
+                .tracking(1.3)
                 .foregroundStyle(PlannerPalette.monthText)
-            content
+                .padding(.bottom, 4)
+            content.padding(.leading, 16)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

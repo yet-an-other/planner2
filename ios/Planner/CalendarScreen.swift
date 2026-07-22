@@ -552,13 +552,23 @@ struct DateCellView: View {
                             .frame(height: CalendarEventLayoutMetrics.itemHeight)
                     }
                 }
-                .padding(.horizontal, 3)
+                .padding(
+                    .leading,
+                    Self.eventRowsLeadingPadding(
+                        hasMonthMarker: dateCell.monthMarker != nil
+                    )
+                )
+                .padding(.trailing, 3)
                 .padding(.top, rowsTop)
                 // Rows never paint past the fixed 96-point Week Row; the
                 // visible cap already bounds what may appear.
                 .clipped()
             }
         }
+    }
+
+    static func eventRowsLeadingPadding(hasMonthMarker: Bool) -> CGFloat {
+        hasMonthMarker ? 5 : 3
     }
 }
 

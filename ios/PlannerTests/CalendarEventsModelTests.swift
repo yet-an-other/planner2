@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import Planner
 
@@ -2278,6 +2279,60 @@ struct CalendarEventsModelTests {
             layout?.cells[2].rows.first?.detail.notes
                 == "Bring snacks & water.\nSee https://example.com/plan"
         )
+    }
+
+    @Test("Plain-text flight notes preserve their authored line breaks")
+    func plainTextFlightNotesPreserveLineBreaks() async {
+        let (model, adapter) = makeModel()
+        let notes = """
+            Flight OS 368 (Austrian Airlines)
+            Class: Economy (T)
+            Baggage: 1PC
+            Departure: 20:15
+            Arrival: 22:10
+            PNR: ONSQLU
+            """
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "flight-os-368",
+                        summary: "Paris → Vienna (OS 368)",
+                        start: .timed(Self.gmt(2026, 7, 22, 20, 15)),
+                        end: .timed(Self.gmt(2026, 7, 22, 22, 10)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        notes: notes
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        )
+        #expect(layout?.cells[2].rows.first?.detail.notes == notes)
+    }
+
+    @Test("Compact Event Detail Popovers fill the sheet width")
+    func compactEventDetailPopoversFillSheetWidth() {
+        #expect(IOSEventDetailPopover.contentMaxWidth(for: .compact) == .infinity)
+        #expect(IOSEventDetailPopover.contentMaxWidth(for: .regular) == 360)
+    }
+
+    @Test("Compact Event Detail Popovers start at half height and can expand")
+    func compactEventDetailPopoversUseAdaptiveDetents() {
+        #expect(IOSEventDetailPopover.compactDetents == [.medium, .large])
+    }
+
+    @Test("Event dots clear a first-of-month leading rule")
+    func eventDotsClearFirstOfMonthLeadingRule() {
+        #expect(DateCellView.eventRowsLeadingPadding(hasMonthMarker: false) == 3)
+        #expect(DateCellView.eventRowsLeadingPadding(hasMonthMarker: true) == 5)
     }
 
     @Test("Google's auto-created-event boilerplate is stripped from notes")
