@@ -139,53 +139,26 @@ struct IOSEventDetailPopover: View {
     /// The Notes section's height cap, the web popover's 10-rem cap.
     private static let notesMaxHeight: CGFloat = 160
 
-    /// The notes as an attributed string with http(s) URLs turned into
-    /// tappable links — presentation-only linkification, so the
-    /// plain-text data model never carries markup. Only http(s) URLs
-    /// linkify: a crafted scheme can never become a script URL.
+    /// Renders the pinned, presentation-only text/link segments into one
+    /// attributed string. The view owns only styling and the native link
+    /// attribute; URL boundary behavior lives in the pure helper.
     private static func linkedNotes(_ notes: String) -> AttributedString {
-        var result = AttributedString()
-        var cursor = notes.startIndex
-        while cursor < notes.endIndex {
-            guard
-                let schemeRange = notes.range(
-                    of: "https?://",
-                    options: [.regularExpression, .caseInsensitive],
-                    range: cursor..<notes.endIndex
-                )
-            else {
-                result.append(AttributedString(notes[cursor...]))
-                break
-            }
-            if schemeRange.lowerBound > cursor {
-                result.append(
-                    AttributedString(notes[cursor..<schemeRange.lowerBound])
-                )
-            }
-
-            // The URL runs to the first whitespace or bracketing
-            // character, mirroring the Web Experience's pattern.
-            let terminators: Set<Character> = ["<", ">", "\"", "'", ")"]
-            var end = schemeRange.upperBound
-            while end < notes.endIndex {
-                let character = notes[end]
-                if character.isWhitespace || terminators.contains(character) {
-                    break
+        CalendarEventTextLinks.splitIntoSegments(notes).reduce(
+            into: AttributedString()
+        ) { result, segment in
+            switch segment {
+            case .text(let text):
+                result.append(AttributedString(text))
+            case .link(let urlText):
+                var attributedLink = AttributedString(urlText)
+                if let url = URL(string: urlText) {
+                    attributedLink.link = url
+                    attributedLink.foregroundColor = PlannerPalette.link
+                    attributedLink.underlineStyle = .single
                 }
-                end = notes.index(after: end)
+                result.append(attributedLink)
             }
-
-            let urlText = String(notes[schemeRange.lowerBound..<end])
-            var segment = AttributedString(urlText)
-            if let url = URL(string: urlText) {
-                segment.link = url
-                segment.foregroundColor = PlannerPalette.link
-                segment.underlineStyle = .single
-            }
-            result.append(segment)
-            cursor = end
         }
-        return result
     }
 }
 
@@ -198,7 +171,8 @@ private struct IOSEventDetailLocationText: View {
     let location: String
 
     var body: some View {
-        if Self.isWholeURL(location), let url = URL(string: location) {
+        let href = CalendarEventLocationLinks.href(for: location)
+        if case let .some(.direct(url)) = href {
             Link(destination: url) {
                 Text(location)
                     .font(.subheadline)
@@ -207,9 +181,9 @@ private struct IOSEventDetailLocationText: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        } else if let mapsURL = Self.mapsURL(for: location) {
+        } else if case let .some(.maps(url)) = href {
             HStack(alignment: .top, spacing: 6) {
-                Link(destination: mapsURL) {
+                Link(destination: url) {
                     Image(systemName: "mappin")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(PlannerPalette.link)
@@ -224,8 +198,8 @@ private struct IOSEventDetailLocationText: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
-            // An unbuildable Maps URL (a location that cannot percent-
-            // encode) degrades to plain text rather than a dead link.
+            // An unbuildable Maps URL degrades to plain text rather than
+            // a dead link.
             Text(location)
                 .font(.subheadline)
                 .foregroundStyle(PlannerPalette.ink)
@@ -235,40 +209,6 @@ private struct IOSEventDetailLocationText: View {
     }
 
     private static let mapsAccessibilityLabel = "Open in Google Maps"
-
-    /// Whether the whole location string is exactly one http(s) URL —
-    /// deliberately excluding other schemes and URLs embedded in prose,
-    /// so a malicious location can never become a script URL and
-    /// prose-with-a-URL honestly goes to Maps search as a whole string.
-    private static func isWholeURL(_ location: String) -> Bool {
-        let lowered = location.lowercased()
-        guard lowered.hasPrefix("http://") || lowered.hasPrefix("https://")
-        else {
-            return false
-        }
-        return !location.contains(where: \.isWhitespace)
-    }
-
-    /// The documented Google Maps search URL for arbitrary free text,
-    /// letting Maps geocode and interpret the place string.
-    private static func mapsURL(for location: String) -> URL? {
-        let collapsed = location
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-        var allowed = CharacterSet.urlQueryAllowed
-        allowed.remove(charactersIn: "&+=")
-        guard
-            let query = collapsed.addingPercentEncoding(
-                withAllowedCharacters: allowed
-            )
-        else {
-            return nil
-        }
-        return URL(
-            string: "https://www.google.com/maps/search/?api=1&query=\(query)"
-        )
-    }
 }
 
 /// One labelled section of the Event Detail Popover: a small uppercase
