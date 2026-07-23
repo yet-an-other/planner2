@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 
 /// The Event Detail Popover's presentation payload for one Calendar Event
 /// (Planning glossary). The published layout items — Calendar Event Bar
@@ -158,11 +157,17 @@ enum CalendarEventTimingLine {
 
 /// Plain-text notes from Google's event description, isolated so the invariant
 /// stays pinned at the seam: descriptions containing HTML are stripped at
-/// normalization via `NSAttributedString(documentType: .html)` — tags and
-/// entities resolved, anchor text kept, never markup — while already plain
-/// descriptions retain authored line breaks. Google's auto-created-event
-/// boilerplate is removed, matching the Web Experience's invariant. Plain text
-/// avoids rendering organizer markup and any tracking beacons it may embed.
+/// normalization by a deterministic, dependency-free converter — tags removed,
+/// entities and anchor text resolved, block and `<br>` breaks turned into
+/// newlines, never markup — while already plain descriptions retain authored
+/// line breaks. Google's auto-created-event boilerplate is removed, matching
+/// the Web Experience's invariant. Plain text avoids rendering organizer
+/// markup and any tracking beacons it may embed.
+///
+/// The converter is pure Swift text work with no WebKit or main-thread
+/// requirement (unlike `NSAttributedString(documentType: .html)`, which is
+/// WebKit-backed, main-thread-only, and blocks the caller synchronously), so
+/// normalization stays cheap and off the critical path on every fetch.
 enum CalendarEventPlainTextNotes {
     /// Renders Google's event description into plain text, or returns
     /// `nil` when nothing readable remains — absent, blank, or
@@ -173,31 +178,18 @@ enum CalendarEventPlainTextNotes {
             return nil
         }
 
-        // Google also returns descriptions that are already plain text. Running
-        // those through the HTML importer collapses authored line breaks as
-        // insignificant HTML whitespace, so only invoke it when markup exists.
-        let rendered: String
+        // Google also returns descriptions that are already plain text. The
+        // markup converter would treat their line breaks as insignificant
+        // whitespace and decode stray ampersands as entities, so only run it
+        // when markup is actually present.
         let source = html as NSString
-        if htmlMarkup.firstMatch(
-            in: html,
-            range: NSRange(location: 0, length: source.length)
-        ) != nil {
-            guard let data = html.data(using: .utf8),
-                  let attributed = try? NSAttributedString(
-                      data: data,
-                      options: [
-                          .documentType: NSAttributedString.DocumentType.html,
-                          .characterEncoding: String.Encoding.utf8.rawValue,
-                      ],
-                      documentAttributes: nil
-                  )
-            else {
-                return nil
-            }
-            rendered = attributed.string
-        } else {
-            rendered = html
-        }
+        let rendered =
+            htmlMarkup.firstMatch(
+                in: html,
+                range: NSRange(location: 0, length: source.length)
+            ) != nil
+            ? strippingMarkup(html)
+            : html
 
         let text = rendered as NSString
         let stripped = googleAutoEventBoilerplate.stringByReplacingMatches(
@@ -205,14 +197,95 @@ enum CalendarEventPlainTextNotes {
             range: NSRange(location: 0, length: text.length),
             withTemplate: ""
         )
-        // The HTML conversion emits Unicode line/paragraph separators for
-        // <br> and block breaks; plain text keeps ordinary newlines.
-        let newlined = stripped
-            .replacingOccurrences(of: "\u{2028}", with: "\n")
-            .replacingOccurrences(of: "\u{2029}", with: "\n")
-        let trimmed = newlined.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
+
+    /// Converts an HTML description to plain text: `<br>` and block-level
+    /// tag boundaries become newlines, every other tag is dropped keeping
+    /// its inner text, and HTML entities resolve. Deterministic and
+    /// thread-safe — no WebKit, no main-thread hop.
+    private static func strippingMarkup(_ html: String) -> String {
+        let full = NSRange(location: 0, length: (html as NSString).length)
+        var text = lineBreakTags.stringByReplacingMatches(
+            in: html,
+            range: full,
+            withTemplate: "\n"
+        )
+        let afterBreaks = NSRange(location: 0, length: (text as NSString).length)
+        text = otherTags.stringByReplacingMatches(
+            in: text,
+            range: afterBreaks,
+            withTemplate: ""
+        )
+        // Adjacent block boundaries (e.g. `</div><div>`) yield back-to-back
+        // breaks; collapse them so markup layout does not open blank lines.
+        let afterTags = NSRange(location: 0, length: (text as NSString).length)
+        text = blankLineRuns.stringByReplacingMatches(
+            in: text,
+            range: afterTags,
+            withTemplate: "\n"
+        )
+        return decodingEntities(text)
+    }
+
+    /// Resolves HTML character references — the common named entities plus
+    /// decimal (`&#NN;`) and hexadecimal (`&#xNN;`) forms — in a single
+    /// pass so an encoded entity such as `&amp;lt;` resolves once to
+    /// `&lt;`, never twice to `<`.
+    private static func decodingEntities(_ text: String) -> String {
+        let source = text as NSString
+        let matches = entityReference.matches(
+            in: text,
+            range: NSRange(location: 0, length: source.length)
+        )
+        guard !matches.isEmpty else {
+            return text
+        }
+        var result = text
+        for match in matches.reversed() {
+            let token = source.substring(with: match.range)
+            guard let range = Range(match.range, in: result),
+                  let replacement = entityValue(token)
+            else {
+                continue
+            }
+            result.replaceSubrange(range, with: replacement)
+        }
+        return result
+    }
+
+    /// Maps one entity token (including its `&` and `;`) to its character,
+    /// or `nil` to leave an unrecognized reference untouched.
+    private static func entityValue(_ token: String) -> String? {
+        if let named = namedEntities[token] {
+            return named
+        }
+        guard token.hasPrefix("&#"), token.hasSuffix(";") else {
+            return nil
+        }
+        let digits = token.dropFirst(2).dropLast()
+        let scalarValue: UInt32?
+        if digits.first == "x" || digits.first == "X" {
+            scalarValue = UInt32(digits.dropFirst(), radix: 16)
+        } else {
+            scalarValue = UInt32(digits, radix: 10)
+        }
+        guard let scalarValue, let scalar = Unicode.Scalar(scalarValue) else {
+            return nil
+        }
+        return String(scalar)
+    }
+
+    private static let namedEntities: [String: String] = [
+        "&amp;": "&",
+        "&lt;": "<",
+        "&gt;": ">",
+        "&quot;": "\"",
+        "&apos;": "'",
+        "&#39;": "'",
+        "&nbsp;": "\u{00A0}",
+    ]
 
     /// Detects tag-shaped markup while leaving ordinary already-plain
     /// descriptions on the newline-preserving path.
@@ -221,6 +294,49 @@ enum CalendarEventPlainTextNotes {
             pattern: "<[A-Za-z!/][^>]*>"
         ) else {
             preconditionFailure("The HTML-markup pattern must compile")
+        }
+        return regex
+    }()
+
+    /// `<br>` and block-level element boundaries that map to a line break.
+    private static let lineBreakTags: NSRegularExpression = {
+        guard let regex = try? NSRegularExpression(
+            pattern:
+                "</?(?:br|p|div|li|ul|ol|tr|h[1-6]|blockquote|section|article|pre|table|thead|tbody)\\b[^>]*>",
+            options: [.caseInsensitive]
+        ) else {
+            preconditionFailure("The line-break-tag pattern must compile")
+        }
+        return regex
+    }()
+
+    /// Any remaining tag — dropped, keeping its inner text.
+    private static let otherTags: NSRegularExpression = {
+        guard let regex = try? NSRegularExpression(
+            pattern: "<[^>]+>"
+        ) else {
+            preconditionFailure("The residual-tag pattern must compile")
+        }
+        return regex
+    }()
+
+    /// Runs of two or more newlines (with optional intervening spaces or
+    /// tabs) left by adjacent block boundaries, collapsed to one break.
+    private static let blankLineRuns: NSRegularExpression = {
+        guard let regex = try? NSRegularExpression(
+            pattern: "[ \\t]*\\n(?:[ \\t]*\\n)+"
+        ) else {
+            preconditionFailure("The blank-line pattern must compile")
+        }
+        return regex
+    }()
+
+    /// A named or numeric HTML character reference.
+    private static let entityReference: NSRegularExpression = {
+        guard let regex = try? NSRegularExpression(
+            pattern: "&(?:#[xX]?[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);"
+        ) else {
+            preconditionFailure("The entity pattern must compile")
         }
         return regex
     }()
