@@ -87,6 +87,11 @@ struct CalendarScreen: View {
             midnightScheduleGeneration += 1
             if nextScenePhase == .active {
                 refreshCalendarGrid()
+                // Refresh the latest visible dates silently before the
+                // connection module performs its independent authorization
+                // revalidation. Initial loading absorbs this signal.
+                reportVisibleRange()
+                events?.refreshOnForeground()
                 // A foreground refresh asks the module to revalidate the
                 // connection; no SDK detail crosses this boundary.
                 connection?.validateOnForeground()

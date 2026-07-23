@@ -1,6 +1,6 @@
 # Web Experience
 
-The Web Experience context defines the language of Planner's browser-based calendar surface, including its presentation, refresh, and offline-display concepts.
+The Web Experience context defines the language of Planner's browser-based calendar surface, including its presentation and offline-display concepts.
 
 ## Language
 
@@ -27,10 +27,6 @@ _Avoid_: Settings modal, calendar dialog, preferences screen
 **Header Status**:
 A Calendar Header area for short connection information, progress messages, or errors related to the Calendar Surface.
 _Avoid_: Toast, alert, notification bar
-
-**Calendar Event Refresh**:
-A replacement of Calendar Events for the visible dates and the one-month scroll-prefetch buffer with their current state from the Selected Source Calendars.
-_Avoid_: Page refresh, reload, calendar refresh, sync
 
 **Saved Busy Block**:
 A privacy-preserving placeholder persisted by the Web Experience for offline use that retains a Calendar Event's timing and color but not its title.

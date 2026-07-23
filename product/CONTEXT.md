@@ -76,6 +76,10 @@ _Avoid_: Event tint, calendar color, event background
 The continuous date range bounded by the earliest and latest dates fetched from Google Calendar.
 _Avoid_: Fetched cache, loaded range, data window
 
+**Calendar Event Refresh**:
+An atomic replacement of Calendar Events for the visible dates and the one-month scroll-prefetch buffer on each side with their current Google state from the Source Calendars used by the delivery experience. Additions, edits, moves, declines, and deletions appear only after the complete request succeeds; a failed request leaves the prior Calendar Events unchanged.
+_Avoid_: Page refresh, reload, calendar refresh, sync, requery
+
 **Calendar Event Bar**:
 A visual representation of a multiday or all-day Calendar Event rendered as a solid colored bar spanning one or more Date Cells.
 _Avoid_: Event strip, block, banner

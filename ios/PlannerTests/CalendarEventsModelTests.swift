@@ -961,6 +961,568 @@ struct CalendarEventsModelTests {
         #expect(layout?.cells[2].rows.map(\.id) == ["island-time"])
     }
 
+    // MARK: Calendar Event Refresh
+
+    @Test("Foreground refreshes the visible dates and one-month buffers")
+    func foregroundRefreshesVisibleBufferedRange() async {
+        let (model, adapter) = makeModel()
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        #expect(await eventually { model.status.message == nil })
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        let range = adapter.fetchedRanges.last
+        #expect(range?.start == Self.gmt(2026, 6, 13))
+        #expect(range?.end == Self.gmt(2026, 8, 27))
+    }
+
+    @Test("Foreground refresh silently replaces an edited event after success")
+    func foregroundRefreshSilentlyReplacesEditedEvent() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        var releaseRefresh: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 1 {
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "event",
+                            summary: "Before",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            }
+            return await withCheckedContinuation { releaseRefresh = $0 }
+        }
+
+        model.setConnected(true)
+        let weekStart = Self.gmt(2026, 7, 20)
+        #expect(await layoutEventually(model, weekStart: weekStart)?
+            .cells[0].rows.first?.title == "Before")
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+
+        model.refreshOnForeground()
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(model.status.message == nil)
+        #expect(model.layout(forWeekStarting: weekStart)?
+            .cells[0].rows.first?.title == "Before")
+
+        releaseRefresh?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "event",
+                        summary: "After",
+                        start: .timed(Self.gmt(2026, 7, 20, 11)),
+                        end: .timed(Self.gmt(2026, 7, 20, 12)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        )
+
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: weekStart)?
+                    .cells[0].rows.first?.title == "After"
+            }
+        )
+    }
+
+    @Test("Foreground refresh clamps its buffer to the Fetched Window")
+    func foregroundRefreshClampsToFetchedWindow() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        var releaseSlab: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 2 {
+                return await withCheckedContinuation { releaseSlab = $0 }
+            }
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+
+        model.setConnected(true)
+        #expect(await eventually { model.status.message == nil })
+        // This range approaches the initial Fetched Window's past edge, so
+        // its slab runs first. Its failure leaves the refresh clamped to the
+        // original [2026-04-15, 2026-10-16) window.
+        model.showVisibleRange(
+            from: Self.gmt(2026, 5, 4),
+            through: Self.gmt(2026, 6, 1)
+        )
+        #expect(await eventually { releaseSlab != nil })
+        model.refreshOnForeground()
+        releaseSlab?.resume(returning: .unavailable(.failed))
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        let range = adapter.fetchedRanges.last
+        #expect(range?.start == Self.gmt(2026, 4, 15))
+        #expect(range?.end == Self.gmt(2026, 7, 1))
+    }
+
+    @Test("Refresh moves one event into range and removes a newly declined event")
+    func refreshMovesAndDeclinesEvents() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: fetchNumber == 1
+                    ? [
+                        GoogleCalendarEvent(
+                            id: "moved",
+                            summary: "Moved",
+                            start: .timed(Self.gmt(2026, 9, 21, 9)),
+                            end: .timed(Self.gmt(2026, 9, 21, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                        GoogleCalendarEvent(
+                            id: "declined",
+                            summary: "Declined",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                    : [
+                        GoogleCalendarEvent(
+                            id: "moved",
+                            summary: "Moved",
+                            start: .timed(Self.gmt(2026, 7, 21, 11)),
+                            end: .timed(Self.gmt(2026, 7, 21, 12)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                        GoogleCalendarEvent(
+                            id: "declined",
+                            summary: "Declined",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: true
+                        ),
+                    ]
+            )
+        }
+
+        model.setConnected(true)
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 9, 21)
+        ) != nil)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        let julyWeek = Self.gmt(2026, 7, 20)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: julyWeek)?
+                    .cells[1].rows.map(\.id) == ["moved"]
+            }
+        )
+        #expect(model.layout(forWeekStarting: julyWeek)?
+            .cells[0].rows.isEmpty == true)
+        #expect(model.layout(forWeekStarting: Self.gmt(2026, 9, 21)) == nil)
+    }
+
+    @Test("Removing a multiday event clears every old Week Row segment")
+    func removingMultidayEventClearsEveryOldSegment() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: fetchNumber == 1
+                    ? [
+                        GoogleCalendarEvent(
+                            id: "trip",
+                            summary: "Trip",
+                            start: .allDay(year: 2026, month: 6, day: 1),
+                            end: .allDay(year: 2026, month: 9, day: 2),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                    : []
+            )
+        }
+
+        model.setConnected(true)
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 6, 1)
+        ) != nil)
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 8, 31)
+        ) != nil)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 6, 1)) == nil
+                    && model.layout(
+                        forWeekStarting: Self.gmt(2026, 8, 31)
+                    ) == nil
+            }
+        )
+    }
+
+    @Test("A foreground refresh waits for a slab and uses the latest visible range")
+    func foregroundRefreshWaitsForSlabAndUsesLatestRange() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        var releaseSlab: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 2 {
+                return await withCheckedContinuation { releaseSlab = $0 }
+            }
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+
+        model.setConnected(true)
+        #expect(await eventually { model.status.message == nil })
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+        #expect(await neverHappens { adapter.fetchCallCount > 2 })
+
+        releaseSlab?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        let refreshRange = adapter.fetchedRanges.last
+        #expect(refreshRange?.start == Self.gmt(2026, 6, 13))
+        #expect(refreshRange?.end == Self.gmt(2026, 8, 27))
+    }
+
+    @Test("A slab waits for an in-flight refresh")
+    func slabWaitsForInFlightRefresh() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        var releaseRefresh: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 2 {
+                return await withCheckedContinuation { releaseRefresh = $0 }
+            }
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+
+        model.setConnected(true)
+        #expect(await eventually { model.status.message == nil })
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+        #expect(await eventually { releaseRefresh != nil })
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+        #expect(await neverHappens { adapter.fetchCallCount > 2 })
+
+        releaseRefresh?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        let slabRange = adapter.fetchedRanges.last
+        #expect(slabRange?.start == Self.gmt(2026, 10, 16))
+        #expect(slabRange?.end == Self.gmt(2026, 12, 16))
+    }
+
+    @Test("An offline refresh retains events and retries on connectivity return")
+    func offlineRefreshRetainsAndRetries() async {
+        let (model, adapter, monitor) = makeModelWithMonitor()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            switch fetchNumber {
+            case 1:
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "event",
+                            summary: "Event",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            case 2:
+                return .unavailable(.offline)
+            default:
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: []
+                )
+            }
+        }
+
+        model.setConnected(true)
+        let weekStart = Self.gmt(2026, 7, 20)
+        #expect(await layoutEventually(model, weekStart: weekStart) != nil)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+
+        model.refreshOnForeground()
+
+        #expect(
+            await eventually {
+                model.status.message == CalendarEventsCopy.refreshOffline
+            }
+        )
+        #expect(model.layout(forWeekStarting: weekStart) != nil)
+
+        monitor.simulateConnectivityReturn()
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: weekStart) == nil
+                    && model.status.message == nil
+            }
+        )
+    }
+
+    @Test("A failed foreground refresh retains events with a warning")
+    func failedRefreshRetainsEventsWithWarning() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 2 {
+                return .unavailable(.failed)
+            }
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "event",
+                        summary: "Event",
+                        start: .timed(Self.gmt(2026, 7, 20, 9)),
+                        end: .timed(Self.gmt(2026, 7, 20, 10)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+        let weekStart = Self.gmt(2026, 7, 20)
+        #expect(await layoutEventually(model, weekStart: weekStart) != nil)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(
+            await eventually {
+                model.status.message == CalendarEventsCopy.refreshFailed
+            }
+        )
+        #expect(model.status.tone == .warning)
+        #expect(model.layout(forWeekStarting: weekStart) != nil)
+    }
+
+    @Test("A refresh completion after reconnect cannot replace newer events")
+    func staleRefreshAfterReconnectCannotReplaceNewerEvents() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        var releaseRefresh: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            switch fetchNumber {
+            case 1:
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: []
+                )
+            case 2:
+                return await withCheckedContinuation { releaseRefresh = $0 }
+            default:
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "new",
+                            summary: "New connection",
+                            start: .timed(Self.gmt(2026, 7, 20, 11)),
+                            end: .timed(Self.gmt(2026, 7, 20, 12)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            }
+        }
+
+        model.setConnected(true)
+        #expect(await eventually { model.status.message == nil })
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+        #expect(await eventually { releaseRefresh != nil })
+
+        model.setConnected(false)
+        model.setConnected(true)
+        let weekStart = Self.gmt(2026, 7, 20)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: weekStart)?
+                    .cells[0].rows.map(\.id) == ["new"]
+            }
+        )
+
+        releaseRefresh?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "stale",
+                        summary: "Stale connection",
+                        start: .timed(Self.gmt(2026, 7, 20, 9)),
+                        end: .timed(Self.gmt(2026, 7, 20, 10)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        )
+
+        #expect(
+            await neverHappens {
+                model.layout(forWeekStarting: weekStart)?
+                    .cells[0].rows.contains(where: { $0.id == "stale" })
+                    == true
+            }
+        )
+    }
+
+    @Test("A successful empty refresh removes in-range events only")
+    func emptyRefreshRemovesInRangeEventsOnly() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: fetchNumber == 1
+                    ? [
+                        GoogleCalendarEvent(
+                            id: "visible",
+                            summary: "Visible",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                        GoogleCalendarEvent(
+                            id: "off-range",
+                            summary: "Off range",
+                            start: .timed(Self.gmt(2026, 9, 21, 9)),
+                            end: .timed(Self.gmt(2026, 9, 21, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                    : []
+            )
+        }
+
+        model.setConnected(true)
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 9, 21)
+        ) != nil)
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 20)) == nil
+            }
+        )
+        #expect(
+            model.layout(forWeekStarting: Self.gmt(2026, 9, 21)) != nil
+        )
+    }
+
     // MARK: Fetched Window expansion
 
     @Test("Approaching the latest edge fetches a two-month forward slab")

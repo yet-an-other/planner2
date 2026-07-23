@@ -152,6 +152,15 @@ extension CalendarEventsCopy {
     /// Shown when a slab fetch fails for any other reason; the range
     /// retries on the next edge approach.
     static let failedPartial = "Couldn\u{2019}t load more events. Will retry"
+
+    /// Shown when Calendar Event Refresh cannot complete offline; existing
+    /// events remain visible and connectivity return retries.
+    static let refreshOffline =
+        "You\u{2019}re offline. Events may be out of date"
+
+    /// Shown when Calendar Event Refresh fails for any other reason; existing
+    /// events remain visible until a later refresh succeeds.
+    static let refreshFailed = "Couldn\u{2019}t refresh events. Will retry"
 }
 
 /// The readable text tone on top of an Event Color.
@@ -300,6 +309,20 @@ final class CalendarEventsModel {
     @ObservationIgnored
     private var isFetchingInitialWindow = false
 
+    /// Whether a bounded Calendar Event Refresh is in flight.
+    @ObservationIgnored
+    private var isRefreshingEvents = false
+
+    /// Foreground and recovery signals coalesce here while another Calendar
+    /// Event request owns the serialized adapter seam.
+    @ObservationIgnored
+    private var isRefreshPending = false
+
+    /// A failed Calendar Event Refresh remains owed so connectivity return
+    /// can retry it and other fetch progress can restore its warning.
+    @ObservationIgnored
+    private var refreshFailure: GoogleCalendarEventsFailure?
+
     /// The local-date bounds of the Fetched Window, when it has been
     /// fetched: `[windowStart, windowEnd)` as start-of-day instants.
     @ObservationIgnored
@@ -320,6 +343,11 @@ final class CalendarEventsModel {
 
     @ObservationIgnored
     private var isExtendingBackward = false
+
+    /// A failed slab waits for another visible-range or connectivity signal
+    /// instead of looping immediately through serialized follow-up work.
+    @ObservationIgnored
+    private var isSlabRetryBlocked = false
 
     /// Whether the module currently treats the Google Account Connection
     /// as connected; repeated reports of the same state are no-ops, so a
@@ -379,8 +407,12 @@ final class CalendarEventsModel {
             fetchedWindow = nil
             normalizedEvents = []
             isFetchingInitialWindow = false
+            isRefreshingEvents = false
+            isRefreshPending = false
+            refreshFailure = nil
             isExtendingForward = false
             isExtendingBackward = false
+            isSlabRetryBlocked = false
             lastVisibleRange = nil
             weekLayouts = [:]
             status = CalendarEventsStatus(message: nil, tone: .info)
@@ -397,7 +429,7 @@ final class CalendarEventsModel {
     private func beginInitialFetch(
         adapter: any GoogleCalendarEventsAdapting
     ) {
-        guard fetchedWindow == nil, !isFetchingInitialWindow else {
+        guard fetchedWindow == nil, !hasFetchInFlight else {
             return
         }
 
@@ -452,6 +484,7 @@ final class CalendarEventsModel {
                 weekLayouts = [:]
                 publishWeeks(covering: (start: windowStart, end: windowEnd))
                 clearStatusIfIdle()
+                drainFetchWork()
             case .unavailable(let failure):
                 status = switch failure {
                 case .offline:
@@ -469,16 +502,181 @@ final class CalendarEventsModel {
         }
     }
 
-    /// Handles connectivity returning after an offline period, event-driven
-    /// with no polling: an unfetched initial window retries, and otherwise
-    /// the last reported visible range is re-checked so failed slabs retry.
+    /// Requests a bounded Calendar Event Refresh after the app returns to
+    /// the foreground. One pending signal survives initial, slab, or refresh
+    /// work and later uses the newest visible range.
+    func refreshOnForeground() {
+        guard adapter != nil, isConnected, fetchedWindow != nil,
+              lastVisibleRange != nil
+        else {
+            return
+        }
+        isRefreshPending = true
+        drainFetchWork()
+    }
+
+    /// Starts the already-authorized refresh decision. The latest visible
+    /// dates grow by one month on each side and clamp to the Fetched Window;
+    /// refresh never expands it.
+    private func beginRefresh(
+        adapter: any GoogleCalendarEventsAdapting,
+        window: (start: Date, end: Date),
+        visible: (start: Date, end: Date)
+    ) {
+        guard
+            let bufferedStart = addMonthsClamped(-1, to: visible.start),
+            let bufferedEnd = addMonthsClamped(1, to: visible.end)
+        else {
+            return
+        }
+
+        let refreshStart = max(bufferedStart, window.start)
+        let refreshEnd = min(bufferedEnd, window.end)
+        guard refreshStart < refreshEnd else {
+            return
+        }
+
+        isRefreshingEvents = true
+        let attempt = connectionGeneration
+        Task { [weak self] in
+            let outcome = await adapter.fetchEvents(
+                from: refreshStart,
+                to: refreshEnd
+            )
+            guard let self, attempt == self.connectionGeneration else {
+                return
+            }
+            isRefreshingEvents = false
+
+            switch outcome {
+            case .success(
+                let sourceCalendar,
+                let events,
+                let eventColorBackgrounds
+            ):
+                applyRefresh(
+                    events,
+                    calendar: sourceCalendar,
+                    eventColorBackgrounds: eventColorBackgrounds,
+                    range: (start: refreshStart, end: refreshEnd)
+                )
+                refreshFailure = nil
+                clearStatusIfIdle()
+            case .unavailable(let failure):
+                refreshFailure = failure
+                clearStatusIfIdle()
+            }
+            drainFetchWork()
+        }
+    }
+
+    /// Atomically replaces Calendar Events intersecting one successful
+    /// bounded refresh while preserving unrelated events. Raw returned ids
+    /// also evict an old off-range form of an event that moved into the
+    /// refreshed range; cancelled and declined events therefore remove their
+    /// prior presentation even though normalization drops them.
+    private func applyRefresh(
+        _ events: [GoogleCalendarEvent],
+        calendar sourceCalendar: GoogleSourceCalendar,
+        eventColorBackgrounds: [String: String],
+        range: (start: Date, end: Date)
+    ) {
+        let returnedIDs = Set(events.map(\.id))
+        let removedEvents = normalizedEvents.filter {
+            intersects($0, range: range) || returnedIDs.contains($0.id)
+        }
+        var nextEvents = normalizedEvents.filter {
+            !intersects($0, range: range) && !returnedIDs.contains($0.id)
+        }
+        let refreshedEvents = normalize(
+            events,
+            calendar: sourceCalendar,
+            eventColorBackgrounds: eventColorBackgrounds
+        )
+        for event in refreshedEvents {
+            nextEvents.removeAll { $0.id == event.id }
+            nextEvents.append(event)
+        }
+
+        var affectedWeeks = Set<Date>()
+        for event in removedEvents + refreshedEvents {
+            affectedWeeks.formUnion(weekStarts(intersecting: event))
+        }
+
+        var nextLayouts = weekLayouts
+        for weekStart in affectedWeeks {
+            let layout = layoutWeek(nextEvents, weekStart: weekStart)
+            if layout.bars.isEmpty
+                && !layout.cells.contains(where: { !$0.rows.isEmpty })
+            {
+                nextLayouts.removeValue(forKey: weekStart)
+            } else {
+                nextLayouts[weekStart] = layout
+            }
+        }
+
+        normalizedEvents = nextEvents
+        weekLayouts = nextLayouts
+    }
+
+    /// Whether one normalized event's presented local dates intersect a
+    /// half-open fetched range.
+    private func intersects(
+        _ event: NormalizedEvent,
+        range: (start: Date, end: Date)
+    ) -> Bool {
+        switch event.kind {
+        case .row(let date, _, _):
+            return date >= range.start && date < range.end
+        case .bar(let startDate, let endDate, _):
+            return startDate < range.end && endDate >= range.start
+        }
+    }
+
+    /// Every Monday-first Week Row touched by one normalized event.
+    private func weekStarts(intersecting event: NormalizedEvent) -> Set<Date> {
+        let calendar = environment.calendar
+        let firstDate: Date
+        let lastDate: Date
+        switch event.kind {
+        case .row(let date, _, _):
+            firstDate = date
+            lastDate = date
+        case .bar(let startDate, let endDate, _):
+            firstDate = startDate
+            lastDate = endDate
+        }
+
+        var result = Set<Date>()
+        var weekStart = startOfMondayWeek(containing: firstDate)
+        let lastWeekStart = startOfMondayWeek(containing: lastDate)
+        while weekStart <= lastWeekStart {
+            result.insert(weekStart)
+            guard let next = calendar.date(
+                byAdding: .day,
+                value: 7,
+                to: weekStart
+            ) else {
+                break
+            }
+            weekStart = next
+        }
+        return result
+    }
+
+    /// Handles connectivity returning after an offline period: an unfetched
+    /// initial window, failed Calendar Event Refresh, or failed slab retries
+    /// against the latest visible range.
     private func handleConnectivityReturn() {
         guard isConnected, let adapter else {
             return
         }
 
+        isSlabRetryBlocked = false
         if fetchedWindow == nil {
             beginInitialFetch(adapter: adapter)
+        } else if refreshFailure != nil {
+            refreshOnForeground()
         } else if let lastVisibleRange {
             showVisibleRange(
                 from: lastVisibleRange.start,
@@ -491,12 +689,26 @@ final class CalendarEventsModel {
     /// copy stays until fresh progress or a success supersedes it.
     private func clearStatusIfIdle() {
         guard !isFetchingInitialWindow,
+              !isRefreshingEvents,
               !isExtendingForward,
               !isExtendingBackward
         else {
             return
         }
-        status = CalendarEventsStatus(message: nil, tone: .info)
+        status = switch refreshFailure {
+        case .offline:
+            CalendarEventsStatus(
+                message: CalendarEventsCopy.refreshOffline,
+                tone: .warning
+            )
+        case .failed:
+            CalendarEventsStatus(
+                message: CalendarEventsCopy.refreshFailed,
+                tone: .warning
+            )
+        case nil:
+            CalendarEventsStatus(message: nil, tone: .info)
+        }
     }
 
     /// Reports the currently visible local-date range (as Week Row start
@@ -506,22 +718,30 @@ final class CalendarEventsModel {
     /// the next approach retries it. Approaches before the initial window
     /// lands do nothing — the initial fetch owns that range.
     func showVisibleRange(from visibleStart: Date, through visibleEnd: Date) {
-        guard let adapter, let window = fetchedWindow else {
+        lastVisibleRange = (visibleStart, visibleEnd)
+        isSlabRetryBlocked = false
+        drainFetchWork()
+    }
+
+    /// Calendar API requests share one serialized seam. Slab expansion leads
+    /// a pending refresh so the latter can clamp against the latest Fetched
+    /// Window; all decisions use the newest visible range.
+    private func drainFetchWork(allowSlab: Bool = true) {
+        guard !hasFetchInFlight, let adapter, isConnected,
+              let window = fetchedWindow, let visible = lastVisibleRange
+        else {
             return
         }
 
-        lastVisibleRange = (visibleStart, visibleEnd)
-
         let calendar = environment.calendar
-
-        if !isExtendingForward,
+        if allowSlab, !isSlabRetryBlocked,
            let lastFetchedDay = calendar.date(
                byAdding: .day,
                value: -1,
                to: window.end
            ),
            let forwardTrigger = addMonthsClamped(-1, to: lastFetchedDay),
-           visibleEnd >= forwardTrigger,
+           visible.end >= forwardTrigger,
            let newLastDay = addMonthsClamped(2, to: lastFetchedDay),
            let newEnd = calendar.date(
                byAdding: .day,
@@ -536,11 +756,12 @@ final class CalendarEventsModel {
                 to: newEnd,
                 direction: .forward
             )
+            return
         }
 
-        if !isExtendingBackward,
+        if allowSlab, !isSlabRetryBlocked,
            let backwardTrigger = addMonthsClamped(1, to: window.start),
-           visibleStart <= backwardTrigger,
+           visible.start <= backwardTrigger,
            let newStart = addMonthsClamped(-2, to: window.start)
         {
             isExtendingBackward = true
@@ -550,7 +771,19 @@ final class CalendarEventsModel {
                 to: window.start,
                 direction: .backward
             )
+            return
         }
+
+        guard isRefreshPending else {
+            return
+        }
+        isRefreshPending = false
+        beginRefresh(adapter: adapter, window: window, visible: visible)
+    }
+
+    private var hasFetchInFlight: Bool {
+        isFetchingInitialWindow || isRefreshingEvents || isExtendingForward
+            || isExtendingBackward
     }
 
     /// One slab direction of the Fetched Window.
@@ -581,15 +814,15 @@ final class CalendarEventsModel {
                 to: fetchEnd
             )
 
-            switch direction {
-            case .forward:
-                self?.isExtendingForward = false
-            case .backward:
-                self?.isExtendingBackward = false
-            }
-
             guard let self, attempt == self.connectionGeneration else {
                 return
+            }
+
+            switch direction {
+            case .forward:
+                isExtendingForward = false
+            case .backward:
+                isExtendingBackward = false
             }
 
             switch outcome {
@@ -618,7 +851,9 @@ final class CalendarEventsModel {
                     fetchedWindow?.start = fetchStart
                 }
                 publishWeeks(covering: (start: fetchStart, end: fetchEnd))
+                isSlabRetryBlocked = false
                 clearStatusIfIdle()
+                drainFetchWork()
             case .unavailable(let failure):
                 status = switch failure {
                 case .offline:
@@ -632,6 +867,10 @@ final class CalendarEventsModel {
                         tone: .warning
                     )
                 }
+                // Do not immediately retry the failed slab. A pending
+                // foreground refresh may still run inside the fetched range.
+                isSlabRetryBlocked = true
+                drainFetchWork(allowSlab: false)
             }
         }
     }
