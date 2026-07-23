@@ -45,6 +45,16 @@ extension GoogleCalendarEventsOutcome {
 private final class FakeCalendarEventsCadenceScheduler:
     CalendarEventsCadenceScheduling
 {
+    private(set) var now: Date
+
+    init(now: Date) {
+        self.now = now
+    }
+
+    func advance(by seconds: TimeInterval) {
+        now = now.addingTimeInterval(seconds)
+    }
+
     @MainActor
     final class Schedule: CalendarEventsCadenceSchedule {
         private(set) var isCancelled = false
@@ -1635,6 +1645,327 @@ struct CalendarEventsModelTests {
         )
     }
 
+    // MARK: Browsing freshness
+
+    @Test("Initial freshness suppresses browsing refresh through five minutes")
+    func initialFreshnessSuppressesUntilExpired() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        scheduler.advance(by: 5 * 60)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 20),
+            through: Self.gmt(2026, 8, 3)
+        )
+        #expect(await neverHappens { adapter.fetchCallCount > 1 })
+
+        scheduler.advance(by: 1)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 27),
+            through: Self.gmt(2026, 8, 10)
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        let range = adapter.fetchedRanges.last
+        #expect(range?.start == Self.gmt(2026, 6, 27))
+        #expect(range?.end == Self.gmt(2026, 9, 10))
+    }
+
+    @Test("Refresh freshness starts at successful completion")
+    func refreshFreshnessStartsAtCompletion() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+
+        var releaseRefresh: CheckedContinuation<
+            GoogleCalendarEventsOutcome,
+            Never
+        >?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { releaseRefresh = $0 }
+        }
+        model.setSceneActive(true)
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+
+        scheduler.advance(by: 5 * 60 + 1)
+        releaseRefresh?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        )
+        #expect(await eventually { scheduler.pendingCount == 1 })
+
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 20),
+            through: Self.gmt(2026, 7, 27)
+        )
+        #expect(await neverHappens { adapter.fetchCallCount > 2 })
+
+        scheduler.advance(by: 5 * 60 + 1)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 19),
+            through: Self.gmt(2026, 7, 26)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+    }
+
+    @Test("A completion later than the clock cannot count as fresh")
+    func futureCompletionDoesNotSuppressBrowsingRefresh() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        scheduler.advance(by: -1)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 20),
+            through: Self.gmt(2026, 8, 3)
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+    }
+
+    @Test("Fresh initial and slab coverage jointly suppress browsing refresh")
+    func initialAndSlabFreshnessSuppressFollowUp() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+
+        #expect(
+            await eventually {
+                adapter.fetchCallCount == 2 && scheduler.pendingCount == 1
+            }
+        )
+        #expect(await neverHappens { adapter.fetchCallCount > 2 })
+    }
+
+    @Test("A fresh slab cannot hide stale partial range coverage")
+    func partialFreshnessAfterSlabRefreshesBufferedRange() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        scheduler.advance(by: 5 * 60 + 1)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        #expect(adapter.fetchedRanges[1].start == Self.gmt(2026, 10, 16))
+        #expect(adapter.fetchedRanges[1].end == Self.gmt(2026, 12, 16))
+        #expect(adapter.fetchedRanges[2].start == Self.gmt(2026, 7, 31))
+        #expect(adapter.fetchedRanges[2].end == Self.gmt(2026, 11, 5))
+    }
+
+    @Test("A failed browsing refresh adds no freshness coverage")
+    func failedBrowsingRefreshAddsNoFreshness() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        scheduler.advance(by: 5 * 60 + 1)
+        adapter.fetchHandler = { _, _ in .unavailable(.failed) }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 20),
+            through: Self.gmt(2026, 8, 3)
+        )
+        #expect(
+            await eventually {
+                adapter.fetchCallCount == 2
+                    && model.status.message == CalendarEventsCopy.refreshFailed
+            }
+        )
+
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 21),
+            through: Self.gmt(2026, 8, 2)
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+    }
+
+    @Test("A failed stale-range refresh retains events and retries on connectivity")
+    func failedBrowsingRefreshRetainsAndRetries() async {
+        let (model, adapter, monitor, scheduler) =
+            makeModelWithMonitorAndScheduler()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [Self.initialEvent]
+            )
+        }
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        let weekStart = Self.gmt(2026, 7, 13)
+        #expect(await layoutEventually(model, weekStart: weekStart) != nil)
+
+        scheduler.advance(by: 5 * 60 + 1)
+        var releaseRefresh: CheckedContinuation<
+            GoogleCalendarEventsOutcome,
+            Never
+        >?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { releaseRefresh = $0 }
+        }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 20),
+            through: Self.gmt(2026, 8, 3)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(model.layout(forWeekStarting: weekStart) != nil)
+        #expect(model.status.message == nil)
+
+        releaseRefresh?.resume(returning: .unavailable(.failed))
+        #expect(
+            await eventually {
+                model.status.message == CalendarEventsCopy.refreshFailed
+            }
+        )
+        #expect(model.layout(forWeekStarting: weekStart) != nil)
+        #expect(await neverHappens { adapter.fetchCallCount > 2 })
+
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+        monitor.simulateConnectivityReturn()
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: weekStart) == nil
+                    && model.status.message == nil
+            }
+        )
+    }
+
+    @Test("Browsing during refresh follows up with the latest stale range")
+    func browsingRefreshUsesLatestRangeForFollowUp() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        scheduler.advance(by: 5 * 60 + 1)
+
+        var releaseRefresh: CheckedContinuation<
+            GoogleCalendarEventsOutcome,
+            Never
+        >?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { releaseRefresh = $0 }
+        }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 6, 15),
+            through: Self.gmt(2026, 6, 29)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 3),
+            through: Self.gmt(2026, 8, 17)
+        )
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+        releaseRefresh?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        let followUp = adapter.fetchedRanges.last
+        #expect(followUp?.start == Self.gmt(2026, 7, 3))
+        #expect(followUp?.end == Self.gmt(2026, 9, 17))
+        #expect(await neverHappens { adapter.fetchCallCount > 3 })
+    }
+
+    @Test("Disconnect clears browsing freshness before reconnect")
+    func disconnectClearsBrowsingFreshness() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+
+        scheduler.advance(by: 5 * 60 + 1)
+        model.setConnected(false)
+        model.setConnected(true)
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(await eventually { scheduler.pendingCount == 1 })
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 20),
+            through: Self.gmt(2026, 8, 3)
+        )
+        #expect(await neverHappens { adapter.fetchCallCount > 2 })
+    }
+
     // MARK: Foreground refresh cadence
 
     @Test("Active cadence starts five minutes after initial fetching completes")
@@ -1917,7 +2248,7 @@ struct CalendarEventsModelTests {
     func teardownCancelsCadenceAndObservation() async {
         let adapter = FakeGoogleCalendarEventsAdapter()
         let monitor = FakeEventsConnectivityMonitor()
-        let scheduler = FakeCalendarEventsCadenceScheduler()
+        let scheduler = FakeCalendarEventsCadenceScheduler(now: Self.now)
         var model: CalendarEventsModel? = CalendarEventsModel(
             environment: Self.makeEnvironment(),
             adapter: adapter,
@@ -1942,7 +2273,7 @@ struct CalendarEventsModelTests {
 
     @Test("Disconnected and release-gated-off models own no cadence")
     func inertModelsOwnNoCadence() {
-        let scheduler = FakeCalendarEventsCadenceScheduler()
+        let scheduler = FakeCalendarEventsCadenceScheduler(now: Self.now)
         let disconnected = CalendarEventsModel(
             environment: Self.makeEnvironment(),
             adapter: FakeGoogleCalendarEventsAdapter(),
@@ -2021,8 +2352,8 @@ struct CalendarEventsModelTests {
         #expect(await neverHappens { adapter.fetchCallCount > 1 })
     }
 
-    @Test("A fetched range is never refetched while scrolling back and forth")
-    func fetchedRangeNeverRefetches() async {
+    @Test("Inactive browsing does not refetch an expanded range")
+    func inactiveBrowsingDoesNotRefetchExpandedRange() async {
         let (model, adapter) = makeModel()
         model.setConnected(true)
         #expect(await eventually { adapter.fetchCallCount == 1 })
@@ -2033,8 +2364,8 @@ struct CalendarEventsModelTests {
         )
         #expect(await eventually { adapter.fetchCallCount == 2 })
 
-        // Same approach again, plus one deep into the new window: no more
-        // fetches until the new edge comes within one month.
+        // The inactive scene performs no browsing refresh. The same approach
+        // and one deep in the expanded window therefore issue no request.
         model.showVisibleRange(
             from: Self.gmt(2026, 8, 31),
             through: Self.gmt(2026, 10, 5)
@@ -3590,7 +3921,13 @@ struct CalendarEventsModelTests {
         environment: CalendarEnvironment = Self.makeEnvironment()
     ) -> (CalendarEventsModel, FakeGoogleCalendarEventsAdapter) {
         let adapter = FakeGoogleCalendarEventsAdapter()
-        let model = CalendarEventsModel(environment: environment, adapter: adapter)
+        let model = CalendarEventsModel(
+            environment: environment,
+            adapter: adapter,
+            cadenceScheduler: FakeCalendarEventsCadenceScheduler(
+                now: environment.now
+            )
+        )
         return (model, adapter)
     }
 
@@ -3606,7 +3943,10 @@ struct CalendarEventsModelTests {
         let model = CalendarEventsModel(
             environment: environment,
             adapter: adapter,
-            connectivityMonitor: monitor
+            connectivityMonitor: monitor,
+            cadenceScheduler: FakeCalendarEventsCadenceScheduler(
+                now: environment.now
+            )
         )
         return (model, adapter, monitor)
     }
@@ -3619,7 +3959,9 @@ struct CalendarEventsModelTests {
         FakeCalendarEventsCadenceScheduler
     ) {
         let adapter = FakeGoogleCalendarEventsAdapter()
-        let scheduler = FakeCalendarEventsCadenceScheduler()
+        let scheduler = FakeCalendarEventsCadenceScheduler(
+            now: environment.now
+        )
         let model = CalendarEventsModel(
             environment: environment,
             adapter: adapter,
@@ -3638,7 +3980,9 @@ struct CalendarEventsModelTests {
     ) {
         let adapter = FakeGoogleCalendarEventsAdapter()
         let monitor = FakeEventsConnectivityMonitor()
-        let scheduler = FakeCalendarEventsCadenceScheduler()
+        let scheduler = FakeCalendarEventsCadenceScheduler(
+            now: environment.now
+        )
         let model = CalendarEventsModel(
             environment: environment,
             adapter: adapter,

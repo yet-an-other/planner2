@@ -119,10 +119,13 @@ protocol CalendarEventsCadenceSchedule: AnyObject {
     func cancel()
 }
 
-/// The deterministic boundary for Calendar Event Refresh cadence. Production
-/// sleeps with a Task; tests retain and fire the supplied action directly.
+/// The deterministic scheduling and clock boundary for Calendar Event
+/// Refresh. Production reads wall time and sleeps with a Task; tests control
+/// both completion instants and scheduled actions directly.
 @MainActor
 protocol CalendarEventsCadenceScheduling: AnyObject {
+    var now: Date { get }
+
     func schedule(
         after delay: Duration,
         action: @escaping @MainActor @Sendable () -> Void
@@ -132,6 +135,8 @@ protocol CalendarEventsCadenceScheduling: AnyObject {
 /// The live completion-relative cadence scheduler.
 @MainActor
 final class TaskCalendarEventsCadenceScheduler: CalendarEventsCadenceScheduling {
+    var now: Date { .now }
+
     func schedule(
         after delay: Duration,
         action: @escaping @MainActor @Sendable () -> Void
@@ -384,6 +389,11 @@ final class CalendarEventsModel {
     @ObservationIgnored
     private var isRefreshPending = false
 
+    /// A changed visible range leaves one freshness decision owed while
+    /// another Calendar Event request owns the serialized adapter seam.
+    @ObservationIgnored
+    private var needsBrowsingFreshnessCheck = false
+
     /// A failed Calendar Event Refresh remains owed so connectivity return
     /// can retry it and other fetch progress can restore its warning.
     @ObservationIgnored
@@ -401,6 +411,12 @@ final class CalendarEventsModel {
     /// one. Memory-only: cleared on Disconnect on This Device (ADR 0003).
     @ObservationIgnored
     private var normalizedEvents: [NormalizedEvent] = []
+
+    /// Successful initial, slab, and refresh completion coverage. This is
+    /// process-local bookkeeping only: it is never persisted and vanishes
+    /// with Disconnect on This Device or model teardown.
+    @ObservationIgnored
+    private var freshnessCoverage: [FreshnessCoverage] = []
 
     /// In-flight slab directions, so repeated edge approaches can never
     /// duplicate a fetch.
@@ -487,6 +503,8 @@ final class CalendarEventsModel {
             cancelCadence()
             fetchedWindow = nil
             normalizedEvents = []
+            freshnessCoverage = []
+            needsBrowsingFreshnessCheck = false
             // The active request keeps its operation flag until its adapter
             // call returns. A reconnect queues behind that physical work;
             // only publication is invalidated immediately.
@@ -567,6 +585,10 @@ final class CalendarEventsModel {
                 )
                 weekLayouts = [:]
                 publishWeeks(covering: (start: windowStart, end: windowEnd))
+                recordFreshness(
+                    for: (start: windowStart, end: windowEnd),
+                    completedAt: cadenceScheduler.now
+                )
                 clearStatusIfIdle()
                 drainFetchWork()
                 scheduleCadenceIfEligible()
@@ -643,18 +665,12 @@ final class CalendarEventsModel {
         window: (start: Date, end: Date),
         visible: (start: Date, end: Date)
     ) -> Bool {
-        guard
-            let bufferedStart = addMonthsClamped(-1, to: visible.start),
-            let bufferedEnd = addMonthsClamped(1, to: visible.end)
+        guard let range = boundedRefreshRange(window: window, visible: visible)
         else {
             return false
         }
-
-        let refreshStart = max(bufferedStart, window.start)
-        let refreshEnd = min(bufferedEnd, window.end)
-        guard refreshStart < refreshEnd else {
-            return false
-        }
+        let refreshStart = range.start
+        let refreshEnd = range.end
 
         cancelCadence()
         isRefreshingEvents = true
@@ -684,6 +700,10 @@ final class CalendarEventsModel {
                     calendar: sourceCalendar,
                     eventColorBackgrounds: eventColorBackgrounds,
                     range: (start: refreshStart, end: refreshEnd)
+                )
+                recordFreshness(
+                    for: (start: refreshStart, end: refreshEnd),
+                    completedAt: cadenceScheduler.now
                 )
                 refreshFailure = nil
                 clearStatusIfIdle()
@@ -847,6 +867,11 @@ final class CalendarEventsModel {
     /// the next approach retries it. Approaches before the initial window
     /// lands do nothing — the initial fetch owns that range.
     func showVisibleRange(from visibleStart: Date, through visibleEnd: Date) {
+        if lastVisibleRange?.start != visibleStart
+            || lastVisibleRange?.end != visibleEnd
+        {
+            needsBrowsingFreshnessCheck = true
+        }
         lastVisibleRange = (visibleStart, visibleEnd)
         isSlabRetryBlocked = false
         drainFetchWork()
@@ -902,6 +927,15 @@ final class CalendarEventsModel {
                 direction: .backward
             )
             return
+        }
+
+        if needsBrowsingFreshnessCheck, isSceneActive,
+           let range = boundedRefreshRange(window: window, visible: visible)
+        {
+            needsBrowsingFreshnessCheck = false
+            if !isFresh(range, at: cadenceScheduler.now) {
+                isRefreshPending = true
+            }
         }
 
         guard isRefreshPending, isSceneActive else {
@@ -1033,6 +1067,10 @@ final class CalendarEventsModel {
                     fetchedWindow?.start = fetchStart
                 }
                 publishWeeks(covering: (start: fetchStart, end: fetchEnd))
+                recordFreshness(
+                    for: (start: fetchStart, end: fetchEnd),
+                    completedAt: cadenceScheduler.now
+                )
                 isSlabRetryBlocked = false
                 clearStatusIfIdle()
                 drainFetchWork()
@@ -1057,6 +1095,96 @@ final class CalendarEventsModel {
                 scheduleCadenceIfEligible()
             }
         }
+    }
+
+    // MARK: Freshness
+
+    /// One successful request's half-open date coverage and completion time.
+    private struct FreshnessCoverage {
+        let start: Date
+        let end: Date
+        let completedAt: Date
+    }
+
+    /// The visible dates plus one month on each side, clipped to the Fetched
+    /// Window. Both foreground and browsing refresh decisions use this one
+    /// calculation so freshness can never authorize a different range from
+    /// the request it suppresses or starts.
+    private func boundedRefreshRange(
+        window: (start: Date, end: Date),
+        visible: (start: Date, end: Date)
+    ) -> (start: Date, end: Date)? {
+        guard
+            let bufferedStart = addMonthsClamped(-1, to: visible.start),
+            let bufferedEnd = addMonthsClamped(1, to: visible.end)
+        else {
+            return nil
+        }
+
+        let start = max(bufferedStart, window.start)
+        let end = min(bufferedEnd, window.end)
+        return start < end ? (start, end) : nil
+    }
+
+    /// Records only successful request completion. Coverage older than the
+    /// freshness horizon can no longer satisfy a future query, so it is
+    /// discarded as newer successes arrive to keep this memory-only list
+    /// bounded during long foreground sessions.
+    private func recordFreshness(
+        for range: (start: Date, end: Date),
+        completedAt: Date
+    ) {
+        let cutoff = completedAt.addingTimeInterval(
+            -Self.refreshCadenceSeconds
+        )
+        freshnessCoverage.removeAll { coverage in
+            coverage.completedAt < cutoff
+                || (range.start <= coverage.start
+                    && range.end >= coverage.end
+                    && completedAt >= coverage.completedAt)
+        }
+        freshnessCoverage.append(
+            FreshnessCoverage(
+                start: range.start,
+                end: range.end,
+                completedAt: completedAt
+            )
+        )
+    }
+
+    /// Whether recent successful requests jointly cover every instant in a
+    /// bounded refresh range. Overlapping initial, slab, and refresh ranges
+    /// can form the coverage together; any gap makes the range stale.
+    private func isFresh(
+        _ range: (start: Date, end: Date),
+        at now: Date
+    ) -> Bool {
+        let cutoff = now.addingTimeInterval(-Self.refreshCadenceSeconds)
+        let eligible = freshnessCoverage
+            .filter {
+                $0.completedAt >= cutoff
+                    && $0.completedAt <= now
+                    && $0.end > range.start
+                    && $0.start < range.end
+            }
+            .sorted {
+                if $0.start != $1.start {
+                    return $0.start < $1.start
+                }
+                return $0.end > $1.end
+            }
+
+        var coveredThrough = range.start
+        for coverage in eligible {
+            if coverage.start > coveredThrough {
+                return false
+            }
+            coveredThrough = max(coveredThrough, coverage.end)
+            if coveredThrough >= range.end {
+                return true
+            }
+        }
+        return false
     }
 
     // MARK: Normalization
@@ -1531,7 +1659,10 @@ final class CalendarEventsModel {
 
     /// Foreground Calendar Event Refresh waits five minutes after the prior
     /// serialized Calendar Event request attempt completes.
-    private static let refreshCadence: Duration = .seconds(5 * 60)
+    private static let refreshCadenceSeconds: TimeInterval = 5 * 60
+    private static let refreshCadence: Duration = .seconds(
+        refreshCadenceSeconds
+    )
 
     /// The readable text tone on an Event Color: whichever of Planner's
     /// ink or white has the stronger APCA lightness contrast against it.
