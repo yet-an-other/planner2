@@ -41,6 +41,59 @@ extension GoogleCalendarEventsOutcome {
     }
 }
 
+@MainActor
+private final class FakeCalendarEventsCadenceScheduler:
+    CalendarEventsCadenceScheduling
+{
+    @MainActor
+    final class Schedule: CalendarEventsCadenceSchedule {
+        private(set) var isCancelled = false
+        private var action: (@MainActor @Sendable () -> Void)?
+
+        init(action: @escaping @MainActor @Sendable () -> Void) {
+            self.action = action
+        }
+
+        func cancel() {
+            isCancelled = true
+            action = nil
+        }
+
+        func fire() {
+            guard !isCancelled, let action else {
+                return
+            }
+            self.action = nil
+            action()
+        }
+
+        var isPending: Bool {
+            !isCancelled && action != nil
+        }
+    }
+
+    private(set) var scheduledDelays: [Duration] = []
+    private(set) var schedules: [Schedule] = []
+
+    func schedule(
+        after delay: Duration,
+        action: @escaping @MainActor @Sendable () -> Void
+    ) -> any CalendarEventsCadenceSchedule {
+        scheduledDelays.append(delay)
+        let schedule = Schedule(action: action)
+        schedules.append(schedule)
+        return schedule
+    }
+
+    var pendingCount: Int {
+        schedules.count(where: \.isPending)
+    }
+
+    func fireNext() {
+        schedules.first(where: \.isPending)?.fire()
+    }
+}
+
 private final class FakeEventsConnectivityMonitor:
     GoogleConnectionConnectivityMonitoring
 {
@@ -1580,6 +1633,337 @@ struct CalendarEventsModelTests {
         #expect(
             model.layout(forWeekStarting: Self.gmt(2026, 9, 21)) != nil
         )
+    }
+
+    // MARK: Foreground refresh cadence
+
+    @Test("Active cadence starts five minutes after initial fetching completes")
+    func activeCadenceStartsAfterInitialCompletion() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        var releaseInitial: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { releaseInitial = $0 }
+        }
+
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        #expect(scheduler.pendingCount == 0)
+        releaseInitial?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        )
+
+        #expect(await eventually { scheduler.pendingCount == 1 })
+        #expect(scheduler.scheduledDelays == [.seconds(5 * 60)])
+
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+        scheduler.fireNext()
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(await eventually { scheduler.pendingCount == 1 })
+    }
+
+    @Test("Slow periodic work starts its next interval only after completion")
+    func periodicCadenceIsCompletionRelative() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { scheduler.pendingCount == 1 })
+
+        var releaseRefresh: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { releaseRefresh = $0 }
+        }
+        scheduler.fireNext()
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(scheduler.pendingCount == 0)
+        #expect(scheduler.scheduledDelays.count == 1)
+
+        releaseRefresh?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        )
+        #expect(await eventually { scheduler.pendingCount == 1 })
+        #expect(scheduler.scheduledDelays.count == 2)
+    }
+
+    @Test("Inactive scenes cancel cadence and reactivate with an immediate refresh")
+    func inactivePausesAndForegroundResumesCadence() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { scheduler.pendingCount == 1 })
+
+        model.setSceneActive(false)
+        #expect(scheduler.pendingCount == 0)
+        scheduler.fireNext()
+        #expect(await neverHappens { adapter.fetchCallCount > 1 })
+
+        model.setSceneActive(true)
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(await eventually { scheduler.pendingCount == 1 })
+    }
+
+    @Test("Disconnect cancels cadence and reconnect restores it for the visible range")
+    func disconnectCancelsAndReconnectRestoresCadence() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { scheduler.pendingCount == 1 })
+
+        model.setConnected(false)
+        #expect(scheduler.pendingCount == 0)
+        scheduler.fireNext()
+
+        #expect(await neverHappens { adapter.fetchCallCount > 1 })
+        #expect(model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) == nil)
+
+        // The Calendar Screen has not scrolled or changed geometry. Its last
+        // visible range still lets the active reconnection establish cadence
+        // after the new initial request completes.
+        model.setConnected(true)
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(await eventually { scheduler.pendingCount == 1 })
+    }
+
+    @Test("A failed periodic refresh retries at the next active interval")
+    func failedPeriodicRefreshRetriesAtNextInterval() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 2 {
+                return .unavailable(.failed)
+            }
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { scheduler.pendingCount == 1 })
+
+        scheduler.fireNext()
+        #expect(
+            await eventually {
+                adapter.fetchCallCount == 2
+                    && model.status.message == CalendarEventsCopy.refreshFailed
+                    && scheduler.pendingCount == 1
+            }
+        )
+
+        scheduler.fireNext()
+        #expect(
+            await eventually {
+                adapter.fetchCallCount == 3
+                    && model.status.message == nil
+                    && scheduler.pendingCount == 1
+            }
+        )
+    }
+
+    @Test("Timer and lifecycle signals coalesce behind one in-flight refresh")
+    func cadenceSignalsCoalesceUsingLatestVisibleRange() async {
+        let (model, adapter, monitor, scheduler) =
+            makeModelWithMonitorAndScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { scheduler.pendingCount == 1 })
+
+        var fetchNumber = 1
+        var releaseRefresh: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 2 {
+                return await withCheckedContinuation { releaseRefresh = $0 }
+            }
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+        scheduler.fireNext()
+        #expect(await eventually { releaseRefresh != nil })
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 27),
+            through: Self.gmt(2026, 8, 10)
+        )
+        model.refreshOnForeground()
+        model.refreshOnForeground()
+        monitor.simulateConnectivityReturn()
+        releaseRefresh?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        let followUpRange = adapter.fetchedRanges.last
+        #expect(followUpRange?.start == Self.gmt(2026, 6, 27))
+        #expect(followUpRange?.end == Self.gmt(2026, 9, 10))
+        #expect(await neverHappens { adapter.fetchCallCount > 3 })
+    }
+
+    @Test("A no-overlap cadence decision stays owed and re-arms its interval")
+    func noOverlapRefreshRearmsCadence() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { scheduler.pendingCount == 1 })
+
+        adapter.fetchHandler = { _, _ in .unavailable(.failed) }
+        model.showVisibleRange(
+            from: Self.gmt(2027, 1, 4),
+            through: Self.gmt(2027, 2, 1)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(await eventually { scheduler.pendingCount == 1 })
+
+        let scheduleCount = scheduler.scheduledDelays.count
+        scheduler.fireNext()
+
+        #expect(await neverHappens { adapter.fetchCallCount > 2 })
+        #expect(scheduler.pendingCount == 1)
+        #expect(scheduler.scheduledDelays.count == scheduleCount + 1)
+
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+    }
+
+    @Test("A slab resets cadence until the slab attempt completes")
+    func slabCompletionResetsCadence() async {
+        let (model, adapter, scheduler) = makeModelWithScheduler()
+        model.setSceneActive(true)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.setConnected(true)
+        #expect(await eventually { scheduler.pendingCount == 1 })
+
+        var releaseSlab: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            await withCheckedContinuation { releaseSlab = $0 }
+        }
+        model.showVisibleRange(
+            from: Self.gmt(2026, 8, 31),
+            through: Self.gmt(2026, 10, 5)
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(scheduler.pendingCount == 0)
+        releaseSlab?.resume(
+            returning: .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: []
+            )
+        )
+        #expect(await eventually { scheduler.pendingCount == 1 })
+    }
+
+    @Test("Model teardown cancels cadence and connectivity observation")
+    func teardownCancelsCadenceAndObservation() async {
+        let adapter = FakeGoogleCalendarEventsAdapter()
+        let monitor = FakeEventsConnectivityMonitor()
+        let scheduler = FakeCalendarEventsCadenceScheduler()
+        var model: CalendarEventsModel? = CalendarEventsModel(
+            environment: Self.makeEnvironment(),
+            adapter: adapter,
+            connectivityMonitor: monitor,
+            cadenceScheduler: scheduler
+        )
+        model?.setSceneActive(true)
+        model?.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model?.setConnected(true)
+        #expect(await eventually { scheduler.pendingCount == 1 })
+
+        weak let weakModel = model
+        model = nil
+
+        #expect(weakModel == nil)
+        #expect(scheduler.pendingCount == 0)
+        #expect(monitor.stopCallCount == 1)
+    }
+
+    @Test("Disconnected and release-gated-off models own no cadence")
+    func inertModelsOwnNoCadence() {
+        let scheduler = FakeCalendarEventsCadenceScheduler()
+        let disconnected = CalendarEventsModel(
+            environment: Self.makeEnvironment(),
+            adapter: FakeGoogleCalendarEventsAdapter(),
+            cadenceScheduler: scheduler
+        )
+        disconnected.setSceneActive(true)
+        disconnected.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+
+        let gatedOff = CalendarEventsModel(
+            environment: Self.makeEnvironment(),
+            adapter: nil,
+            cadenceScheduler: scheduler
+        )
+        gatedOff.setSceneActive(true)
+        gatedOff.setConnected(true)
+
+        #expect(scheduler.pendingCount == 0)
+        #expect(scheduler.scheduledDelays.isEmpty)
     }
 
     // MARK: Fetched Window expansion
@@ -3225,6 +3609,43 @@ struct CalendarEventsModelTests {
             connectivityMonitor: monitor
         )
         return (model, adapter, monitor)
+    }
+
+    private func makeModelWithScheduler(
+        environment: CalendarEnvironment = Self.makeEnvironment()
+    ) -> (
+        CalendarEventsModel,
+        FakeGoogleCalendarEventsAdapter,
+        FakeCalendarEventsCadenceScheduler
+    ) {
+        let adapter = FakeGoogleCalendarEventsAdapter()
+        let scheduler = FakeCalendarEventsCadenceScheduler()
+        let model = CalendarEventsModel(
+            environment: environment,
+            adapter: adapter,
+            cadenceScheduler: scheduler
+        )
+        return (model, adapter, scheduler)
+    }
+
+    private func makeModelWithMonitorAndScheduler(
+        environment: CalendarEnvironment = Self.makeEnvironment()
+    ) -> (
+        CalendarEventsModel,
+        FakeGoogleCalendarEventsAdapter,
+        FakeEventsConnectivityMonitor,
+        FakeCalendarEventsCadenceScheduler
+    ) {
+        let adapter = FakeGoogleCalendarEventsAdapter()
+        let monitor = FakeEventsConnectivityMonitor()
+        let scheduler = FakeCalendarEventsCadenceScheduler()
+        let model = CalendarEventsModel(
+            environment: environment,
+            adapter: adapter,
+            connectivityMonitor: monitor,
+            cadenceScheduler: scheduler
+        )
+        return (model, adapter, monitor, scheduler)
     }
 
     private func layoutEventually(

@@ -113,6 +113,67 @@ protocol GoogleCalendarEventsAdapting {
     ) async -> GoogleCalendarEventsOutcome
 }
 
+/// One cancellable wait owned by the Calendar Events cadence.
+@MainActor
+protocol CalendarEventsCadenceSchedule: AnyObject {
+    func cancel()
+}
+
+/// The deterministic boundary for Calendar Event Refresh cadence. Production
+/// sleeps with a Task; tests retain and fire the supplied action directly.
+@MainActor
+protocol CalendarEventsCadenceScheduling: AnyObject {
+    func schedule(
+        after delay: Duration,
+        action: @escaping @MainActor @Sendable () -> Void
+    ) -> any CalendarEventsCadenceSchedule
+}
+
+/// The live completion-relative cadence scheduler.
+@MainActor
+final class TaskCalendarEventsCadenceScheduler: CalendarEventsCadenceScheduling {
+    func schedule(
+        after delay: Duration,
+        action: @escaping @MainActor @Sendable () -> Void
+    ) -> any CalendarEventsCadenceSchedule {
+        TaskCalendarEventsCadenceSchedule(delay: delay, action: action)
+    }
+}
+
+/// A Task-backed wait whose cancellation never invokes its action.
+@MainActor
+private final class TaskCalendarEventsCadenceSchedule:
+    CalendarEventsCadenceSchedule
+{
+    private var task: Task<Void, Never>?
+
+    init(
+        delay: Duration,
+        action: @escaping @MainActor @Sendable () -> Void
+    ) {
+        task = Task { @MainActor in
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else {
+                return
+            }
+            action()
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+    }
+
+    deinit {
+        task?.cancel()
+    }
+}
+
 /// The iOS Header Status content published by the Calendar Events model:
 /// fetch progress, fetch failures, and offline conditions in Planner-owned
 /// copy. A `nil` message leaves the row to the connection's own status.
@@ -297,6 +358,11 @@ final class CalendarEventsModel {
     @ObservationIgnored
     private let connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)?
 
+    /// The one scheduling boundary for completion-relative foreground
+    /// cadence. It owns no model state and never persists freshness.
+    @ObservationIgnored
+    private let cadenceScheduler: any CalendarEventsCadenceScheduling
+
     @ObservationIgnored
     private var environment: CalendarEnvironment
 
@@ -349,6 +415,16 @@ final class CalendarEventsModel {
     @ObservationIgnored
     private var isSlabRetryBlocked = false
 
+    /// Whether the iOS scene is foreground-active. Calendar Event Refresh
+    /// cadence exists only while this and the connection are both active.
+    @ObservationIgnored
+    private var isSceneActive = false
+
+    /// The single cancellable five-minute wait. A new Calendar Event request
+    /// cancels it; the next wait begins only after serialized work completes.
+    @ObservationIgnored
+    private var cadenceSchedule: (any CalendarEventsCadenceSchedule)?
+
     /// Whether the module currently treats the Google Account Connection
     /// as connected; repeated reports of the same state are no-ops, so a
     /// republished connection can never wedge or duplicate a fetch.
@@ -367,20 +443,24 @@ final class CalendarEventsModel {
     init(
         environment: CalendarEnvironment,
         adapter: (any GoogleCalendarEventsAdapting)?,
-        connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)? = nil
+        connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)? = nil,
+        cadenceScheduler: any CalendarEventsCadenceScheduling =
+            TaskCalendarEventsCadenceScheduler()
     ) {
         self.environment = environment
         self.adapter = adapter
         self.connectivityMonitor = connectivityMonitor
+        self.cadenceScheduler = cadenceScheduler
         connectivityMonitor?.start { [weak self] in
             self?.handleConnectivityReturn()
         }
     }
 
-    /// The module's lifetime end stops connectivity observation; in-flight
-    /// asynchronous work captures the module weakly and is ignored once the
-    /// module is gone.
+    /// The module's lifetime end cancels foreground cadence and stops
+    /// connectivity observation. Scheduled actions and asynchronous fetches
+    /// capture the module weakly, so neither can retain it.
     isolated deinit {
+        cadenceSchedule?.cancel()
         connectivityMonitor?.stop()
     }
 
@@ -404,6 +484,7 @@ final class CalendarEventsModel {
         connectionGeneration += 1
 
         guard connected else {
+            cancelCadence()
             fetchedWindow = nil
             normalizedEvents = []
             // The active request keeps its operation flag until its adapter
@@ -412,7 +493,6 @@ final class CalendarEventsModel {
             isRefreshPending = false
             refreshFailure = nil
             isSlabRetryBlocked = false
-            lastVisibleRange = nil
             weekLayouts = [:]
             status = CalendarEventsStatus(message: nil, tone: .info)
             return
@@ -446,6 +526,7 @@ final class CalendarEventsModel {
             return
         }
 
+        cancelCadence()
         isFetchingInitialWindow = true
         status = CalendarEventsStatus(
             message: CalendarEventsCopy.loading,
@@ -488,6 +569,7 @@ final class CalendarEventsModel {
                 publishWeeks(covering: (start: windowStart, end: windowEnd))
                 clearStatusIfIdle()
                 drainFetchWork()
+                scheduleCadenceIfEligible()
             case .unavailable(let failure):
                 status = switch failure {
                 case .offline:
@@ -501,16 +583,51 @@ final class CalendarEventsModel {
                         tone: .error
                     )
                 }
+                scheduleCadenceIfEligible()
             }
         }
+    }
+
+    /// Publishes foreground-active versus inactive scene state. Foreground
+    /// entry requests the immediate bounded refresh delivered by the refresh
+    /// slice; leaving the foreground cancels cadence and any queued refresh
+    /// signal while allowing a physical request already in flight to finish.
+    func setSceneActive(_ active: Bool) {
+        guard active != isSceneActive else {
+            return
+        }
+
+        isSceneActive = active
+        guard active else {
+            isRefreshPending = false
+            cancelCadence()
+            return
+        }
+        guard isConnected, let adapter else {
+            return
+        }
+        if fetchedWindow == nil {
+            beginInitialFetch(adapter: adapter)
+            return
+        }
+        requestRefresh()
     }
 
     /// Requests a bounded Calendar Event Refresh after the app returns to
     /// the foreground. One pending signal survives initial, slab, or refresh
     /// work and later uses the newest visible range.
     func refreshOnForeground() {
-        guard adapter != nil, isConnected, fetchedWindow != nil,
-              lastVisibleRange != nil
+        if isSceneActive {
+            requestRefresh()
+        } else {
+            setSceneActive(true)
+        }
+    }
+
+    /// Coalesces one refresh signal against current scene and range state.
+    private func requestRefresh() {
+        guard adapter != nil, isConnected, isSceneActive,
+              fetchedWindow != nil, lastVisibleRange != nil
         else {
             return
         }
@@ -525,20 +642,21 @@ final class CalendarEventsModel {
         adapter: any GoogleCalendarEventsAdapting,
         window: (start: Date, end: Date),
         visible: (start: Date, end: Date)
-    ) {
+    ) -> Bool {
         guard
             let bufferedStart = addMonthsClamped(-1, to: visible.start),
             let bufferedEnd = addMonthsClamped(1, to: visible.end)
         else {
-            return
+            return false
         }
 
         let refreshStart = max(bufferedStart, window.start)
         let refreshEnd = min(bufferedEnd, window.end)
         guard refreshStart < refreshEnd else {
-            return
+            return false
         }
 
+        cancelCadence()
         isRefreshingEvents = true
         let attempt = connectionGeneration
         Task { [weak self] in
@@ -574,7 +692,9 @@ final class CalendarEventsModel {
                 clearStatusIfIdle()
             }
             drainFetchWork()
+            scheduleCadenceIfEligible()
         }
+        return true
     }
 
     /// Atomically replaces Calendar Events intersecting one successful
@@ -685,7 +805,7 @@ final class CalendarEventsModel {
         } else if isRefreshingEvents || refreshFailure != nil {
             // Preserve this recovery signal if the request that observed the
             // offline state has not completed yet.
-            refreshOnForeground()
+            requestRefresh()
         } else if let lastVisibleRange {
             showVisibleRange(
                 from: lastVisibleRange.start,
@@ -730,6 +850,7 @@ final class CalendarEventsModel {
         lastVisibleRange = (visibleStart, visibleEnd)
         isSlabRetryBlocked = false
         drainFetchWork()
+        scheduleCadenceIfEligible()
     }
 
     /// Calendar API requests share one serialized seam. Slab expansion leads
@@ -783,11 +904,44 @@ final class CalendarEventsModel {
             return
         }
 
-        guard isRefreshPending else {
+        guard isRefreshPending, isSceneActive else {
             return
         }
         isRefreshPending = false
-        beginRefresh(adapter: adapter, window: window, visible: visible)
+        if !beginRefresh(adapter: adapter, window: window, visible: visible) {
+            // A visible range can sit beyond a failed expansion slab. Keep
+            // the coalesced refresh owed, but re-arm cadence instead of
+            // losing it or spinning while no bounded overlap exists.
+            isRefreshPending = true
+            scheduleCadenceIfEligible()
+        }
+    }
+
+    /// Starts one five-minute wait only when bounded refresh has every input
+    /// it needs. The wait begins after all immediately coalesced fetch work
+    /// drains, making cadence completion-relative instead of wall-clock based.
+    private func scheduleCadenceIfEligible() {
+        guard cadenceSchedule == nil, !hasFetchInFlight, isConnected,
+              isSceneActive, fetchedWindow != nil, lastVisibleRange != nil
+        else {
+            return
+        }
+        cadenceSchedule = cadenceScheduler.schedule(
+            after: Self.refreshCadence
+        ) { [weak self] in
+            guard let self else {
+                return
+            }
+            cadenceSchedule = nil
+            requestRefresh()
+        }
+    }
+
+    /// Cancels the pending interval synchronously. Its action captures the
+    /// model weakly, so scheduler ownership can never extend model lifetime.
+    private func cancelCadence() {
+        cadenceSchedule?.cancel()
+        cadenceSchedule = nil
     }
 
     private var hasFetchInFlight: Bool {
@@ -805,6 +959,7 @@ final class CalendarEventsModel {
             beginInitialFetch(adapter: adapter)
         } else {
             drainFetchWork()
+            scheduleCadenceIfEligible()
         }
     }
 
@@ -825,6 +980,7 @@ final class CalendarEventsModel {
         to fetchEnd: Date,
         direction: ExtensionDirection
     ) {
+        cancelCadence()
         let attempt = connectionGeneration
         status = CalendarEventsStatus(
             message: CalendarEventsCopy.loading,
@@ -880,6 +1036,7 @@ final class CalendarEventsModel {
                 isSlabRetryBlocked = false
                 clearStatusIfIdle()
                 drainFetchWork()
+                scheduleCadenceIfEligible()
             case .unavailable(let failure):
                 status = switch failure {
                 case .offline:
@@ -897,6 +1054,7 @@ final class CalendarEventsModel {
                 // foreground refresh may still run inside the fetched range.
                 isSlabRetryBlocked = true
                 drainFetchWork(allowSlab: false)
+                scheduleCadenceIfEligible()
             }
         }
     }
@@ -1370,6 +1528,10 @@ final class CalendarEventsModel {
     /// 96-point height; further lanes count into Events Overflow instead
     /// of rendering.
     private static let maxVisibleBarLanes = 3
+
+    /// Foreground Calendar Event Refresh waits five minutes after the prior
+    /// serialized Calendar Event request attempt completes.
+    private static let refreshCadence: Duration = .seconds(5 * 60)
 
     /// The readable text tone on an Event Color: whichever of Planner's
     /// ink or white has the stronger APCA lightness contrast against it.

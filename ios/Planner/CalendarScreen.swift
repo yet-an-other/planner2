@@ -75,9 +75,11 @@ struct CalendarScreen: View {
             model.layoutDirection == .rightToLeft ? .rightToLeft : .leftToRight
         )
         .task {
-            // The events module follows the connection: fetch while
-            // connected, clear on Disconnect on This Device. While the gate
-            // is off, neither module exists and nothing changes here.
+            // The events module follows both scene and connection lifecycle:
+            // Calendar Event Refresh cadence exists only while foreground-
+            // active and connected. While the gate is off, neither module
+            // exists and nothing changes here.
+            events?.setSceneActive(scenePhase == .active)
             events?.setConnected(connection?.isConnected ?? false)
         }
         .onChange(of: connection?.control) { _, control in
@@ -87,14 +89,15 @@ struct CalendarScreen: View {
             midnightScheduleGeneration += 1
             if nextScenePhase == .active {
                 refreshCalendarGrid()
-                // Refresh the latest visible dates silently before the
-                // connection module performs its independent authorization
-                // revalidation. Initial loading absorbs this signal.
+                // Report the newest visible dates before foreground entry
+                // requests its immediate bounded Calendar Event Refresh.
                 reportVisibleRange()
-                events?.refreshOnForeground()
+                events?.setSceneActive(true)
                 // A foreground refresh asks the module to revalidate the
                 // connection; no SDK detail crosses this boundary.
                 connection?.validateOnForeground()
+            } else {
+                events?.setSceneActive(false)
             }
         }
         .onReceive(
