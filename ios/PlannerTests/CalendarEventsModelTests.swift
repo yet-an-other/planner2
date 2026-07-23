@@ -241,16 +241,7 @@ struct CalendarEventsModelTests {
                     startTimeText: timeFormatter.string(
                         from: Self.gmt(2026, 7, 20, 9, 30)
                     ),
-                    colorHex: "#039BE5",
-                    detail: CalendarEventDetail(
-                        title: "Standup",
-                        colorHex: "#039BE5",
-                        timingText:
-                            "\(Self.fullDateText(Self.gmt(2026, 7, 20))) · "
-                            + timeFormatter.string(from: Self.gmt(2026, 7, 20, 9, 30))
-                            + " – "
-                            + timeFormatter.string(from: Self.gmt(2026, 7, 20, 10, 15))
-                    )
+                    colorHex: "#039BE5"
                 ),
             ]
         )
@@ -293,13 +284,7 @@ struct CalendarEventsModelTests {
                     startColumn: 2,
                     endColumn: 2,
                     isStartTruncated: false,
-                    isEndTruncated: false,
-                    detail: CalendarEventDetail(
-                        title: "Holiday",
-                        colorHex: "#039BE5",
-                        timingText:
-                            "All day · \(Self.fullDateText(Self.gmt(2026, 7, 22)))"
-                    )
+                    isEndTruncated: false
                 ),
             ]
         )
@@ -1107,6 +1092,235 @@ struct CalendarEventsModelTests {
                     .cells[0].rows.first?.title == "After"
             }
         )
+    }
+
+    @Test("An open Event Detail Popover follows a canonical edit and move")
+    func selectedEventFollowsCanonicalEditAndMove() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 1 {
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "selected",
+                            summary: "Before",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false,
+                            googleLink: "https://calendar.google.com/before",
+                            location: "Room 1",
+                            notes: "Old notes",
+                            attendees: [
+                                GoogleCalendarEventAttendee(
+                                    displayName: "Ada",
+                                    email: "ada@example.com",
+                                    responseStatus: "needsAction"
+                                ),
+                            ]
+                        ),
+                    ]
+                )
+            }
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "selected",
+                        summary: "After",
+                        colorId: "updated-color",
+                        start: .timed(Self.gmt(2026, 7, 21, 11)),
+                        end: .timed(Self.gmt(2026, 7, 21, 12, 30)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        googleLink: "https://calendar.google.com/after",
+                        location: "Room 2",
+                        notes: "<p>New <b>notes</b></p>",
+                        attendees: [
+                            GoogleCalendarEventAttendee(
+                                displayName: "Ada Lovelace",
+                                email: "ada@example.com",
+                                responseStatus: "accepted"
+                            ),
+                            GoogleCalendarEventAttendee(
+                                displayName: nil,
+                                email: "grace@example.com",
+                                responseStatus: "tentative"
+                            ),
+                        ]
+                    ),
+                ],
+                eventColorBackgrounds: ["updated-color": "#D50000"]
+            )
+        }
+
+        model.setConnected(true)
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        model.selectEvent(withID: "selected")
+        #expect(model.selectedEvent?.id == "selected")
+        #expect(model.selectedEvent?.detail.title == "Before")
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(
+            await eventually {
+                model.selectedEvent?.detail.title == "After"
+            }
+        )
+        let detail = model.selectedEvent?.detail
+        #expect(model.selectedEvent?.id == "selected")
+        #expect(detail?.colorHex == "#D50000")
+        #expect(
+            detail?.timingText
+                == "\(Self.fullDateText(Self.gmt(2026, 7, 21))) · "
+                    + Self.timeText(Self.gmt(2026, 7, 21, 11))
+                    + " – "
+                    + Self.timeText(Self.gmt(2026, 7, 21, 12, 30))
+        )
+        #expect(detail?.location == "Room 2")
+        #expect(detail?.notes == "New notes")
+        #expect(
+            detail?.attendees == [
+                CalendarEventAttendee(label: "Ada Lovelace", status: .accepted),
+                CalendarEventAttendee(label: "grace@example.com", status: .tentative),
+            ]
+        )
+        #expect(detail?.googleLink == "https://calendar.google.com/after")
+        #expect(
+            model.layout(forWeekStarting: Self.gmt(2026, 7, 20))?
+                .cells[1].rows.map(\.id) == ["selected"]
+        )
+    }
+
+    @Test("Bounded replacement dismisses a selected event that disappears")
+    func boundedReplacementDismissesSelectedEventThatDisappears() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: fetchNumber == 1
+                    ? [
+                        GoogleCalendarEvent(
+                            id: "selected",
+                            summary: "Selected",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                    : []
+            )
+        }
+
+        model.setConnected(true)
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        model.selectEvent(withID: "selected")
+        #expect(model.selectedEvent != nil)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(await eventually { model.selectedEvent == nil })
+    }
+
+    @Test("A declined canonical replacement dismisses its selected event")
+    func declinedReplacementDismissesSelectedEvent() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "selected",
+                        summary: "Selected",
+                        start: .timed(Self.gmt(2026, 7, 20, 9)),
+                        end: .timed(Self.gmt(2026, 7, 20, 10)),
+                        isCancelled: false,
+                        isDeclinedByViewer: fetchNumber > 1
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        model.selectEvent(withID: "selected")
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(await eventually { model.selectedEvent == nil })
+    }
+
+    @Test("A failed refresh leaves the selected detail unchanged")
+    func failedRefreshLeavesSelectedDetailUnchanged() async {
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber > 1 {
+                return .unavailable(.failed)
+            }
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "selected",
+                        summary: "Selected",
+                        start: .timed(Self.gmt(2026, 7, 20, 9)),
+                        end: .timed(Self.gmt(2026, 7, 20, 10)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false,
+                        notes: "Keep this"
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        model.selectEvent(withID: "selected")
+        let selectedBeforeRefresh = model.selectedEvent
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(
+            await eventually {
+                model.status.message == CalendarEventsCopy.refreshFailed
+            }
+        )
+        #expect(model.selectedEvent == selectedBeforeRefresh)
     }
 
     @Test("Foreground refresh clamps its buffer to the Fetched Window")
@@ -3292,8 +3506,8 @@ struct CalendarEventsModelTests {
 
     // MARK: Event Detail Popover payload
 
-    @Test("A bar segment carries its event's detail with the all-day timing line")
-    func barSegmentCarriesAllDayDetail() async {
+    @Test("A bar segment selects canonical detail with the all-day timing line")
+    func barSegmentSelectsAllDayDetail() async {
         let (model, adapter) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
@@ -3314,8 +3528,9 @@ struct CalendarEventsModelTests {
         model.setConnected(true)
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(layout?.bars.first?.id == "holiday")
         #expect(
-            layout?.bars.first?.detail
+            selectedDetail(model, id: "holiday")
                 == CalendarEventDetail(
                     title: "Holiday",
                     colorHex: "#039BE5",
@@ -3347,9 +3562,12 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
         #expect(
-            layout?.bars.first?.detail.timingText
+            selectedDetail(model, id: "trip")?.timingText
                 == "All day · \(Self.dayMonthYearText(Self.gmt(2026, 7, 22)))"
                     + " – \(Self.dayMonthYearText(Self.gmt(2026, 7, 24)))"
         )
@@ -3376,9 +3594,12 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
         #expect(
-            layout?.bars.first?.detail.timingText
+            selectedDetail(model, id: "hackathon")?.timingText
                 == "\(Self.dayMonthYearText(Self.gmt(2026, 7, 21))), "
                     + "\(Self.timeText(Self.gmt(2026, 7, 21, 22, 0)))"
                     + " – \(Self.dayMonthYearText(Self.gmt(2026, 7, 23))), "
@@ -3386,8 +3607,8 @@ struct CalendarEventsModelTests {
         )
     }
 
-    @Test("Every segment of a week-crossing bar carries the same event's detail")
-    func weekCrossingBarSegmentsCarrySameDetail() async {
+    @Test("Every segment of a week-crossing bar carries one canonical identity")
+    func weekCrossingBarSegmentsCarryCanonicalIdentity() async {
         let (model, adapter) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
@@ -3410,8 +3631,9 @@ struct CalendarEventsModelTests {
         #expect(await layoutEventually(model, weekStart: Self.gmt(2026, 7, 27)) != nil)
         let firstWeek = model.layout(forWeekStarting: Self.gmt(2026, 7, 20))
         let secondWeek = model.layout(forWeekStarting: Self.gmt(2026, 7, 27))
-        #expect(firstWeek?.bars.first?.detail != nil)
-        #expect(firstWeek?.bars.first?.detail == secondWeek?.bars.first?.detail)
+        #expect(firstWeek?.bars.first?.id == "conference")
+        #expect(secondWeek?.bars.first?.id == "conference")
+        #expect(selectedDetail(model, id: "conference")?.title == "Conference")
     }
 
     @Test("The timing line follows the environment's timezone")
@@ -3462,7 +3684,7 @@ struct CalendarEventsModelTests {
         fullDateFormatter.timeZone = kiritimati
         fullDateFormatter.setLocalizedDateFormatFromTemplate("yMMMEd")
 
-        let layout = await layoutEventually(model, weekStart: weekStart)
+        #expect(await layoutEventually(model, weekStart: weekStart) != nil)
         // Locally Wednesday 13:30–14:30: a row reading the local day and
         // times, never the GMT dates.
         let timeFormatter = DateFormatter()
@@ -3470,7 +3692,7 @@ struct CalendarEventsModelTests {
         timeFormatter.locale = Locale(identifier: "en_US_POSIX")
         timeFormatter.timeZone = kiritimati
         timeFormatter.setLocalizedDateFormatFromTemplate("jm")
-        let timingText = layout?.cells[2].rows.first?.detail.timingText
+        let timingText = selectedDetail(model, id: "island-time")?.timingText
         #expect(
             timingText
                 == fullDateFormatter.string(from: localDate)
@@ -3499,14 +3721,19 @@ struct CalendarEventsModelTests {
         }
 
         model.setConnected(true)
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        #expect(layout?.cells[2].rows.first?.detail != nil)
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        model.selectEvent(withID: "event")
+        #expect(model.selectedEvent != nil)
 
         model.setConnected(false)
 
-        // No published layout remains to render detail from — an open
-        // popover dismisses as a consequence (iOS ADR 0005).
+        // Canonical Calendar Events and their identity-based presentation
+        // selection clear together (iOS ADRs 0003 and 0005).
         #expect(model.layout(forWeekStarting: Self.gmt(2026, 7, 20)) == nil)
+        #expect(model.selectedEvent == nil)
     }
 
     @Test("An event's detail carries its trimmed location and its Google link")
@@ -3532,8 +3759,11 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        let detail = layout?.cells[2].rows.first?.detail
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        let detail = selectedDetail(model, id: "review")
         #expect(detail?.location == "Studio 4, King Street")
         #expect(
             detail?.googleLink
@@ -3580,8 +3810,13 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        let details = layout?.cells[2].rows.map(\.detail) ?? []
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        let details = ["sparse", "blank-location", "blank-link"].compactMap {
+            selectedDetail(model, id: $0)
+        }
         // Sparse events stay clean: no Where section, no footer.
         #expect(details.map(\.location) == [nil, nil, nil])
         #expect(details.map(\.googleLink) == [nil, nil, nil])
@@ -3610,9 +3845,12 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
         #expect(
-            layout?.cells[2].rows.first?.detail.notes
+            selectedDetail(model, id: "picnic")?.notes
                 == "Bring snacks & water.\nSee https://example.com/plan"
         )
     }
@@ -3647,11 +3885,11 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(
+        #expect(await layoutEventually(
             model,
             weekStart: Self.gmt(2026, 7, 20)
-        )
-        #expect(layout?.cells[2].rows.first?.detail.notes == notes)
+        ) != nil)
+        #expect(selectedDetail(model, id: "flight-os-368")?.notes == notes)
     }
 
     @Test("Compact Event Detail Popovers fill the sheet width")
@@ -3694,9 +3932,12 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
         #expect(
-            layout?.cells[2].rows.first?.detail.notes
+            selectedDetail(model, id: "flight")?.notes
                 == "Flight to Copenhagen, CPH arrival 11:05."
         )
     }
@@ -3731,8 +3972,14 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        #expect(layout?.cells[2].rows.map(\.detail.notes) == [nil, nil])
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        let notes = ["no-notes", "markup-only"].compactMap {
+            selectedDetail(model, id: $0)?.notes
+        }
+        #expect(notes.isEmpty)
     }
 
     @Test("Attendees map display-name primary with email fallback and status text")
@@ -3792,9 +4039,13 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        let detail = selectedDetail(model, id: "workshop")
         #expect(
-            layout?.cells[2].rows.first?.detail.attendees == [
+            detail?.attendees == [
                 CalendarEventAttendee(label: "Ada Lovelace", status: .accepted),
                 CalendarEventAttendee(label: "grace@example.com", status: .declined),
                 CalendarEventAttendee(label: "alan@example.com", status: .tentative),
@@ -3803,10 +4054,10 @@ struct CalendarEventsModelTests {
             ]
         )
         #expect(
-            layout?.cells[2].rows.first?.detail.attendees.map(\.status.displayText)
+            detail?.attendees.map(\.status.displayText)
                 == ["accepted", "declined", "tentative", "invited", "unknown"]
         )
-        #expect(layout?.cells[2].rows.first?.detail.hiddenAttendeeCount == 0)
+        #expect(detail?.hiddenAttendeeCount == 0)
     }
 
     @Test("Six or more attendees cap at five with a hidden count")
@@ -3837,8 +4088,11 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        let detail = layout?.cells[2].rows.first?.detail
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        let detail = selectedDetail(model, id: "all-hands")
         #expect(detail?.attendees.map(\.label) == (1...5).map { "Person \($0)" })
         #expect(detail?.hiddenAttendeeCount == 2)
     }
@@ -3864,8 +4118,11 @@ struct CalendarEventsModelTests {
 
         model.setConnected(true)
 
-        let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        let detail = layout?.cells[2].rows.first?.detail
+        #expect(await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        ) != nil)
+        let detail = selectedDetail(model, id: "focus")
         #expect(detail?.attendees == [])
         #expect(detail?.hiddenAttendeeCount == 0)
     }
@@ -3990,6 +4247,14 @@ struct CalendarEventsModelTests {
             cadenceScheduler: scheduler
         )
         return (model, adapter, monitor, scheduler)
+    }
+
+    private func selectedDetail(
+        _ model: CalendarEventsModel,
+        id: String
+    ) -> CalendarEventDetail? {
+        model.selectEvent(withID: id)
+        return model.selectedEvent?.detail
     }
 
     private func layoutEventually(

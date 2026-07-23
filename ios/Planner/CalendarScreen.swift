@@ -8,6 +8,7 @@ struct CalendarScreen: View {
     @State private var scrollPosition: WeekRow.ID?
     @State private var midnightScheduleGeneration = 0
     @State private var scrollViewportHeight: CGFloat = 0
+    @State private var preferredEventDetailAnchor: CalendarEventDetailAnchor?
 
     private let currentEnvironment: @MainActor () -> CalendarEnvironment
     private let connection: GoogleAccountConnection?
@@ -28,6 +29,10 @@ struct CalendarScreen: View {
     }
 
     var body: some View {
+        // Read the model-owned selection in this presentation tree so
+        // Observation invalidates the popover binding for update or dismissal.
+        let selectedEventAnchor = resolvedEventDetailAnchor()
+
         VStack(spacing: 0) {
             IOSCalendarHeader(
                 visibleMonth: model.visibleMonth,
@@ -43,7 +48,14 @@ struct CalendarScreen: View {
                     ForEach(model.weekRows) { weekRow in
                         WeekRowView(
                             weekRow: weekRow,
-                            eventWeek: events?.layout(forWeekStarting: weekRow.id)
+                            eventWeek: events?.layout(forWeekStarting: weekRow.id),
+                            events: events,
+                            selectedEventAnchor: selectedEventAnchor,
+                            onSelectEvent: { eventID, anchor in
+                                preferredEventDetailAnchor = anchor
+                                events?.selectEvent(withID: eventID)
+                            },
+                            onRequestDismiss: requestEventDetailDismissal
                         )
                     }
                 }
@@ -152,6 +164,70 @@ struct CalendarScreen: View {
                 message: content.message,
                 tone: content.tone
             )
+        }
+    }
+
+    /// Resolves one native popover anchor for the selected canonical identity.
+    /// The tapped segment remains preferred while it exists. If replacement
+    /// moves the event to another Date Cell or Week Row, the new layout item
+    /// becomes the anchor without changing model-owned selection.
+    private func resolvedEventDetailAnchor() -> CalendarEventDetailAnchor? {
+        guard let events, let selectedEvent = events.selectedEvent else {
+            return nil
+        }
+        let candidates: [CalendarEventDetailAnchor] = events.weekLayouts
+            .sorted { $0.key < $1.key }
+            .flatMap { weekStart, layout -> [CalendarEventDetailAnchor] in
+                let barAnchors = layout.bars
+                    .filter { $0.id == selectedEvent.id }
+                    .map {
+                        CalendarEventDetailAnchor.bar(
+                            eventID: $0.id,
+                            weekStart: weekStart
+                        )
+                    }
+                let rowAnchors: [CalendarEventDetailAnchor] = layout.cells
+                    .enumerated()
+                    .flatMap { column, cell -> [CalendarEventDetailAnchor] in
+                        guard let date = currentEnvironment().calendar.date(
+                            byAdding: .day,
+                            value: column,
+                            to: weekStart
+                        ) else {
+                            return []
+                        }
+                        return cell.rows
+                            .filter { $0.id == selectedEvent.id }
+                            .map {
+                                CalendarEventDetailAnchor.row(
+                                    eventID: $0.id,
+                                    date: date
+                                )
+                            }
+                    }
+                return barAnchors + rowAnchors
+            }
+        if let preferredEventDetailAnchor,
+           candidates.contains(preferredEventDetailAnchor)
+        {
+            return preferredEventDetailAnchor
+        }
+        return candidates.first
+    }
+
+    /// Native popover dismissal writes `false` through its source binding both
+    /// for user dismissal and when refresh replaces that source view. Defer one
+    /// turn and dismiss the canonical selection only when the same anchor still
+    /// owns presentation; a move can install its replacement anchor first.
+    private func requestEventDetailDismissal(
+        from anchor: CalendarEventDetailAnchor
+    ) {
+        Task { @MainActor in
+            await Task.yield()
+            guard resolvedEventDetailAnchor() == anchor else {
+                return
+            }
+            events?.dismissEventDetail()
         }
     }
 
@@ -279,9 +355,21 @@ struct CalendarScreen: View {
     }
 }
 
+/// One concrete Calendar Event Bar or Row that can anchor the native Event
+/// Detail Popover. Rows have one presentation per event; multiday bars include
+/// their Week Row so only the tapped segment presents when several are visible.
+enum CalendarEventDetailAnchor: Equatable {
+    case bar(eventID: String, weekStart: Date)
+    case row(eventID: String, date: Date)
+}
+
 private struct WeekRowView: View {
     let weekRow: WeekRow
     let eventWeek: CalendarEventWeekLayout?
+    let events: CalendarEventsModel?
+    let selectedEventAnchor: CalendarEventDetailAnchor?
+    let onSelectEvent: (String, CalendarEventDetailAnchor) -> Void
+    let onRequestDismiss: (CalendarEventDetailAnchor) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -293,7 +381,11 @@ private struct WeekRowView: View {
                     dateCell: dateCell,
                     rows: eventWeek?.cells[column].rows ?? [],
                     maxBarLane: eventWeek?.cells[column].maxBarLane ?? -1,
-                    overflowCount: eventWeek?.cells[column].overflowCount
+                    overflowCount: eventWeek?.cells[column].overflowCount,
+                    events: events,
+                    selectedEventAnchor: selectedEventAnchor,
+                    onSelectEvent: onSelectEvent,
+                    onRequestDismiss: onRequestDismiss
                 )
             }
         }
@@ -317,7 +409,14 @@ private struct WeekRowView: View {
         }
         .overlay(alignment: .topLeading) {
             if let eventWeek {
-                CalendarEventBarsOverlay(bars: eventWeek.bars)
+                CalendarEventBarsOverlay(
+                    bars: eventWeek.bars,
+                    weekStart: weekRow.id,
+                    events: events,
+                    selectedEventAnchor: selectedEventAnchor,
+                    onSelectEvent: onSelectEvent,
+                    onRequestDismiss: onRequestDismiss
+                )
             }
         }
     }
@@ -346,29 +445,57 @@ private enum CalendarEventLayoutMetrics {
     static let rowSpacing: CGFloat = 2
 }
 
-/// The tappable wrapper that summons the Event Detail Popover from a
-/// Calendar Event Bar or Calendar Event Row (iOS ADR 0005). It owns the
-/// presentation flag and renders the popover from the payload the layout
-/// item carries, so Disconnect on This Device dismisses an open popover
-/// as a consequence of clearing events: the published layout — and with
-/// it this anchor — simply disappears. Everything else on the surface
-/// stays inert.
+/// The tappable wrapper that selects the canonical Calendar Event whose
+/// Event Detail Popover the Calendar Surface presents (iOS ADR 0005). It
+/// forwards only the primary Source Calendar event identity; presentation
+/// state and current detail stay in the Calendar Events model so refreshed
+/// layout replacement cannot strand a stale payload in this transient view.
 private struct CalendarEventDetailTrigger<Label: View>: View {
-    let detail: CalendarEventDetail
+    let eventID: String
+    let anchor: CalendarEventDetailAnchor
+    let selectedAnchor: CalendarEventDetailAnchor?
+    let events: CalendarEventsModel?
+    let onSelect: (String, CalendarEventDetailAnchor) -> Void
+    let onRequestDismiss: (CalendarEventDetailAnchor) -> Void
     @ViewBuilder let label: () -> Label
 
-    @State private var isPresenting = false
-
     var body: some View {
+        let isPresenting = selectedAnchor == anchor
+            && events?.selectedEvent?.id == eventID
+
         Button {
-            isPresenting = true
+            onSelect(eventID, anchor)
         } label: {
             label()
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $isPresenting) {
-            IOSEventDetailPopover(detail: detail) {
-                isPresenting = false
+        .popover(
+            isPresented: Binding(
+                get: { isPresenting },
+                set: { presented in
+                    if !presented {
+                        onRequestDismiss(anchor)
+                    }
+                }
+            )
+        ) {
+            if let events {
+                CalendarEventDetailPresentation(events: events)
+            }
+        }
+    }
+}
+
+/// Observes the model-owned canonical selection inside the native popover's
+/// presentation tree. Successful replacement updates this view in place;
+/// disappearance sets the selection to nil and dismisses its presenter.
+private struct CalendarEventDetailPresentation: View {
+    let events: CalendarEventsModel
+
+    var body: some View {
+        if let selectedEvent = events.selectedEvent {
+            IOSEventDetailPopover(detail: selectedEvent.detail) {
+                events.dismissEventDetail()
             }
         }
     }
@@ -381,6 +508,11 @@ private struct CalendarEventBarsOverlay: View {
     @Environment(\.layoutDirection) private var layoutDirection
 
     let bars: [CalendarEventBarSegment]
+    let weekStart: Date
+    let events: CalendarEventsModel?
+    let selectedEventAnchor: CalendarEventDetailAnchor?
+    let onSelectEvent: (String, CalendarEventDetailAnchor) -> Void
+    let onRequestDismiss: (CalendarEventDetailAnchor) -> Void
 
     var body: some View {
         GeometryReader { geometry in
@@ -398,7 +530,14 @@ private struct CalendarEventBarsOverlay: View {
                 let y = CalendarEventLayoutMetrics.barsTop
                     + CGFloat(bar.lane) * CalendarEventLayoutMetrics.lanePitch
 
-                CalendarEventDetailTrigger(detail: bar.detail) {
+                CalendarEventDetailTrigger(
+                    eventID: bar.id,
+                    anchor: .bar(eventID: bar.id, weekStart: weekStart),
+                    selectedAnchor: selectedEventAnchor,
+                    events: events,
+                    onSelect: onSelectEvent,
+                    onRequestDismiss: onRequestDismiss
+                ) {
                     Text(bar.title)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(
@@ -483,6 +622,10 @@ struct DateCellView: View {
     var rows: [CalendarEventRowItem] = []
     var maxBarLane: Int = -1
     var overflowCount: Int?
+    var events: CalendarEventsModel?
+    var selectedEventAnchor: CalendarEventDetailAnchor?
+    var onSelectEvent: (String, CalendarEventDetailAnchor) -> Void = { _, _ in }
+    var onRequestDismiss: (CalendarEventDetailAnchor) -> Void = { _ in }
 
     private var rowsTop: CGFloat {
         CalendarEventLayoutMetrics.barsTop
@@ -545,7 +688,14 @@ struct DateCellView: View {
                     spacing: CalendarEventLayoutMetrics.rowSpacing
                 ) {
                     ForEach(rows) { row in
-                        CalendarEventDetailTrigger(detail: row.detail) {
+                        CalendarEventDetailTrigger(
+                            eventID: row.id,
+                            anchor: .row(eventID: row.id, date: dateCell.id),
+                            selectedAnchor: selectedEventAnchor,
+                            events: events,
+                            onSelect: onSelectEvent,
+                            onRequestDismiss: onRequestDismiss
+                        ) {
                             CalendarEventRowView(row: row)
                         }
                     }

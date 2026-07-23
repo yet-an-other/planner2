@@ -1,11 +1,11 @@
 import Foundation
 
 /// The Event Detail Popover's presentation payload for one Calendar Event
-/// (Planning glossary). The published layout items — Calendar Event Bar
-/// segments and Calendar Event Row items — carry it, so the popover
-/// renders entirely from model-published state and Disconnect on This
-/// Device dismisses an open popover as a consequence of clearing events
-/// (iOS ADR 0005). Every field is memory-only (iOS ADR 0003).
+/// (Planning glossary). The Calendar Events model projects it from the
+/// canonical event selected by primary Source Calendar event identity, so
+/// successful replacement updates an open popover and disappearance or
+/// Disconnect on This Device dismisses it (iOS ADR 0005). Every field is
+/// memory-only (iOS ADR 0003).
 struct CalendarEventDetail: Equatable, Sendable {
     let title: String
     /// The Event Color as a `#RRGGBB` hex string.

@@ -302,9 +302,6 @@ struct CalendarEventBarSegment: Equatable, Sendable, Identifiable {
     let isStartTruncated: Bool
     /// The event continues into the next Week Row.
     let isEndTruncated: Bool
-    /// The Event Detail Popover payload this segment summons; every
-    /// segment of a multiday bar carries the same event's detail.
-    let detail: CalendarEventDetail
 }
 
 /// A Calendar Event Row: an intraday event presented in its Date Cell with a
@@ -314,8 +311,6 @@ struct CalendarEventRowItem: Equatable, Sendable, Identifiable {
     let title: String
     let startTimeText: String
     let colorHex: String
-    /// The Event Detail Popover payload this row summons.
-    let detail: CalendarEventDetail
 }
 
 /// One Date Cell's event content: the deepest visible bar lane crossing
@@ -339,6 +334,15 @@ struct CalendarEventWeekLayout: Equatable, Sendable {
     let cells: [CalendarEventCellLayout]
 }
 
+/// The one Calendar Event currently presented in the Event Detail Popover.
+/// Its stable Google event id is the selection identity; the detail is a
+/// projection of the model's canonical normalized event and is reconciled
+/// whenever that collection changes.
+struct CalendarEventDetailSelection: Equatable, Sendable, Identifiable {
+    let id: String
+    let detail: CalendarEventDetail
+}
+
 /// The deep native module behind Calendar Events on the iOS Calendar
 /// Surface: it owns the Fetched Window, normalizes Google-shaped events
 /// into Planner's classification, and publishes per-Week-Row layouts. All
@@ -354,6 +358,12 @@ final class CalendarEventsModel {
     /// The iOS Header Status content: the latest events message and its
     /// tone, or a `nil` message while nothing needs saying.
     private(set) var status = CalendarEventsStatus(message: nil, tone: .info)
+
+    /// The selected canonical Calendar Event projected for the open Event
+    /// Detail Popover. The selection remains present through edits and moves,
+    /// updates after successful canonical replacement, and becomes `nil` when
+    /// the selected event disappears or Calendar Events clear.
+    private(set) var selectedEvent: CalendarEventDetailSelection?
 
     @ObservationIgnored
     private let adapter: (any GoogleCalendarEventsAdapting)?
@@ -486,6 +496,43 @@ final class CalendarEventsModel {
         weekLayouts[weekStart]
     }
 
+    /// Selects one canonical Calendar Event by its primary Source Calendar
+    /// event identity. Layout items carry that identity, but the popover detail
+    /// is resolved here so it never retains the tapped item's stale payload.
+    func selectEvent(withID id: String) {
+        guard let selection = detailSelection(forEventID: id) else {
+            return
+        }
+        selectedEvent = selection
+    }
+
+    /// Dismisses the Event Detail Popover without changing Calendar Events.
+    func dismissEventDetail() {
+        selectedEvent = nil
+    }
+
+    /// Reprojects the selected identity from the canonical collection after
+    /// replacement. Absence means deletion, decline, or movement outside the
+    /// refreshed canonical range and dismisses the popover.
+    private func reconcileSelectedEvent() {
+        guard let selectedEvent else {
+            return
+        }
+        self.selectedEvent = detailSelection(forEventID: selectedEvent.id)
+    }
+
+    /// Projects one canonical normalized event into the popover's observable
+    /// selection value. Keeping construction here makes initial selection and
+    /// every later reconciliation share the same identity/detail invariant.
+    private func detailSelection(
+        forEventID id: String
+    ) -> CalendarEventDetailSelection? {
+        guard let event = normalizedEvents.first(where: { $0.id == id }) else {
+            return nil
+        }
+        return CalendarEventDetailSelection(id: event.id, detail: event.detail)
+    }
+
     /// Publishes the Google Account Connection state. Becoming connected
     /// fetches the initial Fetched Window — three months before Today
     /// through three months after — once; becoming disconnected clears
@@ -503,6 +550,7 @@ final class CalendarEventsModel {
             cancelCadence()
             fetchedWindow = nil
             normalizedEvents = []
+            selectedEvent = nil
             freshnessCoverage = []
             needsBrowsingFreshnessCheck = false
             // The active request keeps its operation flag until its adapter
@@ -764,6 +812,7 @@ final class CalendarEventsModel {
 
         normalizedEvents = nextEvents
         weekLayouts = nextLayouts
+        reconcileSelectedEvent()
     }
 
     /// Whether one normalized event's presented local dates intersect a
@@ -1060,6 +1109,7 @@ final class CalendarEventsModel {
                 let redeliveredIds = Set(slabEvents.map(\.id))
                 normalizedEvents.removeAll { redeliveredIds.contains($0.id) }
                 normalizedEvents.append(contentsOf: slabEvents)
+                reconcileSelectedEvent()
                 switch direction {
                 case .forward:
                     fetchedWindow?.end = fetchEnd
@@ -1205,8 +1255,9 @@ final class CalendarEventsModel {
         let colorHex: String
         let textTone: CalendarEventTextTone
         let kind: Kind
-        /// The Event Detail Popover payload, built at normalization so the
-        /// published layout items carry it (iOS ADR 0005).
+        /// The Event Detail Popover payload, built at normalization and
+        /// projected only when this canonical event identity is selected
+        /// (iOS ADR 0005).
         let detail: CalendarEventDetail
     }
 
@@ -1472,8 +1523,7 @@ final class CalendarEventsModel {
                     startColumn: bar.startColumn,
                     endColumn: bar.endColumn,
                     isStartTruncated: bar.startDate < weekStart,
-                    isEndTruncated: bar.endDate > weekEnd,
-                    detail: bar.event.detail
+                    isEndTruncated: bar.endDate > weekEnd
                 )
             )
         }
@@ -1501,8 +1551,7 @@ final class CalendarEventsModel {
                         id: event.id,
                         title: event.title,
                         startTimeText: startTimeText,
-                        colorHex: event.colorHex,
-                        detail: event.detail
+                        colorHex: event.colorHex
                     )
                 )
             )

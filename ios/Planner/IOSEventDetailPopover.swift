@@ -3,14 +3,14 @@ import SwiftUI
 /// The Event Detail Popover on the iOS Calendar Surface (Planning
 /// glossary; iOS ADR 0005): a transient, read-only, native anchored
 /// popover presenting one Calendar Event's details, adapting to a sheet
-/// on compact widths. It renders entirely from the model-published
-/// payload the tapped Calendar Event Bar or Calendar Event Row carries,
-/// so Disconnect on This Device dismisses it as a consequence of clearing
-/// events. The surface stays write-read-only: no edit affordances exist.
+/// on compact widths. It renders from the Calendar Events model's selected
+/// canonical identity projection, so successful replacement updates it and
+/// disappearance or Disconnect on This Device dismisses it. The surface stays
+/// write-read-only: no edit affordances exist.
 struct IOSEventDetailPopover: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    /// The tapped event's model-published presentation payload.
+    /// The selected event's model-published canonical detail projection.
     let detail: CalendarEventDetail
 
     /// Closes the popover: the small close affordance's action.
@@ -249,6 +249,138 @@ private struct IOSEventDetailPopoverSection<Content: View>: View {
 }
 
 #if DEBUG
+/// Deterministic SwiftUI validation for issue #90. The same harness runs at
+/// compact and regular widths; choosing an outcome keeps the native popover
+/// open with the reconciled edit/move/failure detail or dismisses it for
+/// deletion, decline, and Disconnect on This Device. Observable model tests
+/// separately drive these outcomes through real bounded replacement.
+private struct EventDetailRefreshValidationPreview: View {
+    enum Outcome: String, CaseIterable, Identifiable {
+        case edit = "Edit"
+        case move = "Move"
+        case deletion = "Deletion"
+        case decline = "Decline"
+        case failure = "Failure"
+        case disconnect = "Disconnect"
+
+        var id: Self { self }
+
+        /// The successful canonical replacement for this outcome. Failure has
+        /// no replacement at all: the harness deliberately retains whichever
+        /// detail was open before it, matching stale-while-revalidate.
+        var replacementDetail: CalendarEventDetail? {
+            switch self {
+            case .edit:
+                CalendarEventDetail(
+                    title: "Updated Design Review",
+                    colorHex: "#D50000",
+                    timingText: "Wed, Jul 22, 2026 · 2:00 PM – 3:30 PM",
+                    location: "Studio 5",
+                    googleLink: "https://www.google.com/calendar/event?eid=updated",
+                    notes: "Updated agenda at https://example.com/agenda",
+                    attendees: [
+                        CalendarEventAttendee(
+                            label: "Ada Lovelace",
+                            status: .accepted
+                        ),
+                    ]
+                )
+            case .move:
+                CalendarEventDetail(
+                    title: "Design Review",
+                    colorHex: "#039BE5",
+                    timingText: "Thu, Jul 23, 2026 · 11:00 AM – 12:00 PM",
+                    location: "Studio 4",
+                    googleLink: "https://www.google.com/calendar/event?eid=moved"
+                )
+            case .deletion, .decline, .failure, .disconnect:
+                nil
+            }
+        }
+
+        var dismissesSelection: Bool {
+            switch self {
+            case .deletion, .decline, .disconnect:
+                true
+            case .edit, .move, .failure:
+                false
+            }
+        }
+    }
+
+    @State private var outcome = Outcome.edit
+    @State private var presentedDetail = Outcome.edit.replacementDetail
+    @State private var isPresenting = true
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Picker("Refresh outcome", selection: $outcome) {
+                ForEach(Outcome.allCases) { outcome in
+                    Text(outcome.rawValue).tag(outcome)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text(
+                presentedDetail == nil
+                    ? "Expected: Event Detail Popover dismissed"
+                    : "Expected: Event Detail Popover remains open"
+            )
+                .font(.footnote)
+                .foregroundStyle(PlannerPalette.monthText)
+
+            Button("Reset open selected Calendar Event") {
+                presentedDetail = Self.originalDetail
+                isPresenting = true
+            }
+        }
+        .padding()
+        .background(PlannerPalette.canvas)
+        .onChange(of: outcome) { _, outcome in
+            if outcome.dismissesSelection {
+                presentedDetail = nil
+            } else if let replacementDetail = outcome.replacementDetail {
+                presentedDetail = replacementDetail
+            }
+            // Failure intentionally leaves both the selected identity's
+            // existing detail and presentation unchanged.
+            isPresenting = presentedDetail != nil
+        }
+        .popover(
+            isPresented: Binding(
+                get: { isPresenting && presentedDetail != nil },
+                set: { isPresenting = $0 }
+            )
+        ) {
+            if let detail = presentedDetail {
+                IOSEventDetailPopover(detail: detail) {
+                    isPresenting = false
+                }
+            }
+        }
+    }
+
+    private static let originalDetail = CalendarEventDetail(
+        title: "Design Review",
+        colorHex: "#039BE5",
+        timingText: "Wed, Jul 22, 2026 · 1:00 PM – 2:00 PM",
+        location: "Studio 4",
+        googleLink: "https://www.google.com/calendar/event?eid=original"
+    )
+}
+
+#Preview("Refresh Reconciliation · Compact") {
+    EventDetailRefreshValidationPreview()
+        .environment(\.horizontalSizeClass, .compact)
+        .frame(width: 393, height: 852)
+}
+
+#Preview("Refresh Reconciliation · Regular") {
+    EventDetailRefreshValidationPreview()
+        .environment(\.horizontalSizeClass, .regular)
+        .frame(width: 834, height: 1_194)
+}
+
 #Preview("Where and Google Link · iPhone Sheet") {
     IOSEventDetailPopover(
         detail: CalendarEventDetail(
