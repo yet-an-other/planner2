@@ -406,12 +406,11 @@ final class CalendarEventsModel {
         guard connected else {
             fetchedWindow = nil
             normalizedEvents = []
-            isFetchingInitialWindow = false
-            isRefreshingEvents = false
+            // The active request keeps its operation flag until its adapter
+            // call returns. A reconnect queues behind that physical work;
+            // only publication is invalidated immediately.
             isRefreshPending = false
             refreshFailure = nil
-            isExtendingForward = false
-            isExtendingBackward = false
             isSlabRetryBlocked = false
             lastVisibleRange = nil
             weekLayouts = [:]
@@ -462,12 +461,16 @@ final class CalendarEventsModel {
 
             // A stale completion must not overwrite a newer decision: after
             // Disconnect on This Device or a newer connection, its events
-            // are discarded.
-            guard let self, attempt == self.connectionGeneration else {
+            // are discarded, but its physical request first releases the
+            // serialized adapter seam.
+            guard let self else {
                 return
             }
-
             isFetchingInitialWindow = false
+            guard attempt == connectionGeneration else {
+                resumeAfterStaleFetch()
+                return
+            }
 
             switch outcome {
             case .success(
@@ -543,10 +546,14 @@ final class CalendarEventsModel {
                 from: refreshStart,
                 to: refreshEnd
             )
-            guard let self, attempt == self.connectionGeneration else {
+            guard let self else {
                 return
             }
             isRefreshingEvents = false
+            guard attempt == connectionGeneration else {
+                resumeAfterStaleFetch()
+                return
+            }
 
             switch outcome {
             case .success(
@@ -675,7 +682,9 @@ final class CalendarEventsModel {
         isSlabRetryBlocked = false
         if fetchedWindow == nil {
             beginInitialFetch(adapter: adapter)
-        } else if refreshFailure != nil {
+        } else if isRefreshingEvents || refreshFailure != nil {
+            // Preserve this recovery signal if the request that observed the
+            // offline state has not completed yet.
             refreshOnForeground()
         } else if let lastVisibleRange {
             showVisibleRange(
@@ -786,6 +795,19 @@ final class CalendarEventsModel {
             || isExtendingBackward
     }
 
+    /// Once an obsolete physical request releases the serialized adapter
+    /// seam, continue the current connection's initial fetch or queued work.
+    private func resumeAfterStaleFetch() {
+        guard isConnected, let adapter else {
+            return
+        }
+        if fetchedWindow == nil {
+            beginInitialFetch(adapter: adapter)
+        } else {
+            drainFetchWork()
+        }
+    }
+
     /// One slab direction of the Fetched Window.
     private enum ExtensionDirection {
         case forward
@@ -814,7 +836,7 @@ final class CalendarEventsModel {
                 to: fetchEnd
             )
 
-            guard let self, attempt == self.connectionGeneration else {
+            guard let self else {
                 return
             }
 
@@ -823,6 +845,10 @@ final class CalendarEventsModel {
                 isExtendingForward = false
             case .backward:
                 isExtendingBackward = false
+            }
+            guard attempt == connectionGeneration else {
+                resumeAfterStaleFetch()
+                return
             }
 
             switch outcome {

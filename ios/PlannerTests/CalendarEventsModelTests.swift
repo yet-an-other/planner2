@@ -1347,6 +1347,63 @@ struct CalendarEventsModelTests {
         )
     }
 
+    @Test("Connectivity return during an offline refresh queues one retry")
+    func connectivityReturnDuringRefreshQueuesRetry() async {
+        let (model, adapter, monitor) = makeModelWithMonitor()
+        var fetchNumber = 0
+        var releaseRefresh: CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            switch fetchNumber {
+            case 1:
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "event",
+                            summary: "Event",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            case 2:
+                return await withCheckedContinuation { releaseRefresh = $0 }
+            default:
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: []
+                )
+            }
+        }
+
+        model.setConnected(true)
+        let weekStart = Self.gmt(2026, 7, 20)
+        #expect(await layoutEventually(model, weekStart: weekStart) != nil)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+        #expect(await eventually { releaseRefresh != nil })
+
+        monitor.simulateConnectivityReturn()
+        monitor.simulateConnectivityReturn()
+        model.refreshOnForeground()
+        releaseRefresh?.resume(returning: .unavailable(.offline))
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: weekStart) == nil
+                    && model.status.message == nil
+            }
+        )
+        #expect(await neverHappens { adapter.fetchCallCount > 3 })
+    }
+
     @Test("A failed foreground refresh retains events with a warning")
     func failedRefreshRetainsEventsWithWarning() async {
         let (model, adapter) = makeModel()
@@ -1432,13 +1489,9 @@ struct CalendarEventsModelTests {
 
         model.setConnected(false)
         model.setConnected(true)
-        let weekStart = Self.gmt(2026, 7, 20)
-        #expect(
-            await eventually {
-                model.layout(forWeekStarting: weekStart)?
-                    .cells[0].rows.map(\.id) == ["new"]
-            }
-        )
+        // The reconnect queues its initial fetch behind the physically
+        // in-flight obsolete refresh instead of overlapping Google requests.
+        #expect(await neverHappens { adapter.fetchCallCount > 2 })
 
         releaseRefresh?.resume(
             returning: .success(
@@ -1456,12 +1509,18 @@ struct CalendarEventsModelTests {
             )
         )
 
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        let weekStart = Self.gmt(2026, 7, 20)
         #expect(
-            await neverHappens {
+            await eventually {
                 model.layout(forWeekStarting: weekStart)?
-                    .cells[0].rows.contains(where: { $0.id == "stale" })
-                    == true
+                    .cells[0].rows.map(\.id) == ["new"]
             }
+        )
+        #expect(
+            model.layout(forWeekStarting: weekStart)?
+                .cells[0].rows.contains(where: { $0.id == "stale" })
+                == false
         )
     }
 
