@@ -10,23 +10,55 @@ import Testing
 @MainActor
 final class FakeGoogleCalendarEventsAdapter: GoogleCalendarEventsAdapting {
     nonisolated static let defaultCalendar = GoogleSourceCalendar(
-        backgroundColorHex: "#039BE5"
+        id: "primary@example.com",
+        summary: "Primary",
+        backgroundColorHex: "#039BE5",
+        isPrimary: true
     )
 
+    var primarySourceCalendarOutcome: GoogleSourceCalendarOutcome = .success(
+        defaultCalendar
+    )
+    var primarySourceCalendarHandler: (() async -> GoogleSourceCalendarOutcome)?
+    var primarySourceCalendarFetchCallCount = 0
     var fetchCallCount = 0
+    var fetchedSourceCalendars: [[GoogleSourceCalendar]] = []
     var fetchedRanges: [(start: Date, end: Date)] = []
     var fetchHandler: (Date, Date) async -> GoogleCalendarEventsOutcome = {
         _, _ in
         .success(calendar: defaultCalendar, events: [])
     }
 
+    func fetchPrimarySourceCalendar() async -> GoogleSourceCalendarOutcome {
+        primarySourceCalendarFetchCallCount += 1
+        if let primarySourceCalendarHandler {
+            return await primarySourceCalendarHandler()
+        }
+        return primarySourceCalendarOutcome
+    }
+
     func fetchEvents(
-        from start: Date,
-        to end: Date
+        from sourceCalendars: [GoogleSourceCalendar],
+        start: Date,
+        end: Date
     ) async -> GoogleCalendarEventsOutcome {
         fetchCallCount += 1
+        fetchedSourceCalendars.append(sourceCalendars)
         fetchedRanges.append((start, end))
         return await fetchHandler(start, end)
+    }
+}
+
+/// Test convenience for Primary Source Calendars whose identity and summary
+/// are irrelevant to the behavior under test.
+private extension GoogleSourceCalendar {
+    init(backgroundColorHex: String) {
+        self.init(
+            id: "primary@example.com",
+            summary: "Primary",
+            backgroundColorHex: backgroundColorHex,
+            isPrimary: true
+        )
     }
 }
 
@@ -35,9 +67,18 @@ final class FakeGoogleCalendarEventsAdapter: GoogleCalendarEventsAdapting {
 extension GoogleCalendarEventsOutcome {
     static func success(
         calendar: GoogleSourceCalendar,
-        events: [GoogleCalendarEvent]
+        events: [GoogleCalendarEvent],
+        eventColorBackgrounds: [String: String] = [:]
     ) -> GoogleCalendarEventsOutcome {
-        .success(calendar: calendar, events: events, eventColorBackgrounds: [:])
+        .success(
+            events: events.map {
+                GoogleSourceCalendarEvent(
+                    sourceCalendar: calendar,
+                    event: $0
+                )
+            },
+            eventColorBackgrounds: eventColorBackgrounds
+        )
     }
 }
 
@@ -171,6 +212,15 @@ struct CalendarEventsModelTests {
 
     // MARK: Connection-driven fetching
 
+    @Test("Opaque Source Calendar IDs occupy one Google API path segment")
+    func opaqueSourceCalendarIDIsOnePathSegment() {
+        #expect(
+            GoogleCalendarAPIPath.events(
+                sourceCalendarID: "team/shared#calendar@example.com"
+            ) == "/calendar/v3/calendars/team%2Fshared%23calendar@example.com/events"
+        )
+    }
+
     @Test("A disconnected model fetches nothing and publishes no layouts")
     func disconnectedFetchesNothing() async {
         let (model, adapter) = makeModel()
@@ -183,18 +233,106 @@ struct CalendarEventsModelTests {
         )
     }
 
-    @Test("Becoming connected fetches the initial window around Today")
+    @Test("Becoming connected fetches the initial window from the explicit Primary Source Calendar")
     func connectedFetchesInitialWindow() async {
         let (model, adapter) = makeModel()
 
         model.setConnected(true)
 
         #expect(await eventually { adapter.fetchCallCount == 1 })
+        #expect(adapter.primarySourceCalendarFetchCallCount == 1)
+        #expect(
+            adapter.fetchedSourceCalendars
+                == [[FakeGoogleCalendarEventsAdapter.defaultCalendar]]
+        )
         let range = adapter.fetchedRanges.first
         // Today is 2026-07-15; the window runs three months back from its
         // start of day through three months ahead, inclusive of that day.
         #expect(range?.start.timeIntervalSince1970 == Self.gmt(2026, 4, 15).timeIntervalSince1970)
         #expect(range?.end.timeIntervalSince1970 == Self.gmt(2026, 10, 16).timeIntervalSince1970)
+    }
+
+    @Test("Source Calendar identity and presentation remain on Calendar Events")
+    func sourceCalendarIdentityRemainsOnCalendarEvents() async {
+        let sourceCalendar = GoogleSourceCalendar(
+            id: "team@example.com",
+            summary: "Team",
+            backgroundColorHex: "#7CB342",
+            isPrimary: true
+        )
+        let (model, adapter) = makeModel()
+        adapter.primarySourceCalendarOutcome = .success(sourceCalendar)
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: sourceCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "planning",
+                        summary: "Planning",
+                        start: .timed(Self.gmt(2026, 7, 20, 9, 30)),
+                        end: .timed(Self.gmt(2026, 7, 20, 10, 15)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        )
+        let row = layout?.cells[0].rows.first
+        #expect(row?.sourceCalendar == sourceCalendar)
+        #expect(row?.colorHex == sourceCalendar.backgroundColorHex)
+
+        model.selectEvent(withID: "planning")
+        #expect(model.selectedEvent?.sourceCalendar == sourceCalendar)
+    }
+
+    @Test("A Primary Source Calendar failure starts no Calendar Event request")
+    func primarySourceCalendarFailureStartsNoEventRequest() async {
+        let (model, adapter) = makeModel()
+        adapter.primarySourceCalendarOutcome = .unavailable(.failed)
+
+        model.setConnected(true)
+
+        #expect(
+            await eventually {
+                adapter.primarySourceCalendarFetchCallCount == 1
+                    && model.status.message == CalendarEventsCopy.failed
+            }
+        )
+        #expect(adapter.fetchCallCount == 0)
+        #expect(model.weekLayouts.isEmpty)
+    }
+
+    @Test("Primary discovery completing after Disconnect starts no event request")
+    func stalePrimarySourceCalendarCompletionStartsNoEventRequest() async {
+        let (model, adapter) = makeModel()
+        var release: CheckedContinuation<GoogleSourceCalendarOutcome, Never>?
+        adapter.primarySourceCalendarHandler = {
+            await withCheckedContinuation { release = $0 }
+        }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                adapter.primarySourceCalendarFetchCallCount == 1
+            }
+        )
+
+        model.setConnected(false)
+        release?.resume(
+            returning: .success(
+                FakeGoogleCalendarEventsAdapter.defaultCalendar
+            )
+        )
+
+        #expect(await neverHappens { adapter.fetchCallCount > 0 })
+        #expect(model.weekLayouts.isEmpty)
     }
 
     @Test("A timed single-day event appears as a row with localized start time")
@@ -237,6 +375,7 @@ struct CalendarEventsModelTests {
             layout?.cells[0].rows == [
                 CalendarEventRowItem(
                     id: "standup",
+                    sourceCalendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
                     title: "Standup",
                     startTimeText: timeFormatter.string(
                         from: Self.gmt(2026, 7, 20, 9, 30)
@@ -276,6 +415,7 @@ struct CalendarEventsModelTests {
             layout?.bars == [
                 CalendarEventBarSegment(
                     id: "holiday",
+                    sourceCalendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
                     title: "Holiday",
                     colorHex: "#039BE5",
                     // White out-reads Planner's ink on this blue (APCA).
@@ -1516,6 +1656,13 @@ struct CalendarEventsModelTests {
         )
 
         #expect(await eventually { adapter.fetchCallCount == 3 })
+        #expect(
+            adapter.fetchedSourceCalendars
+                == Array(
+                    repeating: [FakeGoogleCalendarEventsAdapter.defaultCalendar],
+                    count: 3
+                )
+        )
         let refreshRange = adapter.fetchedRanges.last
         #expect(refreshRange?.start == Self.gmt(2026, 6, 13))
         #expect(refreshRange?.end == Self.gmt(2026, 8, 27))

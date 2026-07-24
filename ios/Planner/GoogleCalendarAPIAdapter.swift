@@ -1,6 +1,24 @@
 import Foundation
 import GoogleSignIn
 
+/// Percent-encoded Google Calendar API paths whose opaque identifiers must
+/// remain one path segment.
+enum GoogleCalendarAPIPath {
+    static func events(sourceCalendarID: String) -> String? {
+        guard !sourceCalendarID.isEmpty else {
+            return nil
+        }
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#%")
+        guard let encodedID = sourceCalendarID.addingPercentEncoding(
+            withAllowedCharacters: allowed
+        ) else {
+            return nil
+        }
+        return "/calendar/v3/calendars/\(encodedID)/events"
+    }
+}
+
 /// The production Google Calendar adapter: it fetches the primary Source
 /// Calendar's attributes and events directly from the Google Calendar API
 /// with the Google Sign-In SDK-managed access token. Planner's backend is
@@ -17,47 +35,53 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
     }
 
     @MainActor
-    func fetchEvents(
-        from start: Date,
-        to end: Date
-    ) async -> GoogleCalendarEventsOutcome {
-        guard let user = GIDSignIn.sharedInstance.currentUser else {
-            // The model only fetches while connected; a missing user means
-            // the connection left first.
-            return .unavailable(.failed)
-        }
-
+    func fetchPrimarySourceCalendar() async -> GoogleSourceCalendarOutcome {
         do {
-            // The SDK refreshes the access token when it is near expiry;
-            // confirmed invalidation is the connection module's concern,
-            // surfaced here as an ordinary failure.
-            try await user.refreshTokensIfNeeded()
+            let token = try await refreshedAccessToken()
+            return .success(try await fetchPrimaryCalendar(token: token))
         } catch {
-            return Self.classify(error)
+            return .unavailable(Self.classifyFailure(error))
         }
+    }
 
+    @MainActor
+    func fetchEvents(
+        from sourceCalendars: [GoogleSourceCalendar],
+        start: Date,
+        end: Date
+    ) async -> GoogleCalendarEventsOutcome {
         do {
-            // Event content and calendar attributes must all arrive; the
-            // color metadata is cosmetic, so its failure degrades to
-            // Source Calendar colors instead of failing the fetch. The
-            // token crosses the concurrent requests; the SDK user does
-            // not.
-            let token = user.accessToken.tokenString
-            async let calendar = fetchPrimaryCalendar(token: token)
+            let token = try await refreshedAccessToken()
+            // Every supplied Source Calendar and all of its pages must arrive
+            // before this aggregate crosses the seam. Event color metadata is
+            // cosmetic, so its failure silently degrades to each event's
+            // Source Calendar color.
             async let events = fetchAllEvents(
                 token: token,
+                sourceCalendars: sourceCalendars,
                 from: start,
                 to: end
             )
             async let colors = fetchEventColorBackgrounds(token: token)
             return .success(
-                calendar: try await calendar,
                 events: try await events,
                 eventColorBackgrounds: (try? await colors) ?? [:]
             )
         } catch {
-            return Self.classify(error)
+            return .unavailable(Self.classifyFailure(error))
         }
+    }
+
+    /// Returns one SDK-refreshed access token. Confirmed invalidation remains
+    /// the Google Account Connection module's concern and crosses this seam
+    /// only as a stable fetch failure.
+    @MainActor
+    private func refreshedAccessToken() async throws -> String {
+        guard let user = GIDSignIn.sharedInstance.currentUser else {
+            throw FetchError.failed
+        }
+        try await user.refreshTokensIfNeeded()
+        return user.accessToken.tokenString
     }
 
     // MARK: Requests
@@ -70,8 +94,14 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
             query: [],
             token: token
         )
+        guard let id = entry.id else {
+            throw FetchError.failed
+        }
         return GoogleSourceCalendar(
-            backgroundColorHex: entry.backgroundColor ?? "#039BE5"
+            id: id,
+            summary: entry.summary ?? "",
+            backgroundColorHex: entry.backgroundColor ?? "#039BE5",
+            isPrimary: entry.primary ?? false
         )
     }
 
@@ -90,34 +120,57 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
 
     private func fetchAllEvents(
         token: String,
+        sourceCalendars: [GoogleSourceCalendar],
         from start: Date,
         to end: Date
-    ) async throws -> [GoogleCalendarEvent] {
+    ) async throws -> [GoogleSourceCalendarEvent] {
         let stampFormatter = ISO8601DateFormatter()
         stampFormatter.formatOptions = [.withInternetDateTime]
 
-        var events: [GoogleCalendarEvent] = []
-        var pageToken: String?
-        repeat {
-            var query = [
-                URLQueryItem(name: "timeMin", value: stampFormatter.string(from: start)),
-                URLQueryItem(name: "timeMax", value: stampFormatter.string(from: end)),
-                // Recurring events arrive as individual instances.
-                URLQueryItem(name: "singleEvents", value: "true"),
-                URLQueryItem(name: "maxResults", value: "2500"),
-            ]
-            if let pageToken {
-                query.append(URLQueryItem(name: "pageToken", value: pageToken))
-            }
+        var events: [GoogleSourceCalendarEvent] = []
+        for sourceCalendar in sourceCalendars {
+            var pageToken: String?
+            repeat {
+                var query = [
+                    URLQueryItem(
+                        name: "timeMin",
+                        value: stampFormatter.string(from: start)
+                    ),
+                    URLQueryItem(
+                        name: "timeMax",
+                        value: stampFormatter.string(from: end)
+                    ),
+                    // Recurring events arrive as individual instances.
+                    URLQueryItem(name: "singleEvents", value: "true"),
+                    URLQueryItem(name: "maxResults", value: "2500"),
+                ]
+                if let pageToken {
+                    query.append(
+                        URLQueryItem(name: "pageToken", value: pageToken)
+                    )
+                }
 
-            let page: EventsPageDTO = try await get(
-                path: "/calendar/v3/calendars/primary/events",
-                query: query,
-                token: token
-            )
-            events.append(contentsOf: (page.items ?? []).compactMap(Self.mapEvent))
-            pageToken = page.nextPageToken
-        } while pageToken != nil
+                guard let path = GoogleCalendarAPIPath.events(
+                    sourceCalendarID: sourceCalendar.id
+                ) else {
+                    throw FetchError.failed
+                }
+                let page: EventsPageDTO = try await get(
+                    path: path,
+                    query: query,
+                    token: token
+                )
+                events.append(
+                    contentsOf: (page.items ?? []).compactMap(Self.mapEvent).map {
+                        GoogleSourceCalendarEvent(
+                            sourceCalendar: sourceCalendar,
+                            event: $0
+                        )
+                    }
+                )
+                pageToken = page.nextPageToken
+            } while pageToken != nil
+        }
 
         return events
     }
@@ -130,7 +183,7 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
         var components = URLComponents()
         components.scheme = "https"
         components.host = "www.googleapis.com"
-        components.path = path
+        components.percentEncodedPath = path
         components.queryItems = query
         guard let url = components.url else {
             throw FetchError.failed
@@ -161,7 +214,10 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
     }
 
     private struct CalendarListEntryDTO: Decodable, Sendable {
+        let id: String?
+        let summary: String?
         let backgroundColor: String?
+        let primary: Bool?
     }
 
     private struct EventsPageDTO: Decodable, Sendable {
@@ -285,7 +341,9 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
     /// Maps failures to Planner-relevant outcomes: connectivity loss is
     /// transient; anything else is a generic failure. Raw errors never
     /// cross the seam.
-    private static func classify(_ error: Error) -> GoogleCalendarEventsOutcome {
+    private static func classifyFailure(
+        _ error: Error
+    ) -> GoogleCalendarEventsFailure {
         let connectivityCodes = [
             NSURLErrorNotConnectedToInternet,
             NSURLErrorNetworkConnectionLost,
@@ -297,12 +355,12 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
             if error.domain == NSURLErrorDomain,
                connectivityCodes.contains(error.code)
             {
-                return .unavailable(.offline)
+                return .offline
             }
             current = error.userInfo[NSUnderlyingErrorKey] as? NSError
         }
 
-        return .unavailable(.failed)
+        return .failed
     }
 }
 

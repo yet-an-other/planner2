@@ -1252,13 +1252,23 @@ private func previewEvents(
 /// fixed mix of all-day, multiday, intraday, declined, and cancelled events
 /// around 2026-07-15, never the network.
 private struct PreviewGoogleCalendarEventsAdapter: GoogleCalendarEventsAdapting {
+    private static let primarySourceCalendar = GoogleSourceCalendar(
+        id: "primary@example.com",
+        summary: "Primary",
+        backgroundColorHex: "#039BE5",
+        isPrimary: true
+    )
+
+    func fetchPrimarySourceCalendar() async -> GoogleSourceCalendarOutcome {
+        .success(Self.primarySourceCalendar)
+    }
+
     func fetchEvents(
-        from start: Date,
-        to end: Date
+        from sourceCalendars: [GoogleSourceCalendar],
+        start: Date,
+        end: Date
     ) async -> GoogleCalendarEventsOutcome {
-        .success(
-            calendar: GoogleSourceCalendar(backgroundColorHex: "#039BE5"),
-            events: [
+        let events = [
                 GoogleCalendarEvent(
                     id: "offsite",
                     summary: "Team Offsite",
@@ -1375,7 +1385,16 @@ private struct PreviewGoogleCalendarEventsAdapter: GoogleCalendarEventsAdapting 
                     isCancelled: true,
                     isDeclinedByViewer: false
                 ),
-            ],
+            ]
+        return .success(
+            events: sourceCalendars.flatMap { sourceCalendar in
+                events.map {
+                    GoogleSourceCalendarEvent(
+                        sourceCalendar: sourceCalendar,
+                        event: $0
+                    )
+                }
+            },
             eventColorBackgrounds: [:]
         )
     }

@@ -1,10 +1,20 @@
 import Foundation
 import Observation
 
-/// The Source Calendar presentation attributes Planner presents.
+/// One Source Calendar crossing the Google adapter seam. Its stable Google
+/// identity and presentation attributes remain memory-only with Calendar
+/// Events (iOS ADR 0003).
 struct GoogleSourceCalendar: Equatable, Sendable {
+    /// Google's stable opaque calendar identifier.
+    let id: String
+    /// Google's display summary. Presentation fallback for a blank summary
+    /// belongs to the Source Calendars module introduced by a later slice.
+    let summary: String
     /// The calendar's Google background color as a `#RRGGBB` hex string.
     let backgroundColorHex: String
+    /// Whether Google marks this as the Primary Source Calendar.
+    let isPrimary: Bool
+
 }
 
 /// A decoded start or end of a Google Calendar event in Google-shaped form:
@@ -84,32 +94,54 @@ enum GoogleCalendarEventsFailure: Equatable, Sendable {
     case failed
 }
 
-/// The product-oriented outcome of one Google Calendar events fetch.
+/// One Google-shaped Calendar Event tagged with the Source Calendar from
+/// which it was fetched. Keeping the complete Source Calendar on the event
+/// side of the seam preserves identity, summary, Primary marker, and color
+/// without introducing another store.
+struct GoogleSourceCalendarEvent: Equatable, Sendable {
+    let sourceCalendar: GoogleSourceCalendar
+    let event: GoogleCalendarEvent
+}
+
+/// The product-oriented outcome of obtaining the current Primary Source
+/// Calendar before the Primary-only event path begins.
+enum GoogleSourceCalendarOutcome: Equatable, Sendable {
+    case success(GoogleSourceCalendar)
+    case unavailable(GoogleCalendarEventsFailure)
+}
+
+/// The product-oriented outcome of one aggregate Google Calendar events
+/// fetch.
 enum GoogleCalendarEventsOutcome: Equatable, Sendable {
-    /// The primary Source Calendar's attributes, its decoded events for
-    /// the requested range, and Google's event color metadata — the
-    /// explicit-event-color backgrounds keyed by color id, possibly empty
-    /// when their cosmetic fetch failed.
+    /// Complete source-tagged events for the requested Source Calendars and
+    /// Google's account-wide event color metadata. The metadata may be empty
+    /// when its cosmetic fetch failed.
     case success(
-        calendar: GoogleSourceCalendar,
-        events: [GoogleCalendarEvent],
+        events: [GoogleSourceCalendarEvent],
         eventColorBackgrounds: [String: String]
     )
 
-    /// The fetch could not complete.
+    /// The aggregate fetch could not complete. No partial source result
+    /// crosses this seam.
     case unavailable(GoogleCalendarEventsFailure)
 }
 
 /// The Google Calendar seam: one product-oriented interface satisfied by the
-/// live Google Calendar API adapter in production and by a fake adapter in
-/// deterministic tests. Fetches cover the primary Source Calendar only.
+/// live Google Calendar API adapter in production and by fakes in tests and
+/// previews. Calendar Event requests always name their Source Calendars
+/// explicitly; the current product path resolves and supplies only Primary.
 @MainActor
 protocol GoogleCalendarEventsAdapting {
-    /// Fetches the primary Source Calendar's events with local start dates
-    /// in `[start, end)`, expanding recurring events into instances.
+    /// Obtains the Source Calendar Google currently designates as primary.
+    func fetchPrimarySourceCalendar() async -> GoogleSourceCalendarOutcome
+
+    /// Fetches one atomic aggregate for all supplied Source Calendars with
+    /// local start dates in `[start, end)`, expanding recurring events into
+    /// instances.
     func fetchEvents(
-        from start: Date,
-        to end: Date
+        from sourceCalendars: [GoogleSourceCalendar],
+        start: Date,
+        end: Date
     ) async -> GoogleCalendarEventsOutcome
 }
 
@@ -290,6 +322,9 @@ struct CalendarEventBarSegment: Equatable, Sendable, Identifiable {
     /// Unique within the Week Row: the event's id (one segment per event per
     /// week).
     let id: String
+    /// The originating Source Calendar for this current Primary-only copy,
+    /// retained in memory for later canonical cross-calendar identity.
+    let sourceCalendar: GoogleSourceCalendar
     let title: String
     let colorHex: String
     let textTone: CalendarEventTextTone
@@ -308,6 +343,9 @@ struct CalendarEventBarSegment: Equatable, Sendable, Identifiable {
 /// dot, a localized start time, and a title.
 struct CalendarEventRowItem: Equatable, Sendable, Identifiable {
     let id: String
+    /// The originating Source Calendar for this current Primary-only copy,
+    /// retained in memory for later canonical cross-calendar identity.
+    let sourceCalendar: GoogleSourceCalendar
     let title: String
     let startTimeText: String
     let colorHex: String
@@ -340,6 +378,9 @@ struct CalendarEventWeekLayout: Equatable, Sendable {
 /// whenever that collection changes.
 struct CalendarEventDetailSelection: Equatable, Sendable, Identifiable {
     let id: String
+    /// Source identity and presentation data remain memory-only with the
+    /// selected Calendar Event; this slice does not yet present a source row.
+    let sourceCalendar: GoogleSourceCalendar
     let detail: CalendarEventDetail
 }
 
@@ -367,6 +408,12 @@ final class CalendarEventsModel {
 
     @ObservationIgnored
     private let adapter: (any GoogleCalendarEventsAdapting)?
+
+    /// The resolved Source Calendars supplied to every Calendar Event request.
+    /// This prefactor keeps the current Primary-only behavior; the dedicated
+    /// Source Calendars module replaces this resolution in a later slice.
+    @ObservationIgnored
+    private var sourceCalendars: [GoogleSourceCalendar] = []
 
     /// The connectivity observer behind offline recovery, when configured;
     /// the same seam the connection module uses.
@@ -530,7 +577,11 @@ final class CalendarEventsModel {
         guard let event = normalizedEvents.first(where: { $0.id == id }) else {
             return nil
         }
-        return CalendarEventDetailSelection(id: event.id, detail: event.detail)
+        return CalendarEventDetailSelection(
+            id: event.id,
+            sourceCalendar: event.sourceCalendar,
+            detail: event.detail
+        )
     }
 
     /// Publishes the Google Account Connection state. Becoming connected
@@ -549,6 +600,7 @@ final class CalendarEventsModel {
         guard connected else {
             cancelCadence()
             fetchedWindow = nil
+            sourceCalendars = []
             normalizedEvents = []
             selectedEvent = nil
             freshnessCoverage = []
@@ -601,9 +653,31 @@ final class CalendarEventsModel {
 
         let attempt = connectionGeneration
         Task { [weak self] in
+            let sourceOutcome = await adapter.fetchPrimarySourceCalendar()
+            guard self != nil else {
+                return
+            }
+            guard self?.connectionGeneration == attempt else {
+                self?.isFetchingInitialWindow = false
+                self?.resumeAfterStaleFetch()
+                return
+            }
+
+            let primarySourceCalendar: GoogleSourceCalendar
+            switch sourceOutcome {
+            case .success(let sourceCalendar):
+                primarySourceCalendar = sourceCalendar
+            case .unavailable(let failure):
+                self?.isFetchingInitialWindow = false
+                self?.publishInitialFailure(failure)
+                self?.scheduleCadenceIfEligible()
+                return
+            }
+
             let outcome = await adapter.fetchEvents(
-                from: windowStart,
-                to: windowEnd
+                from: [primarySourceCalendar],
+                start: windowStart,
+                end: windowEnd
             )
 
             // A stale completion must not overwrite a newer decision: after
@@ -613,22 +687,19 @@ final class CalendarEventsModel {
             guard let self else {
                 return
             }
-            isFetchingInitialWindow = false
             guard attempt == connectionGeneration else {
+                isFetchingInitialWindow = false
                 resumeAfterStaleFetch()
                 return
             }
+            isFetchingInitialWindow = false
 
             switch outcome {
-            case .success(
-                let sourceCalendar,
-                let events,
-                let eventColorBackgrounds
-            ):
+            case .success(let events, let eventColorBackgrounds):
+                sourceCalendars = [primarySourceCalendar]
                 fetchedWindow = (windowStart, windowEnd)
                 normalizedEvents = normalize(
                     events,
-                    calendar: sourceCalendar,
                     eventColorBackgrounds: eventColorBackgrounds
                 )
                 weekLayouts = [:]
@@ -641,20 +712,26 @@ final class CalendarEventsModel {
                 drainFetchWork()
                 scheduleCadenceIfEligible()
             case .unavailable(let failure):
-                status = switch failure {
-                case .offline:
-                    CalendarEventsStatus(
-                        message: CalendarEventsCopy.offline,
-                        tone: .warning
-                    )
-                case .failed:
-                    CalendarEventsStatus(
-                        message: CalendarEventsCopy.failed,
-                        tone: .error
-                    )
-                }
+                publishInitialFailure(failure)
                 scheduleCadenceIfEligible()
             }
+        }
+    }
+
+    /// Publishes Planner-owned initial-fetch failure copy for either Primary
+    /// Source Calendar discovery or its aggregate Calendar Event request.
+    private func publishInitialFailure(_ failure: GoogleCalendarEventsFailure) {
+        status = switch failure {
+        case .offline:
+            CalendarEventsStatus(
+                message: CalendarEventsCopy.offline,
+                tone: .warning
+            )
+        case .failed:
+            CalendarEventsStatus(
+                message: CalendarEventsCopy.failed,
+                tone: .error
+            )
         }
     }
 
@@ -723,10 +800,12 @@ final class CalendarEventsModel {
         cancelCadence()
         isRefreshingEvents = true
         let attempt = connectionGeneration
+        let requestedSourceCalendars = sourceCalendars
         Task { [weak self] in
             let outcome = await adapter.fetchEvents(
-                from: refreshStart,
-                to: refreshEnd
+                from: requestedSourceCalendars,
+                start: refreshStart,
+                end: refreshEnd
             )
             guard let self else {
                 return
@@ -738,14 +817,9 @@ final class CalendarEventsModel {
             }
 
             switch outcome {
-            case .success(
-                let sourceCalendar,
-                let events,
-                let eventColorBackgrounds
-            ):
+            case .success(let events, let eventColorBackgrounds):
                 applyRefresh(
                     events,
-                    calendar: sourceCalendar,
                     eventColorBackgrounds: eventColorBackgrounds,
                     range: (start: refreshStart, end: refreshEnd)
                 )
@@ -771,12 +845,11 @@ final class CalendarEventsModel {
     /// refreshed range; cancelled and declined events therefore remove their
     /// prior presentation even though normalization drops them.
     private func applyRefresh(
-        _ events: [GoogleCalendarEvent],
-        calendar sourceCalendar: GoogleSourceCalendar,
+        _ events: [GoogleSourceCalendarEvent],
         eventColorBackgrounds: [String: String],
         range: (start: Date, end: Date)
     ) {
-        let returnedIDs = Set(events.map(\.id))
+        let returnedIDs = Set(events.map(\.event.id))
         let removedEvents = normalizedEvents.filter {
             intersects($0, range: range) || returnedIDs.contains($0.id)
         }
@@ -785,7 +858,6 @@ final class CalendarEventsModel {
         }
         let refreshedEvents = normalize(
             events,
-            calendar: sourceCalendar,
             eventColorBackgrounds: eventColorBackgrounds
         )
         for event in refreshedEvents {
@@ -1069,10 +1141,12 @@ final class CalendarEventsModel {
             message: CalendarEventsCopy.loading,
             tone: .info
         )
+        let requestedSourceCalendars = sourceCalendars
         Task { [weak self] in
             let outcome = await adapter.fetchEvents(
-                from: fetchStart,
-                to: fetchEnd
+                from: requestedSourceCalendars,
+                start: fetchStart,
+                end: fetchEnd
             )
 
             guard let self else {
@@ -1091,11 +1165,7 @@ final class CalendarEventsModel {
             }
 
             switch outcome {
-            case .success(
-                let sourceCalendar,
-                let events,
-                let eventColorBackgrounds
-            ):
+            case .success(let events, let eventColorBackgrounds):
                 // Google delivers every event overlapping the requested
                 // range, so an event spanning a previously fetched range's
                 // boundary arrives again here. The fresh copy replaces the
@@ -1103,7 +1173,6 @@ final class CalendarEventsModel {
                 // Row to one segment per event.
                 let slabEvents = normalize(
                     events,
-                    calendar: sourceCalendar,
                     eventColorBackgrounds: eventColorBackgrounds
                 )
                 let redeliveredIds = Set(slabEvents.map(\.id))
@@ -1251,6 +1320,9 @@ final class CalendarEventsModel {
         }
 
         let id: String
+        /// The Source Calendar identity and presentation attributes that
+        /// crossed the adapter seam with this event.
+        let sourceCalendar: GoogleSourceCalendar
         let title: String
         let colorHex: String
         let textTone: CalendarEventTextTone
@@ -1266,8 +1338,7 @@ final class CalendarEventsModel {
     /// every event classifies as a bar or a row in the environment's local
     /// dates.
     private func normalize(
-        _ events: [GoogleCalendarEvent],
-        calendar sourceCalendar: GoogleSourceCalendar,
+        _ events: [GoogleSourceCalendarEvent],
         eventColorBackgrounds: [String: String]
     ) -> [NormalizedEvent] {
         let calendar = environment.calendar
@@ -1282,7 +1353,9 @@ final class CalendarEventsModel {
             timeZone: environment.timeZone
         )
 
-        return events.compactMap { event in
+        return events.compactMap { sourceEvent in
+            let sourceCalendar = sourceEvent.sourceCalendar
+            let event = sourceEvent.event
             guard !event.isCancelled, !event.isDeclinedByViewer else {
                 return nil
             }
@@ -1352,6 +1425,7 @@ final class CalendarEventsModel {
                 }
                 return NormalizedEvent(
                     id: event.id,
+                    sourceCalendar: sourceCalendar,
                     title: title,
                     colorHex: colorHex,
                     textTone: textTone,
@@ -1375,6 +1449,7 @@ final class CalendarEventsModel {
                 if endDate > startDate {
                     return NormalizedEvent(
                         id: event.id,
+                        sourceCalendar: sourceCalendar,
                         title: title,
                         colorHex: colorHex,
                         textTone: textTone,
@@ -1395,6 +1470,7 @@ final class CalendarEventsModel {
                 }
                 return NormalizedEvent(
                     id: event.id,
+                    sourceCalendar: sourceCalendar,
                     title: title,
                     colorHex: colorHex,
                     textTone: textTone,
@@ -1516,6 +1592,7 @@ final class CalendarEventsModel {
             segments.append(
                 CalendarEventBarSegment(
                     id: bar.event.id,
+                    sourceCalendar: bar.event.sourceCalendar,
                     title: bar.event.title,
                     colorHex: bar.event.colorHex,
                     textTone: bar.event.textTone,
@@ -1549,6 +1626,7 @@ final class CalendarEventsModel {
                     startsAt,
                     CalendarEventRowItem(
                         id: event.id,
+                        sourceCalendar: event.sourceCalendar,
                         title: event.title,
                         startTimeText: startTimeText,
                         colorHex: event.colorHex
