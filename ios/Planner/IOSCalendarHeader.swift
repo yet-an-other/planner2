@@ -3,15 +3,15 @@ import SwiftUI
 /// The header collision policy as pure layout math, separated for
 /// deterministic tests.
 ///
-/// The trailing account control must collapse before the Visible Month is
+/// The trailing control cluster must collapse before the Visible Month is
 /// forced below its accepted minimum behavior, and the centered month must
-/// never overlap leading or trailing controls. The control's measured
+/// never overlap leading or trailing controls. The cluster's measured
 /// footprint — including its margins — reserves symmetric space around the
-/// center, so a wider control shrinks the month's width cap instead of
+/// center, so wider controls shrink the month's width cap instead of
 /// colliding with it.
 enum HeaderCollisionLayout {
     /// The width each side of the title row reserves by default for the
-    /// compact Product Name block and an optional account control, keeping
+    /// compact Product Name block and optional trailing controls, keeping
     /// the Visible Month geometrically centered and clear of both.
     static let minimumSideReservation: CGFloat = 96
 
@@ -20,15 +20,15 @@ enum HeaderCollisionLayout {
     /// finally truncation take over, in either presentation form.
     static let visibleMonthMinimumFootprint: CGFloat = 120
 
-    /// The widest control the header offers at a given total width.
+    /// The widest trailing cluster the header offers at a given total width.
     ///
-    /// The control (plus its margins) may grow until the month would drop
+    /// The cluster (plus its margins) may grow until the month would drop
     /// below its minimum footprint; beyond that it must collapse to a
     /// narrower form. The cap keeps even wide layouts from crowding the
     /// center.
-    static func accountControlBudget(in width: CGFloat) -> CGFloat {
+    static func trailingControlsBudget(in width: CGFloat) -> CGFloat {
         max(
-            44,
+            92,
             min(
                 (width - visibleMonthMinimumFootprint) / 2 - 32,
                 280
@@ -59,25 +59,24 @@ enum HeaderCollisionLayout {
 /// Monday-first weekday labels. The Visible Month presents the localized
 /// short month-and-year form (for example, Jul 2026), scaled down modestly
 /// and then truncated when space runs out. Two optional content seams —
-/// `accountControl` and `headerStatus` — let future work mount an iOS
-/// Account Control and iOS Header Status through the header rather than
-/// accumulating authentication or status behavior inside the Calendar
-/// Screen.
+/// `trailingControls` and `headerStatus` — mount the iOS Source Calendar
+/// Control, iOS Account Control, and iOS Header Status through the header
+/// rather than accumulating their behavior inside the Calendar Screen.
 ///
-/// A mounted account control stays clear of the centered Visible Month: the
-/// header bounds the control so it collapses before the month is forced
-/// below its accepted minimum behavior, measures the mounted control, and
-/// shrinks the month's width cap symmetrically when the control needs more
+/// Mounted trailing controls stay clear of the centered Visible Month: the
+/// header bounds the cluster so it collapses before the month is forced
+/// below its accepted minimum behavior, measures the mounted cluster, and
+/// shrinks the month's width cap symmetrically when the cluster needs more
 /// than the default side reservation.
 ///
 /// When both seams are left at their default, the header renders neither and
 /// keeps its accepted 64-point title row plus 36-point weekday row: the
-/// account-control overlay and the header-status row contribute nothing when
+/// trailing-controls overlay and the header-status row contribute nothing when
 /// they are empty, so today's event-free header is unchanged.
-struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
+struct IOSCalendarHeader<TrailingControls: View, HeaderStatus: View>: View {
     @FocusState private var visibleMonthFocused: Bool
     @State private var visibleMonthHovered = false
-    @State private var accountControlWidth = HeaderCollisionLayout.minimumSideReservation
+    @State private var trailingControlsWidth = HeaderCollisionLayout.minimumSideReservation
     /// The Product Version's size: 75% of the iOS Header Status's footnote,
     /// scaling proportionally with Dynamic Type.
     @ScaledMetric(relativeTo: .footnote) private var productVersionFontSize = 9.75
@@ -86,7 +85,7 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
     let productVersion: String?
     let weekdayLabels: [WeekdayLabel]
     let onJumpToToday: () -> Void
-    @ViewBuilder var accountControl: AccountControl
+    @ViewBuilder var trailingControls: TrailingControls
     @ViewBuilder var headerStatus: HeaderStatus
 
     init(
@@ -94,14 +93,14 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
         productVersion: String?,
         weekdayLabels: [WeekdayLabel],
         onJumpToToday: @escaping () -> Void,
-        @ViewBuilder accountControl: () -> AccountControl = { EmptyView() },
+        @ViewBuilder trailingControls: () -> TrailingControls = { EmptyView() },
         @ViewBuilder headerStatus: () -> HeaderStatus = { EmptyView() }
     ) {
         self.visibleMonth = visibleMonth
         self.productVersion = productVersion
         self.weekdayLabels = weekdayLabels
         self.onJumpToToday = onJumpToToday
-        self.accountControl = accountControl()
+        self.trailingControls = trailingControls()
         self.headerStatus = headerStatus()
     }
 
@@ -161,7 +160,7 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
                 .onHover { visibleMonthHovered = $0 }
             }
             .overlay(alignment: .trailing) {
-                accountControl
+                trailingControls
                     // Measure the control itself, not the bounding frame:
                     // the control receives the frame's clamped proposal and
                     // reports its honest collapsed width, while a flexible
@@ -172,10 +171,10 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
                         // The footprint includes the control's margins: the
                         // 16-point horizontal padding applied below on each
                         // side.
-                        accountControlWidth = measuredWidth + 32
+                        trailingControlsWidth = measuredWidth + 32
                     }
                     .frame(
-                        maxWidth: HeaderCollisionLayout.accountControlBudget(
+                        maxWidth: HeaderCollisionLayout.trailingControlsBudget(
                             in: geometry.size.width
                         ),
                         alignment: .trailing
@@ -189,12 +188,12 @@ struct IOSCalendarHeader<AccountControl: View, HeaderStatus: View>: View {
 
     /// The Visible Month keeps its accepted minimum behavior while leading
     /// and trailing controls stay clear: the reservation grows symmetrically
-    /// only when the mounted account control needs more than the default
+    /// only when the mounted trailing controls need more than the default
     /// side reservation, so the month remains centered and never overlaps.
     private func visibleMonthMaxWidth(in width: CGFloat) -> CGFloat {
         HeaderCollisionLayout.visibleMonthMaxWidth(
             in: width,
-            controlFootprint: accountControlWidth
+            controlFootprint: trailingControlsWidth
         )
     }
 

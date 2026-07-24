@@ -103,8 +103,8 @@ struct GoogleSourceCalendarEvent: Equatable, Sendable {
     let event: GoogleCalendarEvent
 }
 
-/// The product-oriented outcome of obtaining the current Primary Source
-/// Calendar before the Primary-only event path begins.
+/// The legacy product-oriented outcome of obtaining the current Primary
+/// Source Calendar before the earlier Primary-only event path begins.
 enum GoogleSourceCalendarOutcome: Equatable, Sendable {
     case success(GoogleSourceCalendar)
     case unavailable(GoogleCalendarEventsFailure)
@@ -129,7 +129,7 @@ enum GoogleCalendarEventsOutcome: Equatable, Sendable {
 /// The Google Calendar seam: one product-oriented interface satisfied by the
 /// live Google Calendar API adapter in production and by fakes in tests and
 /// previews. Calendar Event requests always name their Source Calendars
-/// explicitly; the current product path resolves and supplies only Primary.
+/// explicitly; production supplies the complete Selected Source Calendars.
 @MainActor
 protocol GoogleCalendarEventsAdapting {
     /// Obtains the Source Calendar Google currently designates as primary.
@@ -259,6 +259,10 @@ extension CalendarEventsCopy {
     /// Shown when Calendar Event Refresh fails for any other reason; existing
     /// events remain visible until a later refresh succeeds.
     static let refreshFailed = "Couldn\u{2019}t refresh events. Will retry"
+
+    /// Shown while an intentional Selected Source Calendars change replaces
+    /// the prior atomic snapshot around the dates the user is viewing.
+    static let updatingSelection = "Updating events…"
 }
 
 /// The readable text tone on top of an Event Color.
@@ -322,7 +326,7 @@ struct CalendarEventBarSegment: Equatable, Sendable, Identifiable {
     /// Unique within the Week Row: the event's id (one segment per event per
     /// week).
     let id: String
-    /// The originating Source Calendar for this current Primary-only copy,
+    /// The originating Source Calendar for this fetched copy,
     /// retained in memory for later canonical cross-calendar identity.
     let sourceCalendar: GoogleSourceCalendar
     let title: String
@@ -343,7 +347,7 @@ struct CalendarEventBarSegment: Equatable, Sendable, Identifiable {
 /// dot, a localized start time, and a title.
 struct CalendarEventRowItem: Equatable, Sendable, Identifiable {
     let id: String
-    /// The originating Source Calendar for this current Primary-only copy,
+    /// The originating Source Calendar for this fetched copy,
     /// retained in memory for later canonical cross-calendar identity.
     let sourceCalendar: GoogleSourceCalendar
     let title: String
@@ -444,6 +448,21 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// Event request owns the serialized adapter seam.
     @ObservationIgnored
     private var isRefreshPending = false
+
+    /// Routine Calendar Event work pauses while the native Source Calendar
+    /// Picker is open. Signals still coalesce in their existing pending flags.
+    @ObservationIgnored
+    private var isSourceCalendarPickerPresented = false
+
+    /// A final changed selection owes one whole-snapshot, visible-centered
+    /// replacement. It takes priority over slabs and bounded refreshes.
+    @ObservationIgnored
+    private var isSelectionReplacementPending = false
+
+    /// Whether that whole-snapshot replacement currently owns the serialized
+    /// aggregate adapter seam.
+    @ObservationIgnored
+    private var isReplacingSelection = false
 
     /// A changed visible range leaves one freshness decision owed while
     /// another Calendar Event request owns the serialized adapter seam.
@@ -611,6 +630,8 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         isConnected = connected
         connectionGeneration += 1
         cancelCadence()
+        isSourceCalendarPickerPresented = false
+        isSelectionReplacementPending = false
         fetchedWindow = nil
         sourceCalendars = selected
         normalizedEvents = []
@@ -629,6 +650,44 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         beginInitialFetch(adapter: adapter)
     }
 
+    /// Pauses new routine work while the native picker is open. Physical work
+    /// already in flight may finish; all new triggers continue to coalesce.
+    func sourceCalendarPickerDidOpen() {
+        guard isConnected, !isSourceCalendarPickerPresented else {
+            return
+        }
+        isSourceCalendarPickerPresented = true
+        cancelCadence()
+    }
+
+    /// Resumes routine work after an unchanged dismissal, or invalidates older
+    /// publication and starts one visible-centered atomic replacement after a
+    /// changed dismissal.
+    func sourceCalendarPickerDidClose(
+        selectedSourceCalendars: [GoogleSourceCalendar],
+        selectionChanged: Bool
+    ) {
+        guard isConnected, isSourceCalendarPickerPresented else {
+            return
+        }
+        isSourceCalendarPickerPresented = false
+
+        if selectionChanged {
+            sourceCalendars = selectedSourceCalendars
+            connectionGeneration += 1
+            cancelCadence()
+            isSelectionReplacementPending = true
+            refreshFailure = nil
+            status = CalendarEventsStatus(
+                message: CalendarEventsCopy.updatingSelection,
+                tone: .info
+            )
+        }
+
+        drainFetchWork()
+        scheduleCadenceIfEligible()
+    }
+
     /// Legacy Primary-only connection seam retained for deterministic tests
     /// and previews. Production uses `setSelectedSourceCalendars(_:)`.
     func setConnected(_ connected: Bool) {
@@ -642,6 +701,8 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
 
         guard connected else {
             cancelCadence()
+            isSourceCalendarPickerPresented = false
+            isSelectionReplacementPending = false
             fetchedWindow = nil
             sourceCalendars = []
             normalizedEvents = []
@@ -670,6 +731,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         adapter: any GoogleCalendarEventsAdapting
     ) {
         guard fetchedWindow == nil, !hasFetchInFlight,
+              !isSourceCalendarPickerPresented,
               !usesResolvedSourceCalendars || !sourceCalendars.isEmpty
         else {
             return
@@ -804,11 +866,14 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         guard isConnected, let adapter else {
             return
         }
-        if fetchedWindow == nil {
+        if isSelectionReplacementPending {
+            drainFetchWork()
+            scheduleCadenceIfEligible()
+        } else if fetchedWindow == nil {
             beginInitialFetch(adapter: adapter)
-            return
+        } else {
+            requestRefresh()
         }
-        requestRefresh()
     }
 
     /// Requests a bounded Calendar Event Refresh after the app returns to
@@ -825,7 +890,8 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// Coalesces one refresh signal against current scene and range state.
     private func requestRefresh() {
         guard adapter != nil, isConnected, isSceneActive,
-              fetchedWindow != nil, lastVisibleRange != nil
+              (fetchedWindow != nil || isSelectionReplacementPending),
+              lastVisibleRange != nil
         else {
             return
         }
@@ -992,7 +1058,9 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         }
 
         isSlabRetryBlocked = false
-        if fetchedWindow == nil {
+        if isSelectionReplacementPending {
+            drainFetchWork()
+        } else if fetchedWindow == nil {
             beginInitialFetch(adapter: adapter)
         } else if isRefreshingEvents || refreshFailure != nil {
             // Preserve this recovery signal if the request that observed the
@@ -1055,8 +1123,17 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// Window; all decisions use the newest visible range.
     private func drainFetchWork(allowSlab: Bool = true) {
         guard !hasFetchInFlight, let adapter, isConnected,
-              let window = fetchedWindow, let visible = lastVisibleRange
+              !isSourceCalendarPickerPresented
         else {
+            return
+        }
+
+        if isSelectionReplacementPending {
+            beginSelectionReplacement(adapter: adapter)
+            return
+        }
+
+        guard let window = fetchedWindow, let visible = lastVisibleRange else {
             return
         }
 
@@ -1070,11 +1147,14 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
            let forwardTrigger = addMonthsClamped(-1, to: lastFetchedDay),
            visible.end >= forwardTrigger,
            let newLastDay = addMonthsClamped(2, to: lastFetchedDay),
-           let newEnd = calendar.date(
+           let proposedEnd = calendar.date(
                byAdding: .day,
                value: 1,
                to: newLastDay
-           )
+           ),
+           let extendedRange = extendedCalendarRange(),
+           case let newEnd = min(proposedEnd, extendedRange.end),
+           newEnd > window.end
         {
             isExtendingForward = true
             extend(
@@ -1089,7 +1169,10 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         if allowSlab, !isSlabRetryBlocked,
            let backwardTrigger = addMonthsClamped(1, to: window.start),
            visible.start <= backwardTrigger,
-           let newStart = addMonthsClamped(-2, to: window.start)
+           let proposedStart = addMonthsClamped(-2, to: window.start),
+           let extendedRange = extendedCalendarRange(),
+           case let newStart = max(proposedStart, extendedRange.start),
+           newStart < window.start
         {
             isExtendingBackward = true
             extend(
@@ -1128,7 +1211,9 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// drains, making cadence completion-relative instead of wall-clock based.
     private func scheduleCadenceIfEligible() {
         guard cadenceSchedule == nil, !hasFetchInFlight, isConnected,
-              isSceneActive, fetchedWindow != nil, lastVisibleRange != nil
+              !isSourceCalendarPickerPresented, isSceneActive,
+              (fetchedWindow != nil || isSelectionReplacementPending),
+              lastVisibleRange != nil
         else {
             return
         }
@@ -1139,7 +1224,12 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 return
             }
             cadenceSchedule = nil
-            requestRefresh()
+            if isSelectionReplacementPending {
+                drainFetchWork()
+                scheduleCadenceIfEligible()
+            } else {
+                requestRefresh()
+            }
         }
     }
 
@@ -1152,7 +1242,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
 
     private var hasFetchInFlight: Bool {
         isFetchingInitialWindow || isRefreshingEvents || isExtendingForward
-            || isExtendingBackward
+            || isExtendingBackward || isReplacingSelection
     }
 
     /// Once an obsolete physical request releases the serialized adapter
@@ -1161,7 +1251,10 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         guard isConnected, let adapter else {
             return
         }
-        if fetchedWindow == nil {
+        if isSelectionReplacementPending {
+            drainFetchWork()
+            scheduleCadenceIfEligible()
+        } else if fetchedWindow == nil {
             beginInitialFetch(adapter: adapter)
         } else {
             drainFetchWork()
@@ -1265,6 +1358,121 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 scheduleCadenceIfEligible()
             }
         }
+    }
+
+    /// Replaces the complete Calendar Event snapshot around the latest visible
+    /// dates after a final Selected Source Calendars change. The prior snapshot
+    /// and Fetched Window stay intact until the complete aggregate succeeds.
+    private func beginSelectionReplacement(
+        adapter: any GoogleCalendarEventsAdapting
+    ) {
+        guard !isReplacingSelection,
+              let visible = lastVisibleRange,
+              let range = selectionReplacementRange(visible: visible)
+        else {
+            return
+        }
+
+        cancelCadence()
+        isSelectionReplacementPending = false
+        isReplacingSelection = true
+        status = CalendarEventsStatus(
+            message: CalendarEventsCopy.updatingSelection,
+            tone: .info
+        )
+        let attempt = connectionGeneration
+        let requestedSourceCalendars = sourceCalendars
+
+        Task { [weak self] in
+            let outcome = await adapter.fetchEvents(
+                from: requestedSourceCalendars,
+                start: range.start,
+                end: range.end
+            )
+            guard let self else {
+                return
+            }
+            isReplacingSelection = false
+            guard attempt == connectionGeneration else {
+                resumeAfterStaleFetch()
+                return
+            }
+
+            switch outcome {
+            case .success(let events, let eventColorBackgrounds):
+                fetchedWindow = range
+                normalizedEvents = normalize(
+                    events,
+                    eventColorBackgrounds: eventColorBackgrounds
+                )
+                weekLayouts = [:]
+                publishWeeks(covering: range)
+                freshnessCoverage = []
+                recordFreshness(
+                    for: range,
+                    completedAt: cadenceScheduler.now
+                )
+                refreshFailure = nil
+                isSelectionReplacementPending = false
+                reconcileSelectedEvent()
+                clearStatusIfIdle()
+                drainFetchWork()
+                scheduleCadenceIfEligible()
+            case .unavailable(let failure):
+                // Keep the prior snapshot, Fetched Window, selected detail,
+                // and freshness. The new durable selection remains desired.
+                refreshFailure = failure
+                isSelectionReplacementPending = true
+                clearStatusIfIdle()
+                scheduleCadenceIfEligible()
+            }
+        }
+    }
+
+    /// Three clamped calendar months around the latest visible Date Cells,
+    /// clipped to the complete Week Rows of the Extended Calendar Range.
+    private func selectionReplacementRange(
+        visible: (start: Date, end: Date)
+    ) -> (start: Date, end: Date)? {
+        let calendar = environment.calendar
+        guard
+            let bufferedStart = addMonthsClamped(-3, to: visible.start),
+            let bufferedLastDay = addMonthsClamped(3, to: visible.end),
+            let bufferedEnd = calendar.date(
+                byAdding: .day,
+                value: 1,
+                to: bufferedLastDay
+            ),
+            let extended = extendedCalendarRange()
+        else {
+            return nil
+        }
+
+        let start = max(calendar.startOfDay(for: bufferedStart), extended.start)
+        let end = min(calendar.startOfDay(for: bufferedEnd), extended.end)
+        return start < end ? (start, end) : nil
+    }
+
+    /// The half-open complete Week Rows from the week containing ten years
+    /// before Today through the week containing ten years after Today.
+    private func extendedCalendarRange() -> (start: Date, end: Date)? {
+        let calendar = environment.calendar
+        let today = calendar.startOfDay(for: environment.now)
+        guard
+            let firstDate = addYearsClamped(-10, to: today),
+            let finalDate = addYearsClamped(10, to: today),
+            let end = calendar.date(
+                byAdding: .day,
+                value: 7,
+                to: startOfMondayWeek(containing: finalDate)
+            )
+        else {
+            return nil
+        }
+        return (
+            startOfMondayWeek(containing: firstDate),
+            end
+        )
     }
 
     // MARK: Freshness
@@ -1812,6 +2020,42 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         firstOfTargetMonth.era = source.era
         firstOfTargetMonth.year = year
         firstOfTargetMonth.month = month + amount
+        firstOfTargetMonth.day = 1
+
+        guard
+            let targetMonth = calendar.date(from: firstOfTargetMonth),
+            let validDays = calendar.range(
+                of: .day,
+                in: .month,
+                for: targetMonth
+            )
+        else {
+            return nil
+        }
+
+        var target = firstOfTargetMonth
+        target.day = min(day, validDays.count)
+        return calendar.date(from: target)
+    }
+
+    private func addYearsClamped(_ amount: Int, to date: Date) -> Date? {
+        let calendar = environment.calendar
+        let source = calendar.dateComponents(
+            [.era, .year, .month, .day],
+            from: date
+        )
+        guard let year = source.year, let month = source.month,
+              let day = source.day
+        else {
+            return nil
+        }
+
+        var firstOfTargetMonth = DateComponents()
+        firstOfTargetMonth.calendar = calendar
+        firstOfTargetMonth.timeZone = calendar.timeZone
+        firstOfTargetMonth.era = source.era
+        firstOfTargetMonth.year = year + amount
+        firstOfTargetMonth.month = month
         firstOfTargetMonth.day = 1
 
         guard

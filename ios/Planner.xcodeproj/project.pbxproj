@@ -43,6 +43,8 @@
 		A00000000000000000000152 /* SourceCalendarsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000151 /* SourceCalendarsModel.swift */; };
 		A00000000000000000000154 /* SourceCalendarsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000153 /* SourceCalendarsModelTests.swift */; };
 		A00000000000000000000156 /* GoogleCalendarAPIAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000155 /* GoogleCalendarAPIAdapterTests.swift */; };
+		A00000000000000000000158 /* IOSSourceCalendarControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000157 /* IOSSourceCalendarControl.swift */; };
+		A00000000000000000000160 /* IOSSourceCalendarPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000159 /* IOSSourceCalendarPicker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -96,6 +98,8 @@
 		A00000000000000000000151 /* SourceCalendarsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceCalendarsModel.swift; sourceTree = "<group>"; };
 		A00000000000000000000153 /* SourceCalendarsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceCalendarsModelTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000155 /* GoogleCalendarAPIAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleCalendarAPIAdapterTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000157 /* IOSSourceCalendarControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSourceCalendarControl.swift; sourceTree = "<group>"; };
+		A00000000000000000000159 /* IOSSourceCalendarPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSourceCalendarPicker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -161,6 +165,8 @@
 				A00000000000000000000143 /* CalendarEventDetailLinks.swift */,
 				A00000000000000000000147 /* SelectedSourceCalendarsStore.swift */,
 				A00000000000000000000151 /* SourceCalendarsModel.swift */,
+				A00000000000000000000157 /* IOSSourceCalendarControl.swift */,
+				A00000000000000000000159 /* IOSSourceCalendarPicker.swift */,
 				A00000000000000000000018 /* Assets.xcassets */,
 				A00000000000000000000017 /* Info.plist */,
 			);
@@ -314,6 +320,8 @@
 				A00000000000000000000144 /* CalendarEventDetailLinks.swift in Sources */,
 				A00000000000000000000148 /* SelectedSourceCalendarsStore.swift in Sources */,
 				A00000000000000000000152 /* SourceCalendarsModel.swift in Sources */,
+				A00000000000000000000158 /* IOSSourceCalendarControl.swift in Sources */,
+				A00000000000000000000160 /* IOSSourceCalendarPicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

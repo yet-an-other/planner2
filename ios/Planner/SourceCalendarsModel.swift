@@ -33,6 +33,27 @@ protocol CalendarDataAccountConsuming: AnyObject {
 @MainActor
 protocol SelectedSourceCalendarsConsuming: AnyObject {
     func setSelectedSourceCalendars(_ sourceCalendars: [GoogleSourceCalendar]?)
+    func sourceCalendarPickerDidOpen()
+    func sourceCalendarPickerDidClose(
+        selectedSourceCalendars: [GoogleSourceCalendar],
+        selectionChanged: Bool
+    )
+}
+
+/// The compact iOS Source Calendar Control presentation. A suspended account
+/// has no control; a disclosure-released account keeps a stable control
+/// footprint through loading, failure, and ready states.
+enum SourceCalendarControlPresentation: Equatable, Sendable {
+    case hidden
+    case loading
+    case disabled
+    case ready(selectedCount: Int)
+}
+
+enum SourceCalendarToggleOutcome: Equatable, Sendable {
+    case changed
+    case minimumRequired
+    case unavailable
 }
 
 struct SourceCalendarsStatus: Equatable, Sendable {
@@ -50,6 +71,7 @@ enum SourceCalendarsCopy {
     static let loading = "Loading calendars…"
     static let offline = "You’re offline. Calendars will load when online"
     static let failed = "Couldn’t load calendars. Try again"
+    static let minimumSelection = "Select at least one calendar"
 }
 
 /// Pure, deterministic Source Calendar ordering and reconciliation.
@@ -116,6 +138,9 @@ final class SourceCalendarsModel: CalendarDataAccountConsuming {
     private(set) var availableSourceCalendars: [GoogleSourceCalendar] = []
     private(set) var selectedSourceCalendars: [GoogleSourceCalendar] = []
     private(set) var status = SourceCalendarsStatus(message: nil, tone: .info)
+    private(set) var controlPresentation: SourceCalendarControlPresentation = .hidden
+    private(set) var isPickerPresented = false
+    private(set) var minimumSelectionMessage: String?
 
     @ObservationIgnored
     private let adapter: (any GoogleSourceCalendarsAdapting)?
@@ -134,6 +159,8 @@ final class SourceCalendarsModel: CalendarDataAccountConsuming {
     private var isLoading = false
     @ObservationIgnored
     private var owesConnectivityRetry = false
+    @ObservationIgnored
+    private var openingSelectionIDs: [String]?
 
     init(
         adapter: (any GoogleSourceCalendarsAdapting)?,
@@ -173,12 +200,82 @@ final class SourceCalendarsModel: CalendarDataAccountConsuming {
         availableSourceCalendars = []
         selectedSourceCalendars = []
         status = SourceCalendarsStatus(message: nil, tone: .info)
+        controlPresentation = .hidden
+        isPickerPresented = false
+        minimumSelectionMessage = nil
+        openingSelectionIDs = nil
         selectionConsumer?.setSelectedSourceCalendars(nil)
 
         guard let accountID, let adapter else {
             return
         }
         load(accountID: accountID, adapter: adapter)
+    }
+
+    /// Opens the native picker from the disclosure-released ready state.
+    /// Live Source Calendar refresh on opening belongs to the recovery slice.
+    func presentPicker() {
+        guard case .ready = controlPresentation,
+              !isPickerPresented
+        else {
+            return
+        }
+        openingSelectionIDs = selectedSourceCalendars.map(\.id)
+        minimumSelectionMessage = nil
+        isPickerPresented = true
+        selectionConsumer?.sourceCalendarPickerDidOpen()
+    }
+
+    /// Applies Done and every native dismissal path identically. Toggles have
+    /// already persisted; dismissal publishes one final selection decision to
+    /// Calendar Events so no request is issued per tap.
+    func dismissPicker() {
+        guard isPickerPresented, let openingSelectionIDs else {
+            return
+        }
+        let finalSelection = selectedSourceCalendars
+        let changed = finalSelection.map(\.id) != openingSelectionIDs
+        isPickerPresented = false
+        minimumSelectionMessage = nil
+        self.openingSelectionIDs = nil
+        selectionConsumer?.sourceCalendarPickerDidClose(
+            selectedSourceCalendars: finalSelection,
+            selectionChanged: changed
+        )
+    }
+
+    /// Immediately persists one user toggle while enforcing the minimum-one
+    /// invariant. Calendar Event replacement remains deferred until dismissal.
+    @discardableResult
+    func toggleSourceCalendar(id: String) -> SourceCalendarToggleOutcome {
+        guard isPickerPresented,
+              let accountID,
+              availableSourceCalendars.contains(where: { $0.id == id })
+        else {
+            return .unavailable
+        }
+
+        let selectedIDs = Set(selectedSourceCalendars.map(\.id))
+        if selectedIDs.contains(id), selectedIDs.count == 1 {
+            minimumSelectionMessage = SourceCalendarsCopy.minimumSelection
+            return .minimumRequired
+        }
+
+        var nextIDs = selectedIDs
+        if !nextIDs.insert(id).inserted {
+            nextIDs.remove(id)
+        }
+        let nextSelection = availableSourceCalendars.filter {
+            nextIDs.contains($0.id)
+        }
+        store.saveSelectedSourceCalendarIDs(
+            nextSelection.map(\.id),
+            for: accountID
+        )
+        selectedSourceCalendars = nextSelection
+        minimumSelectionMessage = nil
+        controlPresentation = .ready(selectedCount: nextSelection.count)
+        return .changed
     }
 
     private func load(
@@ -196,6 +293,7 @@ final class SourceCalendarsModel: CalendarDataAccountConsuming {
             message: SourceCalendarsCopy.loading,
             tone: .info
         )
+        controlPresentation = .loading
 
         Task { [weak self] in
             let outcome = await adapter.fetchSourceCalendars()
@@ -230,6 +328,9 @@ final class SourceCalendarsModel: CalendarDataAccountConsuming {
                 availableSourceCalendars = available
                 selectedSourceCalendars = selected
                 status = SourceCalendarsStatus(message: nil, tone: .info)
+                controlPresentation = selected.isEmpty
+                    ? .disabled
+                    : .ready(selectedCount: selected.count)
                 selectionConsumer?.setSelectedSourceCalendars(selected)
             case .unavailable(.offline):
                 owesConnectivityRetry = true
@@ -237,11 +338,13 @@ final class SourceCalendarsModel: CalendarDataAccountConsuming {
                     message: SourceCalendarsCopy.offline,
                     tone: .warning
                 )
+                controlPresentation = .disabled
             case .unavailable(.failed):
                 status = SourceCalendarsStatus(
                     message: SourceCalendarsCopy.failed,
                     tone: .error
                 )
+                controlPresentation = .disabled
             }
         }
     }

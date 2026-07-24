@@ -42,7 +42,7 @@ struct CalendarScreen: View {
                 productVersion: ProductVersion.current,
                 weekdayLabels: model.weekdayLabels,
                 onJumpToToday: jumpToToday,
-                accountControl: { accountControl },
+                trailingControls: { trailingControls },
                 headerStatus: { headerStatus }
             )
 
@@ -132,18 +132,72 @@ struct CalendarScreen: View {
         }
     }
 
-    /// The iOS Account Control mounted through the header's trailing seam.
-    /// While the build-time release gate is off, no connection module exists
-    /// and the seam stays empty; the module publishes the presentation for
-    /// every other case, including the disabled unconfigured build.
+    /// The iOS Source Calendar and Account Controls mounted through the
+    /// header's trailing seam. While the build-time release gate is off, no
+    /// connection module exists and the seam stays empty.
     @ViewBuilder
-    private var accountControl: some View {
+    private var trailingControls: some View {
         if let connection {
-            IOSAccountControl(
-                presentation: connection.control,
-                connect: connection.connect,
-                disconnectOnThisDevice: connection.disconnectOnThisDevice
+            HStack(spacing: 4) {
+                sourceCalendarControl
+
+                IOSAccountControl(
+                    presentation: connection.control,
+                    connect: connection.connect,
+                    disconnectOnThisDevice: connection.disconnectOnThisDevice
+                )
+            }
+        }
+    }
+
+    /// The connected-only iOS Source Calendar Control immediately precedes
+    /// the Account Control. Its native popover adapts to a sheet at compact
+    /// width, and every dismissal writes through the same model lifecycle.
+    @ViewBuilder
+    private var sourceCalendarControl: some View {
+        if let sourceCalendars,
+           sourceCalendars.controlPresentation != .hidden
+        {
+            IOSSourceCalendarControl(
+                presentation: sourceCalendars.controlPresentation,
+                presentPicker: presentSourceCalendarPicker
             )
+            .popover(isPresented: sourceCalendarPickerPresented) {
+                IOSSourceCalendarPicker(
+                    sourceCalendars: sourceCalendars.availableSourceCalendars,
+                    selectedSourceCalendarIDs: Set(
+                        sourceCalendars.selectedSourceCalendars.map(\.id)
+                    ),
+                    minimumSelectionMessage:
+                        sourceCalendars.minimumSelectionMessage,
+                    toggle: {
+                        _ = sourceCalendars.toggleSourceCalendar(id: $0)
+                    },
+                    done: sourceCalendars.dismissPicker
+                )
+                .presentationCompactAdaptation(.sheet)
+            }
+        }
+    }
+
+    private var sourceCalendarPickerPresented: Binding<Bool> {
+        Binding(
+            get: { sourceCalendars?.isPickerPresented == true },
+            set: { presented in
+                if !presented {
+                    sourceCalendars?.dismissPicker()
+                }
+            }
+        )
+    }
+
+    /// Native adaptive presentations never stack. Yielding once lets the
+    /// Event Detail Popover leave its anchor before the picker is presented.
+    private func presentSourceCalendarPicker() {
+        events?.dismissEventDetail()
+        Task { @MainActor in
+            await Task.yield()
+            sourceCalendars?.presentPicker()
         }
     }
 
@@ -335,12 +389,12 @@ struct CalendarScreen: View {
 
         let visibleWeeks = max(
             1,
-            Int(ceil(scrollViewportHeight / WeekRowMetrics.height)) + 1
+            Int(ceil(scrollViewportHeight / WeekRowMetrics.height))
         )
         guard
-            let bottomWeek = currentEnvironment().calendar.date(
+            let latestVisibleDate = currentEnvironment().calendar.date(
                 byAdding: .day,
-                value: 7 * visibleWeeks,
+                value: 7 * visibleWeeks - 1,
                 to: model.topWeekStart
             )
         else {
@@ -349,7 +403,7 @@ struct CalendarScreen: View {
 
         events.showVisibleRange(
             from: model.topWeekStart,
-            through: bottomWeek
+            through: latestVisibleDate
         )
     }
 }

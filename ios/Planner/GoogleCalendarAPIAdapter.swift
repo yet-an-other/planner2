@@ -28,6 +28,7 @@ enum GoogleCalendarAPIPath {
 /// Fetches are memory-only by construction: responses decode straight into
 /// seam values and nothing is written to disk (iOS ADR 0003).
 final class GoogleCalendarAPIAdapter:
+    Sendable,
     GoogleCalendarEventsAdapting,
     GoogleSourceCalendarsAdapting
 {
@@ -198,53 +199,103 @@ final class GoogleCalendarAPIAdapter:
         from start: Date,
         to end: Date
     ) async throws -> [GoogleSourceCalendarEvent] {
+        guard !sourceCalendars.isEmpty else {
+            return []
+        }
+
         let stampFormatter = ISO8601DateFormatter()
         stampFormatter.formatOptions = [.withInternetDateTime]
+        let timeMin = stampFormatter.string(from: start)
+        let timeMax = stampFormatter.string(from: end)
 
-        var events: [GoogleSourceCalendarEvent] = []
-        for sourceCalendar in sourceCalendars {
-            var pageToken: String?
-            repeat {
-                var query = [
-                    URLQueryItem(
-                        name: "timeMin",
-                        value: stampFormatter.string(from: start)
-                    ),
-                    URLQueryItem(
-                        name: "timeMax",
-                        value: stampFormatter.string(from: end)
-                    ),
-                    // Recurring events arrive as individual instances.
-                    URLQueryItem(name: "singleEvents", value: "true"),
-                    URLQueryItem(name: "maxResults", value: "2500"),
-                ]
-                if let pageToken {
-                    query.append(
-                        URLQueryItem(name: "pageToken", value: pageToken)
+        // At most four Source Calendars own network work at once. Each child
+        // pages one source sequentially; indexed assembly restores the
+        // accepted deterministic source order regardless of completion order.
+        return try await withThrowingTaskGroup(
+            of: (Int, [GoogleSourceCalendarEvent]).self
+        ) { group in
+            var nextIndex = 0
+            var results = Array(
+                repeating: [GoogleSourceCalendarEvent](),
+                count: sourceCalendars.count
+            )
+
+            func addNext() {
+                guard nextIndex < sourceCalendars.count else {
+                    return
+                }
+                let index = nextIndex
+                let sourceCalendar = sourceCalendars[index]
+                nextIndex += 1
+                group.addTask { [self] in
+                    (
+                        index,
+                        try await fetchEvents(
+                            token: token,
+                            sourceCalendar: sourceCalendar,
+                            timeMin: timeMin,
+                            timeMax: timeMax
+                        )
                     )
                 }
+            }
 
-                guard let path = GoogleCalendarAPIPath.events(
-                    sourceCalendarID: sourceCalendar.id
-                ) else {
-                    throw FetchError.failed
-                }
-                let page: EventsPageDTO = try await get(
-                    path: path,
-                    query: query,
-                    token: token
-                )
-                events.append(
-                    contentsOf: (page.items ?? []).compactMap(Self.mapEvent).map {
-                        GoogleSourceCalendarEvent(
-                            sourceCalendar: sourceCalendar,
-                            event: $0
-                        )
-                    }
-                )
-                pageToken = page.nextPageToken
-            } while pageToken != nil
+            for _ in 0..<min(4, sourceCalendars.count) {
+                addNext()
+            }
+            while let (index, events) = try await group.next() {
+                results[index] = events
+                addNext()
+            }
+            return results.flatMap { $0 }
         }
+    }
+
+    /// Fetches every page for one Source Calendar. This helper remains
+    /// sequential so pagination tokens cannot race or publish partial data.
+    private func fetchEvents(
+        token: String,
+        sourceCalendar: GoogleSourceCalendar,
+        timeMin: String,
+        timeMax: String
+    ) async throws -> [GoogleSourceCalendarEvent] {
+        guard let path = GoogleCalendarAPIPath.events(
+            sourceCalendarID: sourceCalendar.id
+        ) else {
+            throw FetchError.failed
+        }
+
+        var events: [GoogleSourceCalendarEvent] = []
+        var pageToken: String?
+        repeat {
+            var query = [
+                URLQueryItem(name: "timeMin", value: timeMin),
+                URLQueryItem(name: "timeMax", value: timeMax),
+                // Recurring events arrive as individual instances.
+                URLQueryItem(name: "singleEvents", value: "true"),
+                URLQueryItem(name: "maxResults", value: "2500"),
+            ]
+            if let pageToken {
+                query.append(
+                    URLQueryItem(name: "pageToken", value: pageToken)
+                )
+            }
+
+            let page: EventsPageDTO = try await get(
+                path: path,
+                query: query,
+                token: token
+            )
+            events.append(
+                contentsOf: (page.items ?? []).compactMap(Self.mapEvent).map {
+                    GoogleSourceCalendarEvent(
+                        sourceCalendar: sourceCalendar,
+                        event: $0
+                    )
+                }
+            )
+            pageToken = page.nextPageToken
+        } while pageToken != nil
 
         return events
     }

@@ -132,6 +132,13 @@ private final class PipelineSelectionConsumer: SelectedSourceCalendarsConsuming 
             log.entries.append("event-request")
         }
     }
+
+    func sourceCalendarPickerDidOpen() {}
+
+    func sourceCalendarPickerDidClose(
+        selectedSourceCalendars _: [GoogleSourceCalendar],
+        selectionChanged _: Bool
+    ) {}
 }
 
 @MainActor

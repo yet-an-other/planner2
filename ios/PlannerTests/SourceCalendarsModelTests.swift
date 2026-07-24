@@ -16,6 +16,8 @@ private final class FakeSourceCalendarsAdapter: GoogleSourceCalendarsAdapting {
 @MainActor
 private final class RecordingSelectionConsumer: SelectedSourceCalendarsConsuming {
     private(set) var selections: [[GoogleSourceCalendar]?] = []
+    private(set) var pickerOpenCallCount = 0
+    private(set) var pickerClosures: [([GoogleSourceCalendar], Bool)] = []
     var onSelection: (([GoogleSourceCalendar]?) -> Void)?
 
     func setSelectedSourceCalendars(
@@ -23,6 +25,17 @@ private final class RecordingSelectionConsumer: SelectedSourceCalendarsConsuming
     ) {
         selections.append(sourceCalendars)
         onSelection?(sourceCalendars)
+    }
+
+    func sourceCalendarPickerDidOpen() {
+        pickerOpenCallCount += 1
+    }
+
+    func sourceCalendarPickerDidClose(
+        selectedSourceCalendars: [GoogleSourceCalendar],
+        selectionChanged: Bool
+    ) {
+        pickerClosures.append((selectedSourceCalendars, selectionChanged))
     }
 }
 
@@ -281,6 +294,91 @@ struct SourceCalendarsModelTests {
         #expect(store.saveCallCount == 0)
         #expect(model.selectedSourceCalendars.isEmpty)
         #expect(consumer.selections.last! == nil)
+    }
+
+    @Test("Picker toggles persist immediately and dismissal publishes once")
+    func pickerToggleAndDismissal() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        adapter.handler = { .success([Self.work, Self.primary, Self.family]) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(
+            await eventually {
+                model.controlPresentation == .ready(selectedCount: 1)
+            }
+        )
+
+        model.presentPicker()
+        #expect(model.isPickerPresented)
+        #expect(consumer.pickerOpenCallCount == 1)
+
+        #expect(model.toggleSourceCalendar(id: "work") == .changed)
+        #expect(model.selectedSourceCalendars == [Self.primary, Self.work])
+        #expect(store.values["account-a"] == ["primary", "work"])
+        #expect(consumer.pickerClosures.isEmpty)
+
+        model.dismissPicker()
+        model.dismissPicker()
+        #expect(consumer.pickerClosures.count == 1)
+        #expect(consumer.pickerClosures.last?.0 == [Self.primary, Self.work])
+        #expect(consumer.pickerClosures.last?.1 == true)
+    }
+
+    @Test("The final selected Source Calendar cannot be deselected")
+    func minimumOne() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        adapter.handler = { .success([Self.primary, Self.family]) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: nil
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+        let writesAfterLoad = store.saveCallCount
+        model.presentPicker()
+
+        #expect(
+            model.toggleSourceCalendar(id: "primary") == .minimumRequired
+        )
+        #expect(model.selectedSourceCalendars == [Self.primary])
+        #expect(store.saveCallCount == writesAfterLoad)
+        #expect(
+            model.minimumSelectionMessage
+                == SourceCalendarsCopy.minimumSelection
+        )
+    }
+
+    @Test("Returning to the opening selection dismisses without replacement")
+    func unchangedFinalSelection() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        adapter.handler = { .success([Self.primary, Self.family]) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+        model.presentPicker()
+        _ = model.toggleSourceCalendar(id: "family")
+        _ = model.toggleSourceCalendar(id: "family")
+        model.dismissPicker()
+
+        #expect(consumer.pickerClosures.last?.0 == [Self.primary])
+        #expect(consumer.pickerClosures.last?.1 == false)
     }
 
     private func eventually(

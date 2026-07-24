@@ -280,6 +280,328 @@ struct CalendarEventsModelTests {
         #expect(model.weekLayouts.isEmpty)
     }
 
+    @Test("Changed picker dismissal atomically replaces around visible dates")
+    func changedPickerDismissalReplacesVisibleWindow() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let family = GoogleSourceCalendar(
+            id: "family",
+            summary: "Family",
+            backgroundColorHex: "#7CB342",
+            isPrimary: false
+        )
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        var releaseReplacement:
+            CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 1 {
+                return .success(
+                    calendar: primary,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "old",
+                            summary: "Old snapshot",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            }
+            return await withCheckedContinuation { releaseReplacement = $0 }
+        }
+
+        model.setSelectedSourceCalendars([primary])
+        let weekStart = Self.gmt(2026, 7, 20)
+        #expect(await layoutEventually(model, weekStart: weekStart) != nil)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 26)
+        )
+
+        model.sourceCalendarPickerDidOpen()
+        model.sourceCalendarPickerDidClose(
+            selectedSourceCalendars: [primary, family],
+            selectionChanged: true
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(adapter.fetchedSourceCalendars.last == [primary, family])
+        #expect(adapter.fetchedRanges.last?.start == Self.gmt(2026, 4, 13))
+        #expect(adapter.fetchedRanges.last?.end == Self.gmt(2026, 10, 27))
+        #expect(model.status.message == CalendarEventsCopy.updatingSelection)
+        #expect(
+            model.layout(forWeekStarting: weekStart)?
+                .cells[0].rows.map(\.id) == ["old"]
+        )
+
+        releaseReplacement?.resume(
+            returning: .success(
+                events: [
+                    GoogleSourceCalendarEvent(
+                        sourceCalendar: family,
+                        event: GoogleCalendarEvent(
+                            id: "new",
+                            summary: "New snapshot",
+                            start: .timed(Self.gmt(2026, 7, 20, 11)),
+                            end: .timed(Self.gmt(2026, 7, 20, 12)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        )
+                    ),
+                ],
+                eventColorBackgrounds: [:]
+            )
+        )
+
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: weekStart)?
+                    .cells[0].rows.map(\.id) == ["new"]
+            }
+        )
+        #expect(model.status.message == nil)
+    }
+
+    @Test("Failed selection replacement retains the prior atomic snapshot")
+    func failedSelectionReplacementRetainsSnapshot() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let family = GoogleSourceCalendar(
+            id: "family",
+            summary: "Family",
+            backgroundColorHex: "#7CB342",
+            isPrimary: false
+        )
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 1 {
+                return .success(
+                    calendar: primary,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "old",
+                            summary: "Old snapshot",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            }
+            return .unavailable(.failed)
+        }
+
+        model.setSelectedSourceCalendars([primary])
+        let weekStart = Self.gmt(2026, 7, 20)
+        #expect(await layoutEventually(model, weekStart: weekStart) != nil)
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 26)
+        )
+        model.sourceCalendarPickerDidOpen()
+        model.sourceCalendarPickerDidClose(
+            selectedSourceCalendars: [primary, family],
+            selectionChanged: true
+        )
+
+        #expect(
+            await eventually {
+                model.status.message == CalendarEventsCopy.refreshFailed
+            }
+        )
+        #expect(
+            model.layout(forWeekStarting: weekStart)?
+                .cells[0].rows.map(\.id) == ["old"]
+        )
+    }
+
+    @Test("Routine work pauses and coalesces through unchanged dismissal")
+    func pickerPausesRoutineWork() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let (model, adapter) = makeModel()
+        model.setSelectedSourceCalendars([primary])
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        #expect(await eventually { model.status.message == nil })
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 26)
+        )
+
+        model.sourceCalendarPickerDidOpen()
+        model.setSceneActive(true)
+        model.refreshOnForeground()
+        #expect(await neverHappens { adapter.fetchCallCount > 1 })
+
+        model.sourceCalendarPickerDidClose(
+            selectedSourceCalendars: [primary],
+            selectionChanged: false
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(adapter.fetchedSourceCalendars.last == [primary])
+    }
+
+    @Test("Selection replacement clips to the Extended Calendar Range")
+    func selectionReplacementClipsExtendedRange() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let family = GoogleSourceCalendar(
+            id: "family",
+            summary: "Family",
+            backgroundColorHex: "#7CB342",
+            isPrimary: false
+        )
+        let (model, adapter) = makeModel()
+        model.setSelectedSourceCalendars([primary])
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        #expect(await eventually { model.status.message == nil })
+        model.sourceCalendarPickerDidOpen()
+        model.showVisibleRange(
+            from: Self.gmt(2016, 7, 11),
+            through: Self.gmt(2016, 7, 17)
+        )
+        model.sourceCalendarPickerDidClose(
+            selectedSourceCalendars: [primary, family],
+            selectionChanged: true
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        #expect(adapter.fetchedRanges.last?.start == Self.gmt(2016, 7, 11))
+    }
+
+    @Test("Connectivity return retries a failed selection replacement")
+    func selectionReplacementRetriesOnConnectivity() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let family = GoogleSourceCalendar(
+            id: "family",
+            summary: "Family",
+            backgroundColorHex: "#7CB342",
+            isPrimary: false
+        )
+        let (model, adapter, monitor) = makeModelWithMonitor()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            return fetchNumber == 2
+                ? .unavailable(.offline)
+                : .success(calendar: primary, events: [])
+        }
+
+        model.setSelectedSourceCalendars([primary])
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        #expect(await eventually { model.status.message == nil })
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 26)
+        )
+        model.sourceCalendarPickerDidOpen()
+        model.sourceCalendarPickerDidClose(
+            selectedSourceCalendars: [primary, family],
+            selectionChanged: true
+        )
+        #expect(
+            await eventually {
+                model.status.message == CalendarEventsCopy.refreshOffline
+            }
+        )
+
+        monitor.simulateConnectivityReturn()
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        #expect(adapter.fetchedSourceCalendars.last == [primary, family])
+        #expect(await eventually { model.status.message == nil })
+    }
+
+    @Test("A later changed dismissal wins over an older replacement")
+    func latestSelectionReplacementWins() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let family = GoogleSourceCalendar(
+            id: "family",
+            summary: "Family",
+            backgroundColorHex: "#7CB342",
+            isPrimary: false
+        )
+        let work = GoogleSourceCalendar(
+            id: "work",
+            summary: "Work",
+            backgroundColorHex: "#7986CB",
+            isPrimary: false
+        )
+        let (model, adapter) = makeModel()
+        var fetchNumber = 0
+        var releaseOlder:
+            CheckedContinuation<GoogleCalendarEventsOutcome, Never>?
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            switch fetchNumber {
+            case 1:
+                return .success(calendar: primary, events: [])
+            case 2:
+                return await withCheckedContinuation { releaseOlder = $0 }
+            default:
+                return .success(
+                    calendar: work,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "latest",
+                            summary: "Latest",
+                            start: .timed(Self.gmt(2026, 7, 20, 9)),
+                            end: .timed(Self.gmt(2026, 7, 20, 10)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            }
+        }
+
+        model.setSelectedSourceCalendars([primary])
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        #expect(await eventually { model.status.message == nil })
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 26)
+        )
+        model.sourceCalendarPickerDidOpen()
+        model.sourceCalendarPickerDidClose(
+            selectedSourceCalendars: [primary, family],
+            selectionChanged: true
+        )
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+
+        model.sourceCalendarPickerDidOpen()
+        model.sourceCalendarPickerDidClose(
+            selectedSourceCalendars: [work],
+            selectionChanged: true
+        )
+        releaseOlder?.resume(
+            returning: .success(
+                calendar: family,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "stale",
+                        summary: "Stale",
+                        start: .timed(Self.gmt(2026, 7, 20, 11)),
+                        end: .timed(Self.gmt(2026, 7, 20, 12)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        )
+
+        #expect(await eventually { adapter.fetchCallCount == 3 })
+        #expect(adapter.fetchedSourceCalendars.last == [work])
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        )
+        #expect(layout?.cells[0].rows.map(\.id) == ["latest"])
+    }
+
     @Test("Source Calendar identity and presentation remain on Calendar Events")
     func sourceCalendarIdentityRemainsOnCalendarEvents() async {
         let sourceCalendar = GoogleSourceCalendar(

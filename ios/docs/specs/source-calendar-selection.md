@@ -13,7 +13,7 @@ Planning owns Source Calendar, Primary Source Calendar, Selected Source Calendar
 
 This capability remains behind the existing Google connection release gate. It introduces no additional authorization scope, backend, background processing, or Google Calendar write access.
 
-**Implementation status:** disclosure version 3, complete live Source Calendar loading, per-account restoration, pure reconciliation, and resolved-source Calendar Event loading are delivered. First use therefore remains Primary-only (with deterministic fallback when needed). The iOS Source Calendar Control, picker, and user-driven multi-selection remain later slices.
+**Implementation status:** disclosure version 3, complete initial Source Calendar loading, per-account restoration, pure reconciliation, and the native user-driven multi-selection happy path are delivered. The connected control opens an adaptive picker; immediate toggles persist, and dismissal atomically reloads every selected source around the visible dates with bounded concurrency and stale-completion protection. Live opening reload/recovery and revocation handling, cross-calendar occurrence deduplication and source detail, and bulk-selection/advanced accessibility behavior remain follow-up slices.
 
 ## Accepted behavior
 

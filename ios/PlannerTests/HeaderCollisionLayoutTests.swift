@@ -16,20 +16,20 @@ struct HeaderCollisionLayoutTests {
     func budgetCollapsesAtNarrowWidths() {
         // At iPhone widths even a moderately wide connected capsule must
         // not fit: the month keeps its minimum footprint.
-        #expect(HeaderCollisionLayout.accountControlBudget(in: 320) == 68)
-        #expect(HeaderCollisionLayout.accountControlBudget(in: 393) == 104.5)
-        #expect(HeaderCollisionLayout.accountControlBudget(in: 402) == 109)
+        #expect(HeaderCollisionLayout.trailingControlsBudget(in: 320) == 92)
+        #expect(HeaderCollisionLayout.trailingControlsBudget(in: 393) == 104.5)
+        #expect(HeaderCollisionLayout.trailingControlsBudget(in: 402) == 109)
     }
 
     @Test("The budget caps the control at wide widths")
     func budgetCapsAtWideWidths() {
-        #expect(HeaderCollisionLayout.accountControlBudget(in: 834) == 280)
-        #expect(HeaderCollisionLayout.accountControlBudget(in: 1_366) == 280)
+        #expect(HeaderCollisionLayout.trailingControlsBudget(in: 834) == 280)
+        #expect(HeaderCollisionLayout.trailingControlsBudget(in: 1_366) == 280)
     }
 
-    @Test("The budget never drops below the activation target")
+    @Test("The budget always fits both compact activation targets")
     func budgetFloor() {
-        #expect(HeaderCollisionLayout.accountControlBudget(in: 200) == 44)
+        #expect(HeaderCollisionLayout.trailingControlsBudget(in: 200) == 92)
     }
 
     // MARK: Visible Month cap
@@ -75,7 +75,7 @@ struct HeaderCollisionLayoutTests {
     @Test("An in-budget control can never overlap the centered month")
     func noOverlapInvariant() {
         for width in Self.widths {
-            let budget = HeaderCollisionLayout.accountControlBudget(in: width)
+            let budget = HeaderCollisionLayout.trailingControlsBudget(in: width)
             var controlWidth: CGFloat = 0
             while controlWidth <= budget {
                 let footprint = controlWidth + 32
