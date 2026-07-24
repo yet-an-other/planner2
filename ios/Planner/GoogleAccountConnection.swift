@@ -49,10 +49,14 @@ enum GoogleAuthorizationFailure: Equatable, Sendable {
 
 /// The memory-only result of a successful Google authorization.
 ///
-/// Planner keeps only what the iOS Account Control presents and never
-/// persists it: Google Sign-In owns credential persistence, and email,
-/// tokens, and raw SDK responses are deliberately absent here.
+/// Planner keeps the presentation fields only in memory and exposes Google's
+/// stable opaque account identifier to the Source Calendars boundary. Google
+/// Sign-In owns credential persistence; email, tokens, and raw SDK responses
+/// are deliberately absent here.
 struct GoogleAuthorizedAccount: Equatable, Sendable {
+    /// Google's stable opaque identifier for per-account selection storage.
+    let stableAccountID: String
+
     /// The account display name, when Google provides one.
     let displayName: String?
 
@@ -253,6 +257,11 @@ final class GoogleAccountConnection {
     /// The current iOS Header Status content.
     private(set) var status: Status
 
+    /// Google's stable opaque identifier for the connected account, exposed
+    /// only to the Source Calendars boundary and never persisted as profile
+    /// data. It clears whenever the Google Account Connection clears.
+    private(set) var connectedAccountID: String?
+
     /// The first-connect explanation awaiting the user's choice, or `nil`
     /// when no sheet should be presented.
     private(set) var explanation: GoogleConnectionExplanation?
@@ -286,6 +295,7 @@ final class GoogleAccountConnection {
                 message: GoogleAccountConnectionCopy.restoring,
                 tone: .info
             )
+            connectedAccountID = nil
             // A fresh installation or a backup on new hardware must not
             // inherit the previous installation's sign-in. Clearing is the
             // SDK's local sign-out — never direct Keychain deletion and
@@ -308,6 +318,7 @@ final class GoogleAccountConnection {
                 message: GoogleAccountConnectionCopy.unconfigured,
                 tone: .warning
             )
+            connectedAccountID = nil
         }
     }
 
@@ -327,6 +338,7 @@ final class GoogleAccountConnection {
         disclosureVersion = Self.currentDisclosureVersion
         self.control = control
         self.status = status
+        connectedAccountID = nil
         self.explanation = explanation
     }
     #endif
@@ -434,6 +446,7 @@ final class GoogleAccountConnection {
                 // Identity without the Calendar scope is not a connection:
                 // clear the partial local sign-in and stay disconnected.
                 adapter.signOut()
+                connectedAccountID = nil
                 control = .disconnected(connectEnabled: true)
                 status = Status(
                     message: GoogleAccountConnectionCopy.calendarReadAccessRequired,
@@ -497,6 +510,7 @@ final class GoogleAccountConnection {
         connectionDecision += 1
         owesOfflineValidation = false
         adapter?.signOut()
+        connectedAccountID = nil
         control = .disconnected(connectEnabled: true)
         status = Status(
             message: GoogleAccountConnectionCopy.disconnectedOnThisDevice,
@@ -552,6 +566,7 @@ final class GoogleAccountConnection {
                 // The grant lost the Calendar scope: the saved identity is
                 // not a connection, so clear it and stay disconnected.
                 adapter.signOut()
+                connectedAccountID = nil
                 control = .disconnected(connectEnabled: true)
                 status = Status(
                     message: GoogleAccountConnectionCopy.calendarReadAccessRequired,
@@ -562,6 +577,7 @@ final class GoogleAccountConnection {
                 // expired like any invalid authorization; anything else is
                 // an ordinary blank disconnected state.
                 let wasConnected = control.isConnected
+                connectedAccountID = nil
                 control = .disconnected(connectEnabled: true)
                 status = wasConnected
                     ? Status(
@@ -571,6 +587,7 @@ final class GoogleAccountConnection {
                     : Status(message: nil, tone: .info)
             case .invalidAuthorization:
                 adapter.signOut()
+                connectedAccountID = nil
                 control = .disconnected(connectEnabled: true)
                 status = Status(
                     message: GoogleAccountConnectionCopy.expired,
@@ -613,6 +630,7 @@ final class GoogleAccountConnection {
     /// holds the Calendar scope, refreshing the presented identity on every
     /// successful validation.
     private func publishConnected(_ account: GoogleAuthorizedAccount) {
+        connectedAccountID = account.stableAccountID
         control = .connected(
             GoogleConnectedProfile(
                 displayName: account.displayName,

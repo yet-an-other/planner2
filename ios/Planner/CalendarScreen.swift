@@ -1140,7 +1140,9 @@ private func previewUnconfiguredConnection() -> GoogleAccountConnection {
         disclosureStore: UserDefaultsGoogleConnectionDisclosureStore(),
         installationBoundary: GoogleConnectionInstallationBoundary(
             defaults: .standard,
-            deviceMarkerStore: KeychainGoogleConnectionDeviceMarkerStore()
+            deviceMarkerStore: KeychainGoogleConnectionDeviceMarkerStore(),
+            selectedSourceCalendarsStore:
+                UserDefaultsSelectedSourceCalendarsStore()
         )
     )
 }

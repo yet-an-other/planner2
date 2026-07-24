@@ -127,6 +127,7 @@ struct GoogleAccountConnectionTests {
         }
 
         #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+        #expect(connection.connectedAccountID == Self.stableAccountID)
         #expect(
             connection.status
                 == GoogleAccountConnection.Status(
@@ -156,6 +157,7 @@ struct GoogleAccountConnectionTests {
             $0.restoreHandler = {
                 .restored(
                     GoogleAuthorizedAccount(
+                        stableAccountID: "opaque-account-id",
                         displayName: "Rua Did",
                         imageURL: nil,
                         grantedScopes: ["openid", "email", "profile"]
@@ -316,6 +318,7 @@ struct GoogleAccountConnectionTests {
             )
         )
         #expect(connection.control == .disconnected(connectEnabled: true))
+        #expect(connection.connectedAccountID == nil)
     }
 
     // MARK: Offline and recovery
@@ -475,6 +478,7 @@ struct GoogleAccountConnectionTests {
             )
         )
         #expect(connection.control == .disconnected(connectEnabled: true))
+        #expect(connection.connectedAccountID == nil)
     }
 
     @Test("A generic validation failure preserves the connection silently")
@@ -800,6 +804,7 @@ struct GoogleAccountConnectionTests {
         )
 
         #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
+        #expect(connection.connectedAccountID == Self.stableAccountID)
 
         #expect(adapter.signInCallCount == 1)
         #expect(
@@ -840,6 +845,7 @@ struct GoogleAccountConnectionTests {
         adapter.signInHandler = {
             .connected(
                 GoogleAuthorizedAccount(
+                    stableAccountID: "opaque-account-id",
                     displayName: "Rua Did",
                     imageURL: nil,
                     grantedScopes: ["openid", "email", "profile"]
@@ -983,6 +989,13 @@ struct GoogleAccountConnectionTests {
 
     @Test("Disconnect on This Device signs out locally and immediately")
     func disconnectOnThisDevice() async {
+        let selections = UserDefaultsSelectedSourceCalendarsStore(
+            defaults: makeEphemeralUserDefaults()
+        )
+        selections.saveSelectedSourceCalendarIDs(
+            ["primary", "family"],
+            for: Self.stableAccountID
+        )
         let (connection, adapter, _, _) = makeConnection()
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .connected(Self.authorizedAccount()) }
@@ -995,6 +1008,11 @@ struct GoogleAccountConnectionTests {
 
         #expect(adapter.signOutCallCount == 1)
         #expect(connection.control == .disconnected(connectEnabled: true))
+        #expect(connection.connectedAccountID == nil)
+        #expect(
+            selections.selectedSourceCalendarIDs(for: Self.stableAccountID)
+                == ["primary", "family"]
+        )
         #expect(
             connection.status
                 == GoogleAccountConnection.Status(
@@ -1042,6 +1060,8 @@ struct GoogleAccountConnectionTests {
 
     // MARK: Fixtures
 
+    private static let stableAccountID = "opaque-account-id"
+
     private static let profile = GoogleAccountConnection.GoogleConnectedProfile(
         displayName: "Rua Did",
         imageURL: nil
@@ -1049,6 +1069,7 @@ struct GoogleAccountConnectionTests {
 
     private static func authorizedAccount() -> GoogleAuthorizedAccount {
         GoogleAuthorizedAccount(
+            stableAccountID: stableAccountID,
             displayName: "Rua Did",
             imageURL: nil,
             grantedScopes: ["openid", "email", "profile", calendarReadScope]
@@ -1110,7 +1131,9 @@ struct GoogleAccountConnectionTests {
         store.storedMarker = marker
         return GoogleConnectionInstallationBoundary(
             defaults: defaults,
-            deviceMarkerStore: store
+            deviceMarkerStore: store,
+            selectedSourceCalendarsStore:
+                UserDefaultsSelectedSourceCalendarsStore(defaults: defaults)
         )
     }
 

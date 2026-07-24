@@ -38,6 +38,8 @@
 		A00000000000000000000142 /* IOSEventDetailPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000141 /* IOSEventDetailPopover.swift */; };
 		A00000000000000000000144 /* CalendarEventDetailLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000143 /* CalendarEventDetailLinks.swift */; };
 		A00000000000000000000146 /* CalendarEventDetailLinksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000145 /* CalendarEventDetailLinksTests.swift */; };
+		A00000000000000000000148 /* SelectedSourceCalendarsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000147 /* SelectedSourceCalendarsStore.swift */; };
+		A00000000000000000000150 /* SelectedSourceCalendarsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000149 /* SelectedSourceCalendarsStoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,6 +88,8 @@
 		A00000000000000000000141 /* IOSEventDetailPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSEventDetailPopover.swift; sourceTree = "<group>"; };
 		A00000000000000000000143 /* CalendarEventDetailLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventDetailLinks.swift; sourceTree = "<group>"; };
 		A00000000000000000000145 /* CalendarEventDetailLinksTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventDetailLinksTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000147 /* SelectedSourceCalendarsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedSourceCalendarsStore.swift; sourceTree = "<group>"; };
+		A00000000000000000000149 /* SelectedSourceCalendarsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedSourceCalendarsStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -149,6 +153,7 @@
 				A00000000000000000000139 /* CalendarEventDetail.swift */,
 				A00000000000000000000141 /* IOSEventDetailPopover.swift */,
 				A00000000000000000000143 /* CalendarEventDetailLinks.swift */,
+				A00000000000000000000147 /* SelectedSourceCalendarsStore.swift */,
 				A00000000000000000000018 /* Assets.xcassets */,
 				A00000000000000000000017 /* Info.plist */,
 			);
@@ -167,6 +172,7 @@
 				A00000000000000000000135 /* CalendarEventsModelTests.swift */,
 				A00000000000000000000137 /* HeaderStatusResolutionTests.swift */,
 				A00000000000000000000145 /* CalendarEventDetailLinksTests.swift */,
+				A00000000000000000000149 /* SelectedSourceCalendarsStoreTests.swift */,
 			);
 			path = PlannerTests;
 			sourceTree = "<group>";
@@ -297,6 +303,7 @@
 				A00000000000000000000140 /* CalendarEventDetail.swift in Sources */,
 				A00000000000000000000142 /* IOSEventDetailPopover.swift in Sources */,
 				A00000000000000000000144 /* CalendarEventDetailLinks.swift in Sources */,
+				A00000000000000000000148 /* SelectedSourceCalendarsStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -313,6 +320,7 @@
 				A00000000000000000000136 /* CalendarEventsModelTests.swift in Sources */,
 				A00000000000000000000138 /* HeaderStatusResolutionTests.swift in Sources */,
 				A00000000000000000000146 /* CalendarEventDetailLinksTests.swift in Sources */,
+				A00000000000000000000150 /* SelectedSourceCalendarsStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

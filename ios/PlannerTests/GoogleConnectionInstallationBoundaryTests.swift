@@ -39,13 +39,24 @@ struct GoogleConnectionInstallationBoundaryTests {
     func firstInstallThenRelaunch() {
         let defaults = makeEphemeralUserDefaults()
         let store = FakeDeviceMarkerStore()
+        let selections = UserDefaultsSelectedSourceCalendarsStore(
+            defaults: defaults
+        )
+        selections.saveSelectedSourceCalendarIDs(
+            ["stale-calendar"],
+            for: "stale-account"
+        )
         let boundary = GoogleConnectionInstallationBoundary(
             defaults: defaults,
-            deviceMarkerStore: store
+            deviceMarkerStore: store,
+            selectedSourceCalendarsStore: selections
         )
 
         #expect(boundary.establish() == .fresh)
         #expect(store.setCallCount == 1)
+        #expect(
+            selections.selectedSourceCalendarIDs(for: "stale-account") == nil
+        )
 
         let generated = defaults.string(forKey: Self.markerKey)
         #expect(generated != nil)
@@ -54,12 +65,21 @@ struct GoogleConnectionInstallationBoundaryTests {
 
         // An ordinary relaunch over the same stores is the same
         // installation and regenerates nothing.
+        selections.saveSelectedSourceCalendarIDs(
+            ["primary"],
+            for: "current-account"
+        )
         let relaunch = GoogleConnectionInstallationBoundary(
             defaults: defaults,
-            deviceMarkerStore: store
+            deviceMarkerStore: store,
+            selectedSourceCalendarsStore: selections
         )
         #expect(relaunch.establish() == .same)
         #expect(store.setCallCount == 1)
+        #expect(
+            selections.selectedSourceCalendarIDs(for: "current-account")
+                == ["primary"]
+        )
     }
 
     @Test("An app-update-equivalent state keeps the installation")
@@ -74,7 +94,9 @@ struct GoogleConnectionInstallationBoundaryTests {
         // the stores survive, the code version does not matter.
         let boundary = GoogleConnectionInstallationBoundary(
             defaults: defaults,
-            deviceMarkerStore: store
+            deviceMarkerStore: store,
+            selectedSourceCalendarsStore:
+                UserDefaultsSelectedSourceCalendarsStore(defaults: defaults)
         )
 
         #expect(boundary.establish() == .same)
@@ -92,7 +114,9 @@ struct GoogleConnectionInstallationBoundaryTests {
 
         let boundary = GoogleConnectionInstallationBoundary(
             defaults: defaults,
-            deviceMarkerStore: store
+            deviceMarkerStore: store,
+            selectedSourceCalendarsStore:
+                UserDefaultsSelectedSourceCalendarsStore(defaults: defaults)
         )
 
         #expect(boundary.establish() == .fresh)
@@ -106,17 +130,28 @@ struct GoogleConnectionInstallationBoundaryTests {
     func migratedBackup() {
         let defaults = makeEphemeralUserDefaults()
         let store = FakeDeviceMarkerStore()
+        let selections = UserDefaultsSelectedSourceCalendarsStore(
+            defaults: defaults
+        )
         let originalMarker = UUID().uuidString
-        // The backup carries the install-local marker; the new device has
-        // no matching device marker.
+        // The backup carries install-local state; the new device has no
+        // matching device marker.
         defaults.set(originalMarker, forKey: Self.markerKey)
+        selections.saveSelectedSourceCalendarIDs(
+            ["stale-calendar"],
+            for: "stale-account"
+        )
 
         let boundary = GoogleConnectionInstallationBoundary(
             defaults: defaults,
-            deviceMarkerStore: store
+            deviceMarkerStore: store,
+            selectedSourceCalendarsStore: selections
         )
 
         #expect(boundary.establish() == .migrated)
+        #expect(
+            selections.selectedSourceCalendarIDs(for: "stale-account") == nil
+        )
         #expect(store.storedMarker != nil)
         #expect(store.storedMarker != originalMarker)
         #expect(
@@ -133,7 +168,9 @@ struct GoogleConnectionInstallationBoundaryTests {
 
         let boundary = GoogleConnectionInstallationBoundary(
             defaults: defaults,
-            deviceMarkerStore: store
+            deviceMarkerStore: store,
+            selectedSourceCalendarsStore:
+                UserDefaultsSelectedSourceCalendarsStore(defaults: defaults)
         )
 
         #expect(boundary.establish() == .migrated)
@@ -151,7 +188,9 @@ struct GoogleConnectionInstallationBoundaryTests {
 
         let boundary = GoogleConnectionInstallationBoundary(
             defaults: defaults,
-            deviceMarkerStore: store
+            deviceMarkerStore: store,
+            selectedSourceCalendarsStore:
+                UserDefaultsSelectedSourceCalendarsStore(defaults: defaults)
         )
 
         let installation = boundary.establish()
@@ -169,6 +208,7 @@ struct GoogleAccountConnectionInstallationTests {
     @Test("A fresh installation clears stale sign-in state before restoration")
     func freshInstallClearsBeforeRestore() async {
         let adapter = FakeGoogleSignInAdapter()
+        let defaults = makeEphemeralUserDefaults()
         let connection = GoogleAccountConnection(
             configuration: GoogleAccountConnectionTests.configuredConnection(),
             makeAdapter: { _ in adapter },
@@ -176,8 +216,10 @@ struct GoogleAccountConnectionInstallationTests {
                 acknowledgedVersion: GoogleAccountConnection.currentDisclosureVersion
             ),
             installationBoundary: GoogleConnectionInstallationBoundary(
-                defaults: makeEphemeralUserDefaults(),
-                deviceMarkerStore: FakeDeviceMarkerStore()
+                defaults: defaults,
+                deviceMarkerStore: FakeDeviceMarkerStore(),
+                selectedSourceCalendarsStore:
+                    UserDefaultsSelectedSourceCalendarsStore(defaults: defaults)
             )
         )
 

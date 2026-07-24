@@ -41,7 +41,10 @@ final class GoogleSignInSDKAdapter: GoogleSignInAdapting {
                 additionalScopes: scopes
             )
 
-            return .connected(Self.account(from: result.user))
+            guard let account = Self.account(from: result.user) else {
+                return .unavailable(.failed)
+            }
+            return .connected(account)
         } catch {
             return Self.classify(error)
         }
@@ -53,7 +56,10 @@ final class GoogleSignInSDKAdapter: GoogleSignInAdapting {
             // access token when it is near expiry; Planner adds no expiry
             // of its own.
             let user = try await GIDSignIn.sharedInstance.restorePreviousSignIn()
-            return .restored(Self.account(from: user))
+            guard let account = Self.account(from: user) else {
+                return .unavailable(.failed)
+            }
+            return .restored(account)
         } catch {
             return Self.classifyRestoration(error)
         }
@@ -67,9 +73,19 @@ final class GoogleSignInSDKAdapter: GoogleSignInAdapting {
         GIDSignIn.sharedInstance.handle(url)
     }
 
-    /// The memory-only account snapshot crossing the seam.
-    private static func account(from user: GIDGoogleUser) -> GoogleAuthorizedAccount {
-        GoogleAuthorizedAccount(
+    /// The memory-only account snapshot crossing the seam. A missing opaque
+    /// account identifier cannot establish Planner's per-account boundary.
+    private static func account(
+        from user: GIDGoogleUser
+    ) -> GoogleAuthorizedAccount? {
+        guard let stableAccountID = user.userID,
+              !stableAccountID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return nil
+        }
+
+        return GoogleAuthorizedAccount(
+            stableAccountID: stableAccountID,
             displayName: user.profile?.name,
             imageURL: user.profile.flatMap(Self.profileImageURL),
             grantedScopes: Set(user.grantedScopes ?? [])

@@ -52,13 +52,18 @@ struct GoogleConnectionInstallationBoundary {
 
     private let defaults: UserDefaults
     private let deviceMarkerStore: any GoogleConnectionDeviceMarkerStore
+    private let selectedSourceCalendarsStore:
+        any SelectedSourceCalendarsStoring
 
     init(
         defaults: UserDefaults,
-        deviceMarkerStore: any GoogleConnectionDeviceMarkerStore
+        deviceMarkerStore: any GoogleConnectionDeviceMarkerStore,
+        selectedSourceCalendarsStore:
+            any SelectedSourceCalendarsStoring
     ) {
         self.defaults = defaults
         self.deviceMarkerStore = deviceMarkerStore
+        self.selectedSourceCalendarsStore = selectedSourceCalendarsStore
     }
 
     /// Evaluates the markers, repairs them for the current installation,
@@ -77,6 +82,11 @@ struct GoogleConnectionInstallationBoundary {
             return .same
         }
 
+        // Account-linked selections belong to the same installation and
+        // physical-device boundary as local sign-in. Ordinary relaunches
+        // preserve them; a fresh or migrated installation clears all
+        // accounts before establishing its new marker pair.
+        selectedSourceCalendarsStore.clearAllSelectedSourceCalendars()
         regenerateMarkers()
         return installMarker == nil ? .fresh : .migrated
     }

@@ -29,7 +29,9 @@ struct PlannerApp: App {
                 connectivityMonitor: NWPathConnectivityMonitor(),
                 installationBoundary: GoogleConnectionInstallationBoundary(
                     defaults: .standard,
-                    deviceMarkerStore: KeychainGoogleConnectionDeviceMarkerStore()
+                    deviceMarkerStore: KeychainGoogleConnectionDeviceMarkerStore(),
+                    selectedSourceCalendarsStore:
+                        UserDefaultsSelectedSourceCalendarsStore()
                 )
             )
             calendarEvents = CalendarEventsModel(

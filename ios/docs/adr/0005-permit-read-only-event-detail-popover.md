@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Supersedes the Calendar Events slice's out-of-scope exclusion of "Day Events Popover, Event Detail Popover, and any event interaction, selection, or drill-through" (issue #75) and the "Date Cells remain inert" statement in the iOS calendar-surface spec.
+Accepted. Supersedes the Calendar Events slice's out-of-scope exclusion of "Day Events Popover, Event Detail Popover, and any event interaction, selection, or drill-through" (issue #75) and the "Date Cells remain inert" statement in the iOS calendar-surface spec. The Source Calendar selection specification later extends the popover's canonical identity and content for cross-calendar events.
 
 ## Context
 
@@ -14,16 +14,16 @@ The iOS Calendar Surface adopts web ADR 0002's separation unchanged:
 
 1. The surface remains **write-read-only forever**.
 2. An **Event Detail Popover** (Planning glossary) may be summoned by tapping a Calendar Event Bar or Calendar Event Row — and nothing else. Date Cells otherwise remain inert, and the Events Overflow marker stays inert.
-3. The popover is presented in platform-appropriate form: a native anchored popover (adapting to a sheet on compact widths) with a small close affordance, dismissed by outside tap, that affordance, or the platform gesture — not by surface scroll. Its content and omission rules mirror the Web Experience's popover: title with an Event Color accent, a timing line, location, plain-text notes, attendees with response status as text, and a link to the event in Google Calendar.
+3. The popover is presented in platform-appropriate form: a native anchored popover (adapting to a sheet on compact widths) with a small close affordance, dismissed by outside tap, that affordance, or the platform gesture — not by surface scroll. Its content includes title with an Event Color accent, a timing line, location, plain-text notes, attendees with response status as text, and a link to the event in Google Calendar. When multiple Source Calendars are supported, it also identifies the winning Source Calendar by summary and color.
 4. All detail it presents is **memory-only while connected**, extending iOS ADR 0003's boundary from titles and timing to all event detail. An open popover closes on Disconnect on This Device as a consequence of events being cleared, not as a special case.
-5. Presentation records the selected Calendar Event's primary Source Calendar event identity in the observable Calendar Events model and resolves detail from that model's canonical normalized collection. A successful Calendar Event Refresh keeps the popover open and updates it when that identity remains after an edit or in-range move; deletion, decline, or movement outside the refreshed canonical range removes the identity and dismisses presentation. A failed refresh changes neither selection nor detail.
+5. Presentation records the selected Calendar Event's canonical occurrence identity and winning Source Calendar identity in the observable Calendar Events model and resolves detail from that model's canonical normalized collection. A successful Calendar Event Refresh keeps the popover open and updates it when that identity remains after an edit or in-range move; deletion, decline, movement outside the refreshed canonical range, or a selection change that removes the winning occurrence removes the identity and dismisses presentation. A failed refresh changes neither selection nor detail.
 
 ## Consequences
 
 - The Google Calendar seam grows to decode event detail (Google link, location, notes, attendees) and to retain timed events' end instants for the timing line; all of it stays memory-only per iOS ADR 0003.
-- Calendar Event Bars and Rows carry only the canonical event identity needed to select detail. The Calendar Events model owns the one selected identity and reconciles its presentation projection with atomic replacement, avoiding both a stale view-owned payload and a second event store.
+- Calendar Event Bars and Rows carry the canonical occurrence identity and winning Source Calendar identity needed to select detail. The Calendar Events model owns the one selected identity and reconciles its presentation projection with atomic replacement, avoiding both a stale view-owned payload and a second event store.
 - The Events Overflow marker's inertness is reconfirmed by decision, not inertia: the Day Events Popover remains out of scope, and the Planning glossary's Events Overflow definition explicitly leaves summoning to each delivery experience.
-- The first-connect disclosure and App Privacy posture are unchanged: detail arrives inside the same event fetches the disclosure already covers and is never persisted.
+- Event detail itself adds no persistence and remains covered by the Calendar Event disclosure boundary. Source Calendar selection separately revises the disclosure and App Privacy review because it stores selected IDs (ADR 0006).
 
 ## Considered options
 

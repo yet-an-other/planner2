@@ -56,6 +56,10 @@ _Avoid_: Disconnect, logout, sign out everywhere, revoke access
 A Google Calendar in the user's account that Planner is permitted to read. It has a stable Google id, a display summary, and a background color.
 _Avoid_: Calendar, Google calendar, calendar list, feed
 
+**Primary Source Calendar**:
+The Source Calendar that Google designates as primary for the connected account.
+_Avoid_: Default calendar, main calendar, primary calendar
+
 **Selected Source Calendars**:
 The subset of the user's Source Calendars that Planner uses as sources for Calendar Events.
 _Avoid_: Chosen calendars, enabled calendars, visible calendars
@@ -65,7 +69,7 @@ The alignment of Planner's Source Calendars and Selected Source Calendars with t
 _Avoid_: Calendar sync, selection reset, calendar reload
 
 **Calendar Event**:
-A Google Calendar event available to Planner from one of the Selected Source Calendars.
+A Google Calendar event obtained by Planner from a Source Calendar included in the Selected Source Calendars for that fetch.
 _Avoid_: Event item, schedule entry, appointment
 
 **Event Color**:

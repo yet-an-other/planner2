@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Applies to:** Planner native iOS/iPadOS Google Account Connection
 - **Minimum deployment target:** iOS/iPadOS 17.0
-- **Related:** [`calendar-surface.md`](calendar-surface.md), [`../adr/0001-use-google-sign-in-for-native-account-connection.md`](../adr/0001-use-google-sign-in-for-native-account-connection.md), [`../adr/0002-planner-owned-connect-control.md`](../adr/0002-planner-owned-connect-control.md), system ADR [`0002-keep-google-account-connections-local.md`](../../../docs/adr/0002-keep-google-account-connections-local.md), [`../research/google-account-connection-authentication.md`](../research/google-account-connection-authentication.md)
+- **Related:** [`calendar-surface.md`](calendar-surface.md), [`source-calendar-selection.md`](source-calendar-selection.md), [`../adr/0001-use-google-sign-in-for-native-account-connection.md`](../adr/0001-use-google-sign-in-for-native-account-connection.md), [`../adr/0002-planner-owned-connect-control.md`](../adr/0002-planner-owned-connect-control.md), [`../adr/0006-persist-selected-source-calendars-per-account.md`](../adr/0006-persist-selected-source-calendars-per-account.md), system ADR [`0002-keep-google-account-connections-local.md`](../../../docs/adr/0002-keep-google-account-connections-local.md), [`../research/google-account-connection-authentication.md`](../research/google-account-connection-authentication.md)
 
 ## Purpose and ownership
 
@@ -16,7 +16,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 ### Release gate and configuration
 
 - A build-time release gate controls the entire addition. While off — every committed and production configuration — the app initializes no connection behavior, mounts neither the iOS Account Control nor the iOS Header Status, and renders the accepted 100-point iOS Calendar Header.
-- The gate remains off for production until a Calendar-data feature provides visible value for the sensitive scope. That feature has landed behind the gate: Calendar Events on the iOS Calendar Surface, with the explanation's data-behavior copy updated and the disclosure version incremented to 2. The production flip remains coupled to the external release inputs below.
+- The gate remains off for production until a Calendar-data feature provides visible value for the sensitive scope. Calendar Events have landed behind the gate, with the explanation's data-behavior copy updated and the disclosure version incremented to 2. Source Calendar selection is accepted but not yet implemented; enabling it requires the further disclosure upgrade specified in [`source-calendar-selection.md`](source-calendar-selection.md). The production flip remains coupled to the external release inputs below.
 - With the gate on, the iOS OAuth client ID, reversed callback scheme, and HTTPS Privacy Policy URL arrive as environment-specific build settings substituted into the app bundle. No client secret setting exists anywhere.
 - A gate-on build with missing or invalid values leaves the iOS Calendar Surface usable, disables Connect through the control's dimmed, non-interactive state, and reports "Google connection is not configured".
 - Ordinary builds, previews, tests, and CI require no Google credentials, account, callback, or network access.
@@ -35,8 +35,9 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 
 ### Connect
 
-- The first Connect for the current disclosure version presents a compact native explanation before any Google authorization UI: read-only purpose, inability to modify Calendar data, and the enabled build's actual Calendar-data behavior (gate-on builds download the primary Source Calendar's events to show them and store no Calendar data), with Continue, Cancel, and Privacy Policy actions. The Privacy Policy action opens the configured HTTPS URL.
+- The first Connect for the current disclosure version presents a compact native explanation before any Google authorization UI: read-only purpose, inability to modify Calendar data, and the enabled build's actual Calendar-data behavior, with Continue, Cancel, and Privacy Policy actions. Version 2 states that gate-on builds download the Primary Source Calendar's events and store no Calendar data. Enabling Source Calendar selection requires a later version stating that Planner reads the Selected Source Calendars, stores their IDs on this device, and stores no Calendar Events; previously connected installations acknowledge it before that behavior begins. The Privacy Policy action opens the configured HTTPS URL.
 - Continue acknowledges the disclosure version through an install-local, non-identifying marker and resumes the same Connect flow; acknowledging suppresses the sheet until the version increments. Cancel or interactive dismissal opens no Google UI and reports "Google connection cancelled".
+- A revised Calendar-data disclosure can also be required after restoration. Source Calendar selection defines that upgrade path: before acknowledgement Planner performs no Calendar request or selection write; cancellation preserves the restored Google Account Connection in an event-empty suspended state, keeps Disconnect on This Device available, and re-presents the explanation on the next foreground entry.
 - One authorization request obtains `openid`, `email`, `profile`, and `https://www.googleapis.com/auth/calendar.readonly` through the configured iOS OAuth client, so existing project-wide consent is reused without a redundant prompt. The reversed-client-ID callback route returns through the app's URL handling to the SDK.
 - Connected state is published only when the Calendar scope is present. Identity without it clears the partial local sign-in, remains disconnected, and reports "Calendar read access is required".
 - User cancellation remains disconnected and reports "Google connection cancelled". Other failures map to stable Planner-owned copy: "Google connection failed. Try again". Raw Google errors never reach the iOS Header Status.
@@ -45,7 +46,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 ### Restoration and recovery
 
 - Startup enters a restoring presentation with the control disabled and "Restoring Google account…" in the status row instead of flashing a false Connect.
-- A valid saved connection with the required scope restores connected identity ("Google account connected"); Google Sign-In refreshes expired access credentials when refresh is available. No saved session becomes an ordinary blank disconnected state. Planner imposes no arbitrary connection expiry.
+- A valid saved connection with the required scope restores connected identity ("Google account connected"); Google Sign-In refreshes expired access credentials when refresh is available. No saved Google Account Connection becomes an ordinary blank disconnected state. Planner imposes no arbitrary connection expiry.
 - Confirmed invalid or revoked authorization clears the local connection and reports "Google connection expired. Connect again".
 - A transient connectivity failure preserves the connected state and reports "You're offline. Google connection will be checked when online". Validation retries when connectivity returns and when the app next becomes active, event-driven with no polling, timers, or background processing. Recovery success replaces the warning with connected status without user action. Only confirmed invalidation transitions to disconnected.
 - Stale asynchronous completions never overwrite newer user intent.
@@ -62,17 +63,17 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 
 ### Data minimization
 
-- Google Sign-In owns Google credential persistence and refresh in its Keychain storage. Planner persists no access tokens, refresh tokens, email, display name, profile image URL, or Calendar data. Presentation state is memory-only; the profile image loads through an ephemeral session. Planner logs no tokens, OAuth codes, profile identifiers, or raw SDK responses.
+- Google Sign-In owns Google credential persistence and refresh in its Keychain storage. Planner persists no access tokens, refresh tokens, email, display name, profile image URL, Source Calendar presentation data, or Calendar Events. ADR 0006 permits stable opaque account identifiers associated with stored per-account selections and their Selected Source Calendar IDs in app-local preferences. Other presentation state is memory-only; the profile image loads through an ephemeral `URLSession`. Planner logs no tokens, OAuth codes, profile identifiers, Calendar IDs, or raw SDK responses.
 
 ## Interaction and product exclusions
 
 This slice contains no:
 
 - Google Calendar API request, Source Calendar, Calendar Event, or any other Calendar resource fetch
-- Persistence of account profile fields, Google tokens, or Calendar data beyond the SDK-owned credentials and the non-identifying disclosure and installation markers
+- Persistence of account profile fields, Google tokens, Source Calendar presentation data, or Calendar Events beyond the SDK-owned credentials, non-identifying disclosure and installation markers, and the narrow Selected Source Calendar ID exception in ADR 0006
 - Account switcher or more than one connected account
-- Project-wide Revoke Planner Access action, session list, or remote device management
-- Native Planner backend session, web-cookie protocol reuse, or embedded client secret
+- Project-wide Revoke Planner Access action, Google Account Connection list, or remote device management
+- Native Planner backend connection, web-cookie protocol reuse, or embedded client secret
 - Sign in with Apple or any required onboarding or account gate before the iOS Calendar Surface
 - Analytics, account telemetry, crash-reporting payloads, or logging of user identity
 - Background refresh, push notifications, widgets, extensions, or continuously running timers
@@ -83,7 +84,7 @@ This slice contains no:
 Swift Testing drives the Google Account Connection module through a fake Google Sign-In adapter, an in-memory disclosure store, a fake connectivity monitor, and deterministic installation markers. Coverage includes:
 
 - Release-gate and configuration validation, including that the committed app bundle stays gated off
-- Restoration: valid, refreshed, no session, missing scope, invalid authorization, stale completion
+- Restoration: valid, refreshed, no saved connection, missing scope, invalid authorization, stale completion
 - Connect: success, existing-consent reuse, missing Calendar scope, cancellation, generic and connectivity failure, duplicate activation protection, connect-while-restoring and connect-while-connected refusal
 - First-connect explanation: presentation, Continue acknowledgement and resumption, cancellation, suppression, version re-increment, duplicate protection
 - Offline and recovery: preservation with warning, connectivity-return retry, repeated transitions, invalidation from the warning state, silent generic failure, offline disconnect, disconnect race, idle return, module lifetime end
@@ -129,7 +130,7 @@ These gates are deliberately **not complete** and are not reported as such:
 - An iOS OAuth client bound to Planner's bundle identifier in the shared Google Cloud project, with its reversed callback scheme.
 - Google Calendar API enabled and the OAuth consent screen production-ready with the sensitive `calendar.readonly` scope verified as Google requires.
 - A public HTTPS Privacy Policy URL whose content covers current and intended Calendar-data handling.
-- App Privacy answers covering Planner's and the SDK's account and Calendar data behavior.
+- App Privacy answers covering Planner's and the SDK's account and Calendar data behavior, including the account-linked Selected Source Calendar configuration in ADR 0006.
 - A first user-visible Calendar-data consumer, which alone justifies enabling the production release gate. Delivered behind the gate: Calendar Events on the iOS Calendar Surface. The production flip itself remains open.
 
 ## Compliance validation
@@ -140,4 +141,4 @@ These gates are deliberately **not complete** and are not reported as such:
 
 ## Deferred validation and release work
 
-Real-OAuth acceptance per the matrix above, Google OAuth verification administration, App Store submission, TestFlight distribution, signing administration, and release rollout remain outside implementation. Enabling the production gate is coupled to the first user-visible Calendar-data feature; that feature has landed behind the gate, and the explanation's data-behavior copy and disclosure version were updated with it (version 2), so the remaining coupling is the external release inputs above.
+Real-OAuth acceptance per the matrix above, Google OAuth verification administration, App Store submission, TestFlight distribution, signing administration, and release rollout remain outside implementation. Calendar Events have landed behind the gate and disclosure version 2 describes that current behavior. Source Calendar selection must increment the disclosure again and obtain acknowledgement as specified before its new persistence begins; the production flip remains coupled to the external release inputs above.
