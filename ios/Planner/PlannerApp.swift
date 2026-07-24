@@ -9,18 +9,35 @@ struct PlannerApp: App {
     private let accountConnection: GoogleAccountConnection?
 
     /// The Calendar Events module, created only when the build-time release
-    /// gate is on. It fetches the primary Source Calendar's events directly
-    /// from Google while the connection is connected, keeps them
-    /// memory-only, and clears them on Disconnect on This Device.
+    /// gate is on. It consumes disclosure-gated Selected Source Calendars,
+    /// keeps their events memory-only, and clears them on Disconnect on This
+    /// Device.
     private let calendarEvents: CalendarEventsModel?
+
+    /// Disclosure-gated Source Calendar loading, reconciliation, and
+    /// per-account selection persistence.
+    private let sourceCalendars: SourceCalendarsModel?
 
     init() {
         switch GoogleAccountConnectionConfiguration.load(from: .main) {
         case .gatedOff:
             accountConnection = nil
             calendarEvents = nil
+            sourceCalendars = nil
         case let configuration:
-            accountConnection = GoogleAccountConnection(
+            let calendarAPI = GoogleCalendarAPIAdapter()
+            let events = CalendarEventsModel(
+                environment: .current(),
+                adapter: calendarAPI,
+                connectivityMonitor: NWPathConnectivityMonitor()
+            )
+            let sources = SourceCalendarsModel(
+                adapter: calendarAPI,
+                store: UserDefaultsSelectedSourceCalendarsStore(),
+                selectionConsumer: events,
+                connectivityMonitor: NWPathConnectivityMonitor()
+            )
+            let connection = GoogleAccountConnection(
                 configuration: configuration,
                 makeAdapter: { configured in
                     GoogleSignInSDKAdapter(configuration: configured)
@@ -32,13 +49,12 @@ struct PlannerApp: App {
                     deviceMarkerStore: KeychainGoogleConnectionDeviceMarkerStore(),
                     selectedSourceCalendarsStore:
                         UserDefaultsSelectedSourceCalendarsStore()
-                )
+                ),
+                calendarDataConsumer: sources
             )
-            calendarEvents = CalendarEventsModel(
-                environment: .current(),
-                adapter: GoogleCalendarAPIAdapter(),
-                connectivityMonitor: NWPathConnectivityMonitor()
-            )
+            calendarEvents = events
+            sourceCalendars = sources
+            accountConnection = connection
         }
     }
 
@@ -48,6 +64,7 @@ struct PlannerApp: App {
                 environment: .current(),
                 currentEnvironment: { .current() },
                 connection: accountConnection,
+                sourceCalendars: sourceCalendars,
                 events: calendarEvents
             )
             .onOpenURL { url in

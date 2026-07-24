@@ -252,6 +252,34 @@ struct CalendarEventsModelTests {
         #expect(range?.end.timeIntervalSince1970 == Self.gmt(2026, 10, 16).timeIntervalSince1970)
     }
 
+    @Test("A reconciled selection starts events without Primary discovery")
+    func reconciledSelectionStartsEventsDirectly() async {
+        let sourceCalendar = GoogleSourceCalendar(
+            id: "fallback@example.com",
+            summary: "Fallback",
+            backgroundColorHex: "#7CB342",
+            isPrimary: false
+        )
+        let (model, adapter) = makeModel()
+
+        model.setSelectedSourceCalendars([sourceCalendar])
+
+        #expect(await eventually { adapter.fetchCallCount == 1 })
+        #expect(adapter.primarySourceCalendarFetchCallCount == 0)
+        #expect(adapter.fetchedSourceCalendars == [[sourceCalendar]])
+    }
+
+    @Test("A successful empty Source Calendar selection fetches no events")
+    func emptyResolvedSelectionFetchesNothing() async {
+        let (model, adapter) = makeModel()
+
+        model.setSelectedSourceCalendars([])
+
+        #expect(await neverHappens { adapter.fetchCallCount > 0 })
+        #expect(adapter.primarySourceCalendarFetchCallCount == 0)
+        #expect(model.weekLayouts.isEmpty)
+    }
+
     @Test("Source Calendar identity and presentation remain on Calendar Events")
     func sourceCalendarIdentityRemainsOnCalendarEvents() async {
         let sourceCalendar = GoogleSourceCalendar(

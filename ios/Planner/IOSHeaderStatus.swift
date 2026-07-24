@@ -68,6 +68,19 @@ extension IOSHeaderStatus.Tone {
         }
     }
 
+    /// Maps the Source Calendars module's status tone onto the status row's
+    /// presentation tone; the view layer owns the palette mapping.
+    init(_ tone: SourceCalendarsStatus.Tone) {
+        switch tone {
+        case .info:
+            self = .info
+        case .warning:
+            self = .warning
+        case .error:
+            self = .error
+        }
+    }
+
     /// Maps the events module's status tone onto the status row's
     /// presentation tone; the view layer owns the palette mapping.
     init(_ tone: CalendarEventsStatus.Tone) {
@@ -89,12 +102,20 @@ extension IOSHeaderStatus.Tone {
 /// shows when neither has anything to say.
 func resolveHeaderStatus(
     connection: GoogleAccountConnection.Status?,
+    sourceCalendars: SourceCalendarsStatus? = nil,
     events: CalendarEventsStatus?
 ) -> (message: String?, tone: IOSHeaderStatus.Tone) {
     if let connection, connection.message != nil,
        connection.tone != .info
     {
         return (connection.message, IOSHeaderStatus.Tone(connection.tone))
+    }
+
+    if let sourceCalendars, sourceCalendars.message != nil {
+        return (
+            sourceCalendars.message,
+            IOSHeaderStatus.Tone(sourceCalendars.tone)
+        )
     }
 
     if let events, events.message != nil {

@@ -27,18 +27,53 @@ enum GoogleCalendarAPIPath {
 ///
 /// Fetches are memory-only by construction: responses decode straight into
 /// seam values and nothing is written to disk (iOS ADR 0003).
-final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
-    private let session: URLSession
+final class GoogleCalendarAPIAdapter:
+    GoogleCalendarEventsAdapting,
+    GoogleSourceCalendarsAdapting
+{
+    private let loadRequest: @Sendable (URLRequest) async throws ->
+        (Data, URLResponse)
+    private let accessTokenProvider:
+        @MainActor @Sendable () async throws -> String
 
-    init(session: URLSession = URLSession(configuration: .ephemeral)) {
-        self.session = session
+    init(
+        session: URLSession = URLSession(configuration: .ephemeral),
+        accessTokenProvider:
+            (@MainActor @Sendable () async throws -> String)? = nil,
+        loadRequest:
+            (@Sendable (URLRequest) async throws -> (Data, URLResponse))? = nil
+    ) {
+        self.accessTokenProvider = accessTokenProvider ?? {
+            try await Self.sdkAccessToken()
+        }
+        self.loadRequest = loadRequest ?? { request in
+            try await session.data(for: request)
+        }
     }
 
+    @MainActor
+    func fetchSourceCalendars() async -> GoogleSourceCalendarsOutcome {
+        do {
+            let token = try await refreshedAccessToken()
+            return .success(try await fetchSourceCalendars(token: token))
+        } catch {
+            return .unavailable(Self.classifySourceCalendarsFailure(error))
+        }
+    }
+
+    /// Legacy Primary-only seam used by deterministic previews and tests.
+    /// Production resolves selection through `fetchSourceCalendars()`.
     @MainActor
     func fetchPrimarySourceCalendar() async -> GoogleSourceCalendarOutcome {
         do {
             let token = try await refreshedAccessToken()
-            return .success(try await fetchPrimaryCalendar(token: token))
+            let sourceCalendars = try await fetchSourceCalendars(token: token)
+            guard let primary = sourceCalendars.first(where: \.isPrimary)
+                    ?? SourceCalendarReconciliation.ordered(sourceCalendars).first
+            else {
+                throw FetchError.failed
+            }
+            return .success(primary)
         } catch {
             return .unavailable(Self.classifyFailure(error))
         }
@@ -77,6 +112,11 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
     /// only as a stable fetch failure.
     @MainActor
     private func refreshedAccessToken() async throws -> String {
+        try await accessTokenProvider()
+    }
+
+    @MainActor
+    private static func sdkAccessToken() async throws -> String {
         guard let user = GIDSignIn.sharedInstance.currentUser else {
             throw FetchError.failed
         }
@@ -86,20 +126,54 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
 
     // MARK: Requests
 
-    private func fetchPrimaryCalendar(
+    private func fetchSourceCalendars(
         token: String
-    ) async throws -> GoogleSourceCalendar {
-        let entry: CalendarListEntryDTO = try await get(
-            path: "/calendar/v3/users/me/calendarList/primary",
-            query: [],
-            token: token
-        )
-        guard let id = entry.id else {
-            throw FetchError.failed
+    ) async throws -> [GoogleSourceCalendar] {
+        var sourceCalendars: [GoogleSourceCalendar] = []
+        var pageToken: String?
+        var seenPageTokens = Set<String>()
+
+        repeat {
+            var query = [URLQueryItem(name: "maxResults", value: "250")]
+            if let pageToken {
+                guard seenPageTokens.insert(pageToken).inserted else {
+                    throw FetchError.failed
+                }
+                query.append(
+                    URLQueryItem(name: "pageToken", value: pageToken)
+                )
+            }
+
+            let page: CalendarListPageDTO = try await get(
+                path: "/calendar/v3/users/me/calendarList",
+                query: query,
+                token: token
+            )
+            sourceCalendars.append(
+                contentsOf: (page.items ?? []).compactMap(Self.mapSourceCalendar)
+            )
+            pageToken = page.nextPageToken
+        } while pageToken != nil
+
+        return sourceCalendars
+    }
+
+    private static func mapSourceCalendar(
+        _ entry: CalendarListEntryDTO
+    ) -> GoogleSourceCalendar? {
+        guard entry.deleted != true,
+              entry.hidden != true,
+              ["reader", "writer", "owner"].contains(entry.accessRole),
+              let id = entry.id,
+              !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return nil
         }
         return GoogleSourceCalendar(
             id: id,
-            summary: entry.summary ?? "",
+            summary: entry.summary?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ) ?? "",
             backgroundColorHex: entry.backgroundColor ?? "#039BE5",
             isPrimary: entry.primary ?? false
         )
@@ -192,7 +266,7 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await loadRequest(request)
         guard
             let httpResponse = response as? HTTPURLResponse,
             (200..<300).contains(httpResponse.statusCode)
@@ -213,11 +287,19 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
         case failed
     }
 
+    private struct CalendarListPageDTO: Decodable, Sendable {
+        let items: [CalendarListEntryDTO]?
+        let nextPageToken: String?
+    }
+
     private struct CalendarListEntryDTO: Decodable, Sendable {
         let id: String?
         let summary: String?
         let backgroundColor: String?
         let primary: Bool?
+        let deleted: Bool?
+        let hidden: Bool?
+        let accessRole: String?
     }
 
     private struct EventsPageDTO: Decodable, Sendable {
@@ -341,6 +423,17 @@ final class GoogleCalendarAPIAdapter: GoogleCalendarEventsAdapting {
     /// Maps failures to Planner-relevant outcomes: connectivity loss is
     /// transient; anything else is a generic failure. Raw errors never
     /// cross the seam.
+    private static func classifySourceCalendarsFailure(
+        _ error: Error
+    ) -> GoogleSourceCalendarsFailure {
+        switch classifyFailure(error) {
+        case .offline:
+            return .offline
+        case .failed:
+            return .failed
+        }
+    }
+
     private static func classifyFailure(
         _ error: Error
     ) -> GoogleCalendarEventsFailure {

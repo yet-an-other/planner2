@@ -392,7 +392,7 @@ struct CalendarEventDetailSelection: Equatable, Sendable, Identifiable {
 /// (iOS ADR 0003).
 @MainActor
 @Observable
-final class CalendarEventsModel {
+final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// The laid-out Week Rows keyed by their Monday-first local start dates.
     private(set) var weekLayouts: [Date: CalendarEventWeekLayout] = [:]
 
@@ -409,9 +409,8 @@ final class CalendarEventsModel {
     @ObservationIgnored
     private let adapter: (any GoogleCalendarEventsAdapting)?
 
-    /// The resolved Source Calendars supplied to every Calendar Event request.
-    /// This prefactor keeps the current Primary-only behavior; the dedicated
-    /// Source Calendars module replaces this resolution in a later slice.
+    /// The disclosure-gated, reconciled Selected Source Calendars supplied
+    /// to every Calendar Event request.
     @ObservationIgnored
     private var sourceCalendars: [GoogleSourceCalendar] = []
 
@@ -504,6 +503,12 @@ final class CalendarEventsModel {
     @ObservationIgnored
     private var isConnected = false
 
+    /// Production receives a disclosure-gated, reconciled selection from the
+    /// Source Calendars module. The legacy connection method remains as a
+    /// deterministic test and preview seam for the earlier Primary-only path.
+    @ObservationIgnored
+    private var usesResolvedSourceCalendars = false
+
     /// Monotonic marker of the latest connection decision, so a stale
     /// asynchronous fetch completion can never overwrite newer user intent
     /// — the same discipline the connection module keeps.
@@ -543,8 +548,8 @@ final class CalendarEventsModel {
         weekLayouts[weekStart]
     }
 
-    /// Selects one canonical Calendar Event by its primary Source Calendar
-    /// event identity. Layout items carry that identity, but the popover detail
+    /// Selects one canonical Calendar Event by its current source event
+    /// identity. Layout items carry that identity, but the popover detail
     /// is resolved here so it never retains the tapped item's stale payload.
     func selectEvent(withID id: String) {
         guard let selection = detailSelection(forEventID: id) else {
@@ -584,16 +589,54 @@ final class CalendarEventsModel {
         )
     }
 
-    /// Publishes the Google Account Connection state. Becoming connected
-    /// fetches the initial Fetched Window — three months before Today
-    /// through three months after — once; becoming disconnected clears
-    /// every event and forgets the window, so a later connection fetches
-    /// fresh data.
+    /// Publishes the disclosure-gated, reconciled Selected Source Calendars.
+    /// `nil` suspends Calendar data and clears memory-only events; an empty
+    /// selection is the successful no-source exception and starts no request.
+    func setSelectedSourceCalendars(
+        _ selectedSourceCalendars: [GoogleSourceCalendar]?
+    ) {
+        guard let adapter else {
+            return
+        }
+        let selected = selectedSourceCalendars ?? []
+        let connected = selectedSourceCalendars != nil
+        guard !usesResolvedSourceCalendars
+                || connected != isConnected
+                || selected != sourceCalendars
+        else {
+            return
+        }
+
+        usesResolvedSourceCalendars = true
+        isConnected = connected
+        connectionGeneration += 1
+        cancelCadence()
+        fetchedWindow = nil
+        sourceCalendars = selected
+        normalizedEvents = []
+        selectedEvent = nil
+        freshnessCoverage = []
+        needsBrowsingFreshnessCheck = false
+        isRefreshPending = false
+        refreshFailure = nil
+        isSlabRetryBlocked = false
+        weekLayouts = [:]
+        status = CalendarEventsStatus(message: nil, tone: .info)
+
+        guard connected, !selected.isEmpty else {
+            return
+        }
+        beginInitialFetch(adapter: adapter)
+    }
+
+    /// Legacy Primary-only connection seam retained for deterministic tests
+    /// and previews. Production uses `setSelectedSourceCalendars(_:)`.
     func setConnected(_ connected: Bool) {
         guard let adapter, connected != isConnected else {
             return
         }
 
+        usesResolvedSourceCalendars = false
         isConnected = connected
         connectionGeneration += 1
 
@@ -626,7 +669,9 @@ final class CalendarEventsModel {
     private func beginInitialFetch(
         adapter: any GoogleCalendarEventsAdapting
     ) {
-        guard fetchedWindow == nil, !hasFetchInFlight else {
+        guard fetchedWindow == nil, !hasFetchInFlight,
+              !usesResolvedSourceCalendars || !sourceCalendars.isEmpty
+        else {
             return
         }
 
@@ -652,30 +697,36 @@ final class CalendarEventsModel {
         )
 
         let attempt = connectionGeneration
+        let resolvedSourceCalendars = sourceCalendars
+        let usesResolvedSourceCalendars = usesResolvedSourceCalendars
         Task { [weak self] in
-            let sourceOutcome = await adapter.fetchPrimarySourceCalendar()
-            guard self != nil else {
-                return
-            }
-            guard self?.connectionGeneration == attempt else {
-                self?.isFetchingInitialWindow = false
-                self?.resumeAfterStaleFetch()
-                return
-            }
+            let requestedSourceCalendars: [GoogleSourceCalendar]
+            if usesResolvedSourceCalendars {
+                requestedSourceCalendars = resolvedSourceCalendars
+            } else {
+                let sourceOutcome = await adapter.fetchPrimarySourceCalendar()
+                guard self != nil else {
+                    return
+                }
+                guard self?.connectionGeneration == attempt else {
+                    self?.isFetchingInitialWindow = false
+                    self?.resumeAfterStaleFetch()
+                    return
+                }
 
-            let primarySourceCalendar: GoogleSourceCalendar
-            switch sourceOutcome {
-            case .success(let sourceCalendar):
-                primarySourceCalendar = sourceCalendar
-            case .unavailable(let failure):
-                self?.isFetchingInitialWindow = false
-                self?.publishInitialFailure(failure)
-                self?.scheduleCadenceIfEligible()
-                return
+                switch sourceOutcome {
+                case .success(let sourceCalendar):
+                    requestedSourceCalendars = [sourceCalendar]
+                case .unavailable(let failure):
+                    self?.isFetchingInitialWindow = false
+                    self?.publishInitialFailure(failure)
+                    self?.scheduleCadenceIfEligible()
+                    return
+                }
             }
 
             let outcome = await adapter.fetchEvents(
-                from: [primarySourceCalendar],
+                from: requestedSourceCalendars,
                 start: windowStart,
                 end: windowEnd
             )
@@ -696,7 +747,7 @@ final class CalendarEventsModel {
 
             switch outcome {
             case .success(let events, let eventColorBackgrounds):
-                sourceCalendars = [primarySourceCalendar]
+                sourceCalendars = requestedSourceCalendars
                 fetchedWindow = (windowStart, windowEnd)
                 normalizedEvents = normalize(
                     events,

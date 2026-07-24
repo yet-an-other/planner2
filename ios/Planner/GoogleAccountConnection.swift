@@ -213,7 +213,7 @@ final class GoogleAccountConnection {
     /// behavior. Increment it when the copy's data-behavior claims change,
     /// so installations that acknowledged an earlier version see the
     /// revised sheet again.
-    static let currentDisclosureVersion = 2
+    static let currentDisclosureVersion = 3
 
     /// The scopes Connect requests in one authorization flow: Google identity
     /// plus read-only Calendar access.
@@ -228,6 +228,11 @@ final class GoogleAccountConnection {
         "https://www.googleapis.com/auth/calendar.readonly"
 
     private let adapter: (any GoogleSignInAdapting)?
+
+    /// The post-disclosure Calendar-data boundary. Account connection and
+    /// Calendar authorization may remain established while this consumer is
+    /// deliberately suspended for an unacknowledged disclosure upgrade.
+    private weak var calendarDataConsumer: (any CalendarDataAccountConsuming)?
 
     /// The connectivity observer for offline recovery, when configured.
     private let connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)?
@@ -262,9 +267,17 @@ final class GoogleAccountConnection {
     /// data. It clears whenever the Google Account Connection clears.
     private(set) var connectedAccountID: String?
 
-    /// The first-connect explanation awaiting the user's choice, or `nil`
-    /// when no sheet should be presented.
+    /// The explanation awaiting the user's choice, or `nil` when no sheet
+    /// should be presented. It serves both first Connect and a restored
+    /// account's revised Calendar-data disclosure.
     private(set) var explanation: GoogleConnectionExplanation?
+
+    private enum ExplanationPurpose {
+        case connect
+        case calendarAccessUpgrade
+    }
+
+    private var explanationPurpose: ExplanationPurpose?
 
     /// Builds the module for a gate-on build. A configured build receives
     /// an adapter, establishes the installation boundary — clearing stale
@@ -281,10 +294,13 @@ final class GoogleAccountConnection {
         disclosureStore: any GoogleConnectionDisclosureStoring,
         connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)? = nil,
         installationBoundary: GoogleConnectionInstallationBoundary,
-        disclosureVersion: Int = GoogleAccountConnection.currentDisclosureVersion
+        disclosureVersion: Int = GoogleAccountConnection.currentDisclosureVersion,
+        calendarDataConsumer: (any CalendarDataAccountConsuming)? = nil
     ) {
         self.disclosureStore = disclosureStore
         self.disclosureVersion = disclosureVersion
+        self.calendarDataConsumer = calendarDataConsumer
+        explanationPurpose = nil
         switch configuration {
         case .configured(let configured):
             adapter = makeAdapter(configured)
@@ -332,6 +348,7 @@ final class GoogleAccountConnection {
         explanation: GoogleConnectionExplanation? = nil
     ) {
         adapter = nil
+        calendarDataConsumer = nil
         self.connectivityMonitor = nil
         privacyPolicyURL = explanation?.privacyPolicyURL
         disclosureStore = UserDefaultsGoogleConnectionDisclosureStore()
@@ -340,6 +357,7 @@ final class GoogleAccountConnection {
         self.status = status
         connectedAccountID = nil
         self.explanation = explanation
+        explanationPurpose = explanation == nil ? nil : .connect
     }
     #endif
 
@@ -378,6 +396,7 @@ final class GoogleAccountConnection {
             disclosureStore.acknowledgedDisclosureVersion() ?? 0
         guard acknowledgedVersion >= disclosureVersion else {
             connectionDecision += 1
+            explanationPurpose = .connect
             explanation = GoogleConnectionExplanation(
                 privacyPolicyURL: privacyPolicyURL
             )
@@ -387,32 +406,58 @@ final class GoogleAccountConnection {
         beginInteractiveConnect(adapter: adapter)
     }
 
-    /// Continues past the first-connect explanation: acknowledges the
-    /// current disclosure version for this installation and resumes the same
-    /// Connect flow the user requested.
+    /// Continues past the presented explanation. First Connect resumes the
+    /// authorization flow; a restored-account upgrade keeps the connection
+    /// and releases its account to the Calendar-data boundary.
     func continueConnect() {
-        guard let adapter, explanation != nil else {
+        guard let purpose = explanationPurpose, explanation != nil else {
             return
         }
 
         explanation = nil
+        explanationPurpose = nil
         disclosureStore.recordAcknowledgedDisclosureVersion(disclosureVersion)
-        beginInteractiveConnect(adapter: adapter)
+
+        switch purpose {
+        case .connect:
+            guard let adapter else {
+                return
+            }
+            beginInteractiveConnect(adapter: adapter)
+        case .calendarAccessUpgrade:
+            guard let connectedAccountID else {
+                return
+            }
+            status = Status(
+                message: GoogleAccountConnectionCopy.connected,
+                tone: .info
+            )
+            calendarDataConsumer?.setCalendarDataAccountID(connectedAccountID)
+        }
     }
 
-    /// Cancels the first-connect explanation — by Cancel or by dismissing
-    /// the sheet — so no Google authorization UI opens and the cancellation
-    /// is reported as ordinary information.
+    /// Cancels the presented explanation. First Connect remains disconnected;
+    /// a restored-account upgrade preserves Disconnect on This Device while
+    /// Calendar loading and selection persistence stay suspended.
     func cancelConnectExplanation() {
-        guard explanation != nil else {
+        guard let purpose = explanationPurpose, explanation != nil else {
             return
         }
 
         explanation = nil
-        status = Status(
-            message: GoogleAccountConnectionCopy.cancelled,
-            tone: .info
-        )
+        explanationPurpose = nil
+        status = switch purpose {
+        case .connect:
+            Status(
+                message: GoogleAccountConnectionCopy.cancelled,
+                tone: .info
+            )
+        case .calendarAccessUpgrade:
+            Status(
+                message: GoogleAccountConnectionCopy.reviewCalendarAccess,
+                tone: .warning
+            )
+        }
     }
 
     /// The one interactive Connect flow: identity plus Calendar read
@@ -441,12 +486,12 @@ final class GoogleAccountConnection {
             switch outcome {
             case .connected(let account)
             where account.grantedScopes.contains(Self.calendarReadScope):
-                publishConnected(account)
+                publishConnected(account, restored: false)
             case .connected:
                 // Identity without the Calendar scope is not a connection:
                 // clear the partial local sign-in and stay disconnected.
                 adapter.signOut()
-                connectedAccountID = nil
+                clearConnectedAccount()
                 control = .disconnected(connectEnabled: true)
                 status = Status(
                     message: GoogleAccountConnectionCopy.calendarReadAccessRequired,
@@ -480,6 +525,14 @@ final class GoogleAccountConnection {
         guard adapter != nil, !isInteractiveFlowInFlight, explanation == nil else {
             return
         }
+
+        if control.isConnected,
+           (disclosureStore.acknowledgedDisclosureVersion() ?? 0)
+                < disclosureVersion
+        {
+            presentCalendarAccessUpgrade()
+            return
+        }
         beginValidation()
     }
 
@@ -510,7 +563,9 @@ final class GoogleAccountConnection {
         connectionDecision += 1
         owesOfflineValidation = false
         adapter?.signOut()
-        connectedAccountID = nil
+        explanation = nil
+        explanationPurpose = nil
+        clearConnectedAccount()
         control = .disconnected(connectEnabled: true)
         status = Status(
             message: GoogleAccountConnectionCopy.disconnectedOnThisDevice,
@@ -561,12 +616,12 @@ final class GoogleAccountConnection {
             switch outcome {
             case .restored(let account)
             where account.grantedScopes.contains(Self.calendarReadScope):
-                publishConnected(account)
+                publishConnected(account, restored: true)
             case .restored:
                 // The grant lost the Calendar scope: the saved identity is
                 // not a connection, so clear it and stay disconnected.
                 adapter.signOut()
-                connectedAccountID = nil
+                clearConnectedAccount()
                 control = .disconnected(connectEnabled: true)
                 status = Status(
                     message: GoogleAccountConnectionCopy.calendarReadAccessRequired,
@@ -577,7 +632,7 @@ final class GoogleAccountConnection {
                 // expired like any invalid authorization; anything else is
                 // an ordinary blank disconnected state.
                 let wasConnected = control.isConnected
-                connectedAccountID = nil
+                clearConnectedAccount()
                 control = .disconnected(connectEnabled: true)
                 status = wasConnected
                     ? Status(
@@ -587,7 +642,7 @@ final class GoogleAccountConnection {
                     : Status(message: nil, tone: .info)
             case .invalidAuthorization:
                 adapter.signOut()
-                connectedAccountID = nil
+                clearConnectedAccount()
                 control = .disconnected(connectEnabled: true)
                 status = Status(
                     message: GoogleAccountConnectionCopy.expired,
@@ -629,7 +684,10 @@ final class GoogleAccountConnection {
     /// Publishes the connected presentation for an authorized account that
     /// holds the Calendar scope, refreshing the presented identity on every
     /// successful validation.
-    private func publishConnected(_ account: GoogleAuthorizedAccount) {
+    private func publishConnected(
+        _ account: GoogleAuthorizedAccount,
+        restored: Bool
+    ) {
         connectedAccountID = account.stableAccountID
         control = .connected(
             GoogleConnectedProfile(
@@ -641,6 +699,35 @@ final class GoogleAccountConnection {
             message: GoogleAccountConnectionCopy.connected,
             tone: .info
         )
+
+        let acknowledged =
+            (disclosureStore.acknowledgedDisclosureVersion() ?? 0)
+                >= disclosureVersion
+        if restored && !acknowledged {
+            calendarDataConsumer?.setCalendarDataAccountID(nil)
+            presentCalendarAccessUpgrade()
+        } else {
+            explanation = nil
+            explanationPurpose = nil
+            calendarDataConsumer?.setCalendarDataAccountID(account.stableAccountID)
+        }
+    }
+
+    private func presentCalendarAccessUpgrade() {
+        guard let privacyPolicyURL, control.isConnected else {
+            return
+        }
+        connectionDecision += 1
+        explanationPurpose = .calendarAccessUpgrade
+        explanation = GoogleConnectionExplanation(
+            privacyPolicyURL: privacyPolicyURL
+        )
+        calendarDataConsumer?.setCalendarDataAccountID(nil)
+    }
+
+    private func clearConnectedAccount() {
+        connectedAccountID = nil
+        calendarDataConsumer?.setCalendarDataAccountID(nil)
     }
 }
 
@@ -695,6 +782,11 @@ extension GoogleAccountConnectionCopy {
     /// Shown for any authorization failure without more specific copy.
     static let failed = "Google connection failed. Try again"
 
+    /// Shown when a restored connection remains available for Disconnect on
+    /// This Device but Calendar-data behavior awaits revised disclosure.
+    static let reviewCalendarAccess =
+        "Review Calendar access update to load events."
+
     /// The first-connect explanation title.
     static let explanationTitle = "Connect Google Calendar"
 
@@ -702,10 +794,10 @@ extension GoogleAccountConnectionCopy {
     /// assurance, and this build's actual Calendar-data behavior.
     static let explanationBody =
         "Planner requests read-only access to Google Calendar to show "
-        + "your primary calendar\u{2019}s events on the Calendar Surface. "
-        + "Planner cannot create, edit, or delete anything in your Google "
-        + "Calendar. This build downloads your primary calendar\u{2019}s "
-        + "events to show them and stores no Calendar data."
+        + "events from your Selected Source Calendars on the Calendar "
+        + "Surface. Planner cannot create, edit, or delete anything in your "
+        + "Google Calendar. Planner stores the selected Source Calendar IDs "
+        + "on this device and stores no Calendar Events."
 
     /// The explanation action that acknowledges and resumes Connect.
     static let explanationContinue = "Continue"

@@ -11,6 +11,13 @@ struct HeaderStatusResolutionTests {
         GoogleAccountConnection.Status(message: message, tone: tone)
     }
 
+    private static func sourceCalendars(
+        _ message: String?,
+        _ tone: SourceCalendarsStatus.Tone
+    ) -> SourceCalendarsStatus {
+        SourceCalendarsStatus(message: message, tone: tone)
+    }
+
     private static func events(
         _ message: String?,
         _ tone: CalendarEventsStatus.Tone
@@ -30,6 +37,24 @@ struct HeaderStatusResolutionTests {
 
         #expect(content.message == GoogleAccountConnectionCopy.offline)
         #expect(content.tone == .warning)
+    }
+
+    @Test("Source Calendar loading leads over event and resting connection status")
+    func sourceCalendarsLeadCalendarPipeline() {
+        let content = resolveHeaderStatus(
+            connection: Self.connection(
+                GoogleAccountConnectionCopy.connected,
+                .info
+            ),
+            sourceCalendars: Self.sourceCalendars(
+                SourceCalendarsCopy.loading,
+                .info
+            ),
+            events: Self.events(CalendarEventsCopy.loading, .info)
+        )
+
+        #expect(content.message == SourceCalendarsCopy.loading)
+        #expect(content.tone == .info)
     }
 
     @Test("Events progress overrides the connection's resting information")

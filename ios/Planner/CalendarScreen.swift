@@ -12,12 +12,14 @@ struct CalendarScreen: View {
 
     private let currentEnvironment: @MainActor () -> CalendarEnvironment
     private let connection: GoogleAccountConnection?
+    private let sourceCalendars: SourceCalendarsModel?
     private let events: CalendarEventsModel?
 
     init(
         environment: CalendarEnvironment,
         currentEnvironment: @escaping @MainActor () -> CalendarEnvironment,
         connection: GoogleAccountConnection? = nil,
+        sourceCalendars: SourceCalendarsModel? = nil,
         events: CalendarEventsModel? = nil
     ) {
         let model = CalendarGridModel(environment: environment)
@@ -25,6 +27,7 @@ struct CalendarScreen: View {
         _scrollPosition = State(initialValue: model.todayWeek.id)
         self.currentEnvironment = currentEnvironment
         self.connection = connection
+        self.sourceCalendars = sourceCalendars
         self.events = events
     }
 
@@ -87,15 +90,10 @@ struct CalendarScreen: View {
             model.layoutDirection == .rightToLeft ? .rightToLeft : .leftToRight
         )
         .task {
-            // The events module follows both scene and connection lifecycle:
-            // Calendar Event Refresh cadence exists only while foreground-
-            // active and connected. While the gate is off, neither module
-            // exists and nothing changes here.
+            // Source Calendars owns the disclosure-gated connection-to-event
+            // pipeline. The screen reports only scene lifecycle for Calendar
+            // Event Refresh cadence.
             events?.setSceneActive(scenePhase == .active)
-            events?.setConnected(connection?.isConnected ?? false)
-        }
-        .onChange(of: connection?.control) { _, control in
-            events?.setConnected(control?.isConnected ?? false)
         }
         .onChange(of: scenePhase) { _, nextScenePhase in
             midnightScheduleGeneration += 1
@@ -158,6 +156,7 @@ struct CalendarScreen: View {
         if let connection {
             let content = resolveHeaderStatus(
                 connection: connection.status,
+                sourceCalendars: sourceCalendars?.status,
                 events: events?.status
             )
             IOSHeaderStatus(
@@ -1238,16 +1237,19 @@ private struct PreviewGoogleSignInAdapter: GoogleSignInAdapting {
 }
 
 /// A Calendar Events module backed by canned events around the preview's
-/// Today (2026-07-15), for deterministic event previews. The preview's
-/// connected control drives the module's fetch exactly as production does.
+/// Today (2026-07-15), for deterministic event previews. Production receives
+/// its selection from Source Calendars; the preview uses the retained
+/// Primary-only seam to start its canned fetch.
 @MainActor
 private func previewEvents(
     environment: CalendarEnvironment
 ) -> CalendarEventsModel {
-    CalendarEventsModel(
+    let model = CalendarEventsModel(
         environment: environment,
         adapter: PreviewGoogleCalendarEventsAdapter()
     )
+    model.setConnected(true)
+    return model
 }
 
 /// The stub Google Calendar events adapter for deterministic previews: a

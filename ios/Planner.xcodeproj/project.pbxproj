@@ -40,6 +40,9 @@
 		A00000000000000000000146 /* CalendarEventDetailLinksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000145 /* CalendarEventDetailLinksTests.swift */; };
 		A00000000000000000000148 /* SelectedSourceCalendarsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000147 /* SelectedSourceCalendarsStore.swift */; };
 		A00000000000000000000150 /* SelectedSourceCalendarsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000149 /* SelectedSourceCalendarsStoreTests.swift */; };
+		A00000000000000000000152 /* SourceCalendarsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000151 /* SourceCalendarsModel.swift */; };
+		A00000000000000000000154 /* SourceCalendarsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000153 /* SourceCalendarsModelTests.swift */; };
+		A00000000000000000000156 /* GoogleCalendarAPIAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000155 /* GoogleCalendarAPIAdapterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -90,6 +93,9 @@
 		A00000000000000000000145 /* CalendarEventDetailLinksTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventDetailLinksTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000147 /* SelectedSourceCalendarsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedSourceCalendarsStore.swift; sourceTree = "<group>"; };
 		A00000000000000000000149 /* SelectedSourceCalendarsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedSourceCalendarsStoreTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000151 /* SourceCalendarsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceCalendarsModel.swift; sourceTree = "<group>"; };
+		A00000000000000000000153 /* SourceCalendarsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceCalendarsModelTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000155 /* GoogleCalendarAPIAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleCalendarAPIAdapterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -154,6 +160,7 @@
 				A00000000000000000000141 /* IOSEventDetailPopover.swift */,
 				A00000000000000000000143 /* CalendarEventDetailLinks.swift */,
 				A00000000000000000000147 /* SelectedSourceCalendarsStore.swift */,
+				A00000000000000000000151 /* SourceCalendarsModel.swift */,
 				A00000000000000000000018 /* Assets.xcassets */,
 				A00000000000000000000017 /* Info.plist */,
 			);
@@ -173,6 +180,8 @@
 				A00000000000000000000137 /* HeaderStatusResolutionTests.swift */,
 				A00000000000000000000145 /* CalendarEventDetailLinksTests.swift */,
 				A00000000000000000000149 /* SelectedSourceCalendarsStoreTests.swift */,
+				A00000000000000000000153 /* SourceCalendarsModelTests.swift */,
+				A00000000000000000000155 /* GoogleCalendarAPIAdapterTests.swift */,
 			);
 			path = PlannerTests;
 			sourceTree = "<group>";
@@ -304,6 +313,7 @@
 				A00000000000000000000142 /* IOSEventDetailPopover.swift in Sources */,
 				A00000000000000000000144 /* CalendarEventDetailLinks.swift in Sources */,
 				A00000000000000000000148 /* SelectedSourceCalendarsStore.swift in Sources */,
+				A00000000000000000000152 /* SourceCalendarsModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -321,6 +331,8 @@
 				A00000000000000000000138 /* HeaderStatusResolutionTests.swift in Sources */,
 				A00000000000000000000146 /* CalendarEventDetailLinksTests.swift in Sources */,
 				A00000000000000000000150 /* SelectedSourceCalendarsStoreTests.swift in Sources */,
+				A00000000000000000000154 /* SourceCalendarsModelTests.swift in Sources */,
+				A00000000000000000000156 /* GoogleCalendarAPIAdapterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

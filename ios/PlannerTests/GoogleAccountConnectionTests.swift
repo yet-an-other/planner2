@@ -67,6 +67,82 @@ final class FakeGoogleConnectionDisclosureStore: GoogleConnectionDisclosureStori
 /// The deterministic connectivity monitor: tests drive offline/online
 /// transitions directly through the same seam the production NWPathMonitor
 /// wrapper satisfies.
+private final class CalendarPipelineLog {
+    var entries: [String] = []
+}
+
+@MainActor
+private final class PipelineSourceCalendarsAdapter:
+    GoogleSourceCalendarsAdapting
+{
+    let log: CalendarPipelineLog
+    let sourceCalendar: GoogleSourceCalendar
+
+    init(log: CalendarPipelineLog) {
+        self.log = log
+        sourceCalendar = GoogleSourceCalendar(
+            id: "primary",
+            summary: "Primary",
+            backgroundColorHex: "#039BE5",
+            isPrimary: true
+        )
+    }
+
+    func fetchSourceCalendars() async -> GoogleSourceCalendarsOutcome {
+        log.entries.append("source-calendars")
+        return .success([sourceCalendar])
+    }
+}
+
+private final class PipelineSelectedSourceCalendarsStore:
+    SelectedSourceCalendarsStoring
+{
+    let log: CalendarPipelineLog
+
+    init(log: CalendarPipelineLog) {
+        self.log = log
+    }
+
+    func selectedSourceCalendarIDs(for accountID: String) -> [String]? {
+        nil
+    }
+
+    func saveSelectedSourceCalendarIDs(
+        _ calendarIDs: [String],
+        for accountID: String
+    ) {
+        log.entries.append("persist-selection")
+    }
+
+    func clearAllSelectedSourceCalendars() {}
+}
+
+@MainActor
+private final class PipelineSelectionConsumer: SelectedSourceCalendarsConsuming {
+    let log: CalendarPipelineLog
+
+    init(log: CalendarPipelineLog) {
+        self.log = log
+    }
+
+    func setSelectedSourceCalendars(
+        _ sourceCalendars: [GoogleSourceCalendar]?
+    ) {
+        if sourceCalendars?.isEmpty == false {
+            log.entries.append("event-request")
+        }
+    }
+}
+
+@MainActor
+private final class FakeCalendarDataAccountConsumer: CalendarDataAccountConsuming {
+    private(set) var accountIDs: [String?] = []
+
+    func setCalendarDataAccountID(_ accountID: String?) {
+        accountIDs.append(accountID)
+    }
+}
+
 private final class FakeConnectivityMonitor: GoogleConnectionConnectivityMonitoring {
     private var onConnectivityReturn: (@MainActor () -> Void)?
     var startCallCount = 0
@@ -743,8 +819,8 @@ struct GoogleAccountConnectionTests {
                 acknowledgedVersion: 1
             )
         )
-        // The event-downloading disclosure bumped the version.
-        #expect(GoogleAccountConnection.currentDisclosureVersion == 2)
+        // Selected Source Calendar persistence bumped the disclosure again.
+        #expect(GoogleAccountConnection.currentDisclosureVersion == 3)
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .connected(Self.authorizedAccount()) }
 
@@ -765,12 +841,158 @@ struct GoogleAccountConnectionTests {
         )
     }
 
-    @Test("The explanation states events are downloaded and nothing stored")
-    func explanationCopyStatesDownloadingAndNoStorage() {
+    @Test("The explanation states selected IDs are stored but events are not")
+    func explanationCopyStatesSelectionAndEventStorage() {
         let body = GoogleAccountConnectionCopy.explanationBody
-        #expect(body.contains("downloads"))
-        #expect(body.contains("stores no Calendar data"))
-        #expect(!body.contains("downloads no Calendar data"))
+        #expect(body.contains("Selected Source Calendars"))
+        #expect(body.contains("stores the selected Source Calendar IDs"))
+        #expect(body.contains("stores no Calendar Events"))
+    }
+
+    @Test("A restored older disclosure suspends Calendar data until Continue")
+    func restoredDisclosureUpgradeContinues() async {
+        let consumer = FakeCalendarDataAccountConsumer()
+        let store = FakeGoogleConnectionDisclosureStore(acknowledgedVersion: 2)
+        let (connection, adapter, _, _) = makeConnection(
+            disclosureStore: store,
+            calendarDataConsumer: consumer
+        ) {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+
+        #expect(
+            await controlEventuallyEquals(
+                .connected(Self.profile),
+                in: connection
+            )
+        )
+        #expect(connection.explanation != nil)
+        #expect(adapter.signInCallCount == 0)
+        #expect(!consumer.accountIDs.contains(Self.stableAccountID))
+
+        connection.continueConnect()
+
+        #expect(connection.explanation == nil)
+        #expect(store.acknowledgedVersion == 3)
+        #expect(consumer.accountIDs.last == Self.stableAccountID)
+    }
+
+    @Test("Cancelling a restored upgrade preserves connection and reoffers on foreground")
+    func restoredDisclosureUpgradeCancellation() async {
+        let consumer = FakeCalendarDataAccountConsumer()
+        let (connection, _, _, _) = makeConnection(
+            disclosureStore: FakeGoogleConnectionDisclosureStore(
+                acknowledgedVersion: 2
+            ),
+            calendarDataConsumer: consumer
+        ) {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+
+        #expect(
+            await controlEventuallyEquals(
+                .connected(Self.profile),
+                in: connection
+            )
+        )
+        #expect(connection.explanation != nil)
+
+        connection.cancelConnectExplanation()
+
+        #expect(connection.control == .connected(Self.profile))
+        #expect(
+            connection.status.message
+                == GoogleAccountConnectionCopy.reviewCalendarAccess
+        )
+        #expect(!consumer.accountIDs.contains(Self.stableAccountID))
+
+        connection.validateOnForeground()
+        #expect(connection.explanation != nil)
+        #expect(connection.control == .connected(Self.profile))
+    }
+
+    @Test("A current disclosure releases restored Calendar data immediately")
+    func currentRestorationReleasesCalendarData() async {
+        let consumer = FakeCalendarDataAccountConsumer()
+        let (connection, _, _, _) = makeConnection(
+            calendarDataConsumer: consumer
+        ) {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+
+        #expect(
+            await controlEventuallyEquals(
+                .connected(Self.profile),
+                in: connection
+            )
+        )
+        #expect(connection.explanation == nil)
+        #expect(consumer.accountIDs.last == Self.stableAccountID)
+    }
+
+    @Test("A new disclosure orders Source Calendars, persistence, then events")
+    func newDisclosureCalendarPipelineOrdering() async {
+        let log = CalendarPipelineLog()
+        let sourceAdapter = PipelineSourceCalendarsAdapter(log: log)
+        let selectionConsumer = PipelineSelectionConsumer(log: log)
+        let sourceModel = SourceCalendarsModel(
+            adapter: sourceAdapter,
+            store: PipelineSelectedSourceCalendarsStore(log: log),
+            selectionConsumer: selectionConsumer
+        )
+        let (connection, adapter, _, _) = makeConnection(
+            disclosureStore: FakeGoogleConnectionDisclosureStore(),
+            calendarDataConsumer: sourceModel
+        )
+        #expect(await settledDisconnected(connection))
+        adapter.signInHandler = { .connected(Self.authorizedAccount()) }
+
+        connection.connect()
+        #expect(connection.explanation != nil)
+        #expect(log.entries.isEmpty)
+
+        connection.continueConnect()
+
+        #expect(
+            await eventually {
+                log.entries
+                    == [
+                        "source-calendars",
+                        "persist-selection",
+                        "event-request",
+                    ]
+            }
+        )
+    }
+
+    @Test("A cancelled restored disclosure performs no Calendar pipeline work")
+    func cancelledRestoredDisclosureStartsNoCalendarPipeline() async {
+        let log = CalendarPipelineLog()
+        let selectionConsumer = PipelineSelectionConsumer(log: log)
+        let sourceModel = SourceCalendarsModel(
+            adapter: PipelineSourceCalendarsAdapter(log: log),
+            store: PipelineSelectedSourceCalendarsStore(log: log),
+            selectionConsumer: selectionConsumer
+        )
+        let (connection, _, _, _) = makeConnection(
+            disclosureStore: FakeGoogleConnectionDisclosureStore(
+                acknowledgedVersion: 2
+            ),
+            calendarDataConsumer: sourceModel
+        ) {
+            $0.restoreHandler = { .restored(Self.authorizedAccount()) }
+        }
+        #expect(
+            await controlEventuallyEquals(
+                .connected(Self.profile),
+                in: connection
+            )
+        )
+
+        connection.cancelConnectExplanation()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(log.entries.isEmpty)
     }
 
     @Test("A repeated Connect while explaining presents one sheet")
@@ -1101,6 +1323,7 @@ struct GoogleAccountConnectionTests {
         connectivityMonitor: FakeConnectivityMonitor = FakeConnectivityMonitor(),
         installationBoundary: GoogleConnectionInstallationBoundary = Self.sameInstallationBoundary(),
         disclosureVersion: Int = GoogleAccountConnection.currentDisclosureVersion,
+        calendarDataConsumer: (any CalendarDataAccountConsuming)? = nil,
         configure: (FakeGoogleSignInAdapter) -> Void = { _ in }
     ) -> (
         connection: GoogleAccountConnection,
@@ -1116,7 +1339,8 @@ struct GoogleAccountConnectionTests {
             disclosureStore: disclosureStore,
             connectivityMonitor: connectivityMonitor,
             installationBoundary: installationBoundary,
-            disclosureVersion: disclosureVersion
+            disclosureVersion: disclosureVersion,
+            calendarDataConsumer: calendarDataConsumer
         )
         return (connection, adapter, disclosureStore, connectivityMonitor)
     }
