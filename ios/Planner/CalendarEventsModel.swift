@@ -724,7 +724,8 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// Detail Popover closes any open Day Events Popover. `drilledFromDay`
     /// records the Date Cell's day whose Day Events Popover the event was
     /// drilled through from — an open day selection implies it — so that
-    /// day's Events Overflow marker can anchor a cap-hidden event's detail.
+    /// day's Events Overflow marker, the same anchor that presented the
+    /// Day Events Popover, anchors the drilled event's detail.
     func selectEvent(withID id: String, drilledFromDay day: Date? = nil) {
         guard let selection = detailSelection(forEventID: id) else {
             return
@@ -736,10 +737,11 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     }
 
     /// Whether the selected Calendar Event is attributed to the given Date
-    /// Cell's day. A cap-hidden event drilled from the Day Events Popover
-    /// has no visible Calendar Event Bar or Row to anchor its Event Detail
-    /// Popover, so the marker of a Date Cell it is attributed to anchors
-    /// the popover instead.
+    /// Cell's day. An event drilled from the Day Events Popover anchors its
+    /// Event Detail Popover to that day's Events Overflow marker while it
+    /// stays attributed — the same anchor that presented the Day Events
+    /// Popover — so the surface needs attribution to keep the marker's
+    /// presentation owned by a day the event still belongs to.
     func selectedEventIsAttributed(toDay date: Date) -> Bool {
         guard let selectedEvent else {
             return false

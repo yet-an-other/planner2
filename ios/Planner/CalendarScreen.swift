@@ -235,8 +235,24 @@ struct CalendarScreen: View {
     /// The tapped segment remains preferred while it exists. If replacement
     /// moves the event to another Date Cell or Week Row, the new layout item
     /// becomes the anchor without changing model-owned selection.
+    ///
+    /// A drilled-through selection resolves no visible anchor while the
+    /// drilled-through Date Cell keeps its Events Overflow marker: the
+    /// detail anchors to that marker instead — the same view that presented
+    /// the Day Events Popover. Native presentations on one anchor serialize
+    /// across the drill-through, while a cross-anchor presentation races
+    /// the dismissing overlay and can be torn down with it: the teardown
+    /// writes `false` through the popover's source binding exactly as a
+    /// user dismissal does, so the selection read as dismissed and the
+    /// Event Detail Popover never survived.
     private func resolvedEventDetailAnchor() -> CalendarEventDetailAnchor? {
         guard let events, let selectedEvent = events.selectedEvent else {
+            return nil
+        }
+        if let drilledFromDay = events.selectedEventDrilledFromDay,
+           events.selectedEventIsAttributed(toDay: drilledFromDay),
+           carriesEventsOverflowMarker(on: drilledFromDay)
+        {
             return nil
         }
         let candidates: [CalendarEventDetailAnchor] = events.weekLayouts
@@ -280,14 +296,16 @@ struct CalendarScreen: View {
     }
 
     /// The Date Cell whose Events Overflow marker anchors the Event Detail
-    /// Popover when the selected event has no visible Calendar Event Bar or
-    /// Row — the drill-through case for cap-hidden events, whose days
-    /// always carry a marker. The drilled-through Date Cell wins while the
-    /// event stays attributed to it: it summoned the Day Events Popover, so
-    /// it is on screen, unlike an earlier attributed cell the LazyVStack
-    /// may never have rendered. Only when refresh moves the event off that
-    /// day does the earliest qualifying cell in Week Row order take over,
-    /// so exactly one marker presents.
+    /// Popover for a drilled-through selection while the drilled-through
+    /// Date Cell keeps its marker, or when the selected event has no
+    /// visible Calendar Event Bar or Row. The drilled-through Date Cell
+    /// wins while the event stays attributed to it: it summoned the Day
+    /// Events Popover, so it is on screen, unlike an earlier attributed
+    /// cell the LazyVStack may never have rendered. Only when refresh moves
+    /// the event off that day or its marker disappears does a visible
+    /// Calendar Event Bar or Row anchor — or, failing that, the earliest
+    /// qualifying marker cell in Week Row order — take over, so exactly one
+    /// view presents.
     private func resolvedEventDetailFallbackDate() -> Date? {
         guard let events, events.selectedEvent != nil,
               resolvedEventDetailAnchor() == nil
@@ -757,9 +775,11 @@ private struct EventsOverflowMarkerText: View {
 /// The tappable Events Overflow marker that summons the Day Events Popover
 /// for its Date Cell (Planning glossary). Presentation state stays in the
 /// Calendar Events model so refreshed layout replacement cannot strand a
-/// stale payload in this transient view. The marker also anchors the Event
-/// Detail Popover when the selected event has no visible Calendar Event
-/// Bar or Row — the drill-through case for cap-hidden events.
+/// stale payload in this transient view. The marker also anchors the
+/// drilled-through Event Detail Popover while its Date Cell keeps its
+/// marker: the same anchor presented the Day Events Popover, so the native
+/// presentations serialize across the drill-through instead of racing the
+/// dismissing overlay.
 private struct DayEventsPopoverTrigger: View {
     let date: Date
     let overflowCount: Int
@@ -814,22 +834,18 @@ private struct DayEventsPopoverPresentation: View {
             IOSDayEventsPopover(selection: selection) {
                 events.dismissDayEvents()
             } onSelectEvent: { eventID in
-                // The drill-through: the Day Events Popover closes as the
-                // Event Detail Popover summons, and the summoned day
-                // travels with the selection so this cell's Events
-                // Overflow marker can anchor a cap-hidden event's detail.
-                // Native adaptive presentations never stack — yielding
-                // once lets this popover leave its anchor before the
-                // detail presents, the same pacing as the Source Calendar
-                // Picker.
-                events.dismissDayEvents()
-                Task { @MainActor in
-                    await Task.yield()
-                    events.selectEvent(
-                        withID: eventID,
-                        drilledFromDay: selection.date
-                    )
-                }
+                // The drill-through: one model mutation closes the Day
+                // Events Popover and selects the event, so the two native
+                // presentations swap in a single view update on the same
+                // anchor — this cell's Events Overflow marker. Splitting
+                // the dismissal and the selection across updates lets the
+                // new presentation race the dismissing overlay; UIKit can
+                // tear it down and write `false` through its source
+                // binding exactly as a user dismissal does.
+                events.selectEvent(
+                    withID: eventID,
+                    drilledFromDay: selection.date
+                )
             }
         }
     }
