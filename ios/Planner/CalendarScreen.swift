@@ -35,6 +35,7 @@ struct CalendarScreen: View {
         // Read the model-owned selection in this presentation tree so
         // Observation invalidates the popover binding for update or dismissal.
         let selectedEventAnchor = resolvedEventDetailAnchor()
+        let eventDetailFallbackDate = resolvedEventDetailFallbackDate()
 
         VStack(spacing: 0) {
             IOSCalendarHeader(
@@ -54,12 +55,15 @@ struct CalendarScreen: View {
                             eventWeek: events?.layout(forWeekStarting: weekRow.id),
                             events: events,
                             selectedEventAnchor: selectedEventAnchor,
+                            eventDetailFallbackDate: eventDetailFallbackDate,
                             onSelectEvent: { eventID, anchor in
                                 preferredEventDetailAnchor = anchor
                                 events?.selectEvent(withID: eventID)
                             },
                             onRequestDismiss: requestEventDetailDismissal,
-                            onRequestDayEventsDismiss: requestDayEventsDismissal
+                            onRequestDayEventsDismiss: requestDayEventsDismissal,
+                            onRequestEventDetailFallbackDismiss:
+                                requestEventDetailFallbackDismissal
                         )
                     }
                 }
@@ -275,6 +279,39 @@ struct CalendarScreen: View {
         return candidates.first
     }
 
+    /// The Date Cell whose Events Overflow marker anchors the Event Detail
+    /// Popover when the selected event has no visible Calendar Event Bar or
+    /// Row — the drill-through case for cap-hidden events, whose days
+    /// always carry a marker. The earliest qualifying cell in Week Row
+    /// order wins, so exactly one marker presents.
+    private func resolvedEventDetailFallbackDate() -> Date? {
+        guard let events, events.selectedEvent != nil,
+              resolvedEventDetailAnchor() == nil
+        else {
+            return nil
+        }
+        let calendar = currentEnvironment().calendar
+        for (weekStart, layout) in events.weekLayouts
+            .sorted(by: { $0.key < $1.key })
+        {
+            for (column, cell) in layout.cells.enumerated()
+            where cell.overflowCount != nil {
+                guard
+                    let date = calendar.date(
+                        byAdding: .day,
+                        value: column,
+                        to: weekStart
+                    ),
+                    events.selectedEventIsAttributed(toDay: date)
+                else {
+                    continue
+                }
+                return date
+            }
+        }
+        return nil
+    }
+
     /// Native popover dismissal writes `false` through its source binding both
     /// for user dismissal and when refresh replaces that source view. Defer one
     /// turn and dismiss the canonical selection only when the same anchor still
@@ -285,6 +322,21 @@ struct CalendarScreen: View {
         Task { @MainActor in
             await Task.yield()
             guard resolvedEventDetailAnchor() == anchor else {
+                return
+            }
+            events?.dismissEventDetail()
+        }
+    }
+
+    /// Native dismissal of a marker-anchored Event Detail Popover writes
+    /// `false` through its source binding. Defer one turn and dismiss the
+    /// event selection only while the same Date Cell still anchors the
+    /// fallback: a refresh can install a visible Calendar Event Bar or Row
+    /// anchor first, and that replacement owns the presentation then.
+    private func requestEventDetailFallbackDismissal(from date: Date) {
+        Task { @MainActor in
+            await Task.yield()
+            guard resolvedEventDetailFallbackDate() == date else {
                 return
             }
             events?.dismissEventDetail()
@@ -442,9 +494,11 @@ private struct WeekRowView: View {
     let eventWeek: CalendarEventWeekLayout?
     let events: CalendarEventsModel?
     let selectedEventAnchor: CalendarEventDetailAnchor?
+    let eventDetailFallbackDate: Date?
     let onSelectEvent: (String, CalendarEventDetailAnchor) -> Void
     let onRequestDismiss: (CalendarEventDetailAnchor) -> Void
     let onRequestDayEventsDismiss: (Date) -> Void
+    let onRequestEventDetailFallbackDismiss: (Date) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -459,9 +513,12 @@ private struct WeekRowView: View {
                     overflowCount: eventWeek?.cells[column].overflowCount,
                     events: events,
                     selectedEventAnchor: selectedEventAnchor,
+                    eventDetailFallbackDate: eventDetailFallbackDate,
                     onSelectEvent: onSelectEvent,
                     onRequestDismiss: onRequestDismiss,
-                    onRequestDayEventsDismiss: onRequestDayEventsDismiss
+                    onRequestDayEventsDismiss: onRequestDayEventsDismiss,
+                    onRequestEventDetailFallbackDismiss:
+                        onRequestEventDetailFallbackDismiss
                 )
             }
         }
@@ -671,12 +728,16 @@ private struct EventsOverflowMarkerText: View {
 /// The tappable Events Overflow marker that summons the Day Events Popover
 /// for its Date Cell (Planning glossary). Presentation state stays in the
 /// Calendar Events model so refreshed layout replacement cannot strand a
-/// stale payload in this transient view.
+/// stale payload in this transient view. The marker also anchors the Event
+/// Detail Popover when the selected event has no visible Calendar Event
+/// Bar or Row — the drill-through case for cap-hidden events.
 private struct DayEventsPopoverTrigger: View {
     let date: Date
     let overflowCount: Int
     let events: CalendarEventsModel
+    let anchorsEventDetail: Bool
     let onRequestDismiss: (Date) -> Void
+    let onRequestEventDetailDismiss: (Date) -> Void
 
     var body: some View {
         let isPresenting = events.selectedDayEvents?.date == date
@@ -699,6 +760,18 @@ private struct DayEventsPopoverTrigger: View {
         ) {
             DayEventsPopoverPresentation(events: events)
         }
+        .popover(
+            isPresented: Binding(
+                get: { anchorsEventDetail },
+                set: { presented in
+                    if !presented {
+                        onRequestEventDetailDismiss(date)
+                    }
+                }
+            )
+        ) {
+            CalendarEventDetailPresentation(events: events)
+        }
     }
 }
 
@@ -711,6 +784,17 @@ private struct DayEventsPopoverPresentation: View {
         if let selection = events.selectedDayEvents {
             IOSDayEventsPopover(selection: selection) {
                 events.dismissDayEvents()
+            } onSelectEvent: { eventID in
+                // The drill-through: the Day Events Popover closes as the
+                // Event Detail Popover summons. Native adaptive
+                // presentations never stack — yielding once lets this
+                // popover leave its anchor before the detail presents,
+                // the same pacing as the Source Calendar Picker.
+                events.dismissDayEvents()
+                Task { @MainActor in
+                    await Task.yield()
+                    events.selectEvent(withID: eventID)
+                }
             }
         }
     }
@@ -767,9 +851,11 @@ struct DateCellView: View {
     var overflowCount: Int?
     var events: CalendarEventsModel?
     var selectedEventAnchor: CalendarEventDetailAnchor?
+    var eventDetailFallbackDate: Date?
     var onSelectEvent: (String, CalendarEventDetailAnchor) -> Void = { _, _ in }
     var onRequestDismiss: (CalendarEventDetailAnchor) -> Void = { _ in }
     var onRequestDayEventsDismiss: (Date) -> Void = { _ in }
+    var onRequestEventDetailFallbackDismiss: (Date) -> Void = { _ in }
 
     private var rowsTop: CGFloat {
         CalendarEventLayoutMetrics.barsTop
@@ -852,7 +938,11 @@ struct DateCellView: View {
                                 date: dateCell.id,
                                 overflowCount: overflowCount,
                                 events: events,
-                                onRequestDismiss: onRequestDayEventsDismiss
+                                anchorsEventDetail:
+                                    eventDetailFallbackDate == dateCell.id,
+                                onRequestDismiss: onRequestDayEventsDismiss,
+                                onRequestEventDetailDismiss:
+                                    onRequestEventDetailFallbackDismiss
                             )
                         } else {
                             // Ungated builds keep the inert Events

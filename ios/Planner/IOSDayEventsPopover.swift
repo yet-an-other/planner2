@@ -8,8 +8,10 @@ import SwiftUI
 /// Calendar Event Rows by start time ascending, under a date heading
 /// naming the Date Cell. Presentation mirrors the iOS Event Detail
 /// Popover — a native anchored popover on regular widths adapting to a
-/// sheet on compact ones — and dismissal is native. The list is
-/// read-only: no create, edit, or delete affordances exist.
+/// sheet on compact ones — and dismissal is native. Selecting an item
+/// drills through to that event's Event Detail Popover; the two overlays
+/// are mutually exclusive, with no stacking and no back navigation. The
+/// surface stays write-read-only: no edit affordances exist.
 struct IOSDayEventsPopover: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -20,12 +22,18 @@ struct IOSDayEventsPopover: View {
     /// Closes the popover: the small close affordance's action.
     let onClose: () -> Void
 
+    /// The drill-through action: selecting a list item summons that
+    /// event's Event Detail Popover as this popover closes.
+    let onSelectEvent: (String) -> Void
+
     init(
         selection: CalendarEventDaySelection,
-        onClose: @escaping () -> Void
+        onClose: @escaping () -> Void,
+        onSelectEvent: @escaping (String) -> Void = { _ in }
     ) {
         self.selection = selection
         self.onClose = onClose
+        self.onSelectEvent = onSelectEvent
     }
 
     var body: some View {
@@ -49,12 +57,17 @@ struct IOSDayEventsPopover: View {
                 }
 
                 ForEach(selection.items) { item in
-                    switch item {
-                    case .bar(let bar):
-                        IOSDayEventBarItemView(bar: bar)
-                    case .row(let row):
-                        IOSDayEventRowItemView(row: row)
+                    Button {
+                        onSelectEvent(item.id)
+                    } label: {
+                        switch item {
+                        case .bar(let bar):
+                            IOSDayEventBarItemView(bar: bar)
+                        case .row(let row):
+                            IOSDayEventRowItemView(row: row)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(16)

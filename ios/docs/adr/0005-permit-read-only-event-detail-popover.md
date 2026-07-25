@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Supersedes the Calendar Events slice's out-of-scope exclusion of "Day Events Popover, Event Detail Popover, and any event interaction, selection, or drill-through" (issue #75) and the "Date Cells remain inert" statement in the iOS calendar-surface spec. The Source Calendar selection specification later extends the popover's canonical identity and content for cross-calendar events. The Day Events Popover series (issues #99–#102) later lifts the Events Overflow marker's inertness in gated builds — the marker summons the read-only Day Events Popover (iOS calendar-surface spec § Day Events Popover) — superseding the marker's reconfirmed inertness below; the surface stays write-read-only forever.
+Accepted. Supersedes the Calendar Events slice's out-of-scope exclusion of "Day Events Popover, Event Detail Popover, and any event interaction, selection, or drill-through" (issue #75) and the "Date Cells remain inert" statement in the iOS calendar-surface spec. The Source Calendar selection specification later extends the popover's canonical identity and content for cross-calendar events. The Day Events Popover series (issues #99–#102) later lifts the Events Overflow marker's inertness in gated builds — the marker summons the read-only Day Events Popover (iOS calendar-surface spec § Day Events Popover) — superseding the marker's reconfirmed inertness below, and the day list's items drill through to the Event Detail Popover, extending point 2's summon paths with one more read-only trigger; the overlays are mutually exclusive and the surface stays write-read-only forever.
 
 ## Context
 
@@ -28,5 +28,5 @@ The iOS Calendar Surface adopts web ADR 0002's separation unchanged:
 ## Considered options
 
 - **Keep the iOS surface interaction-free.** Rejected: the detail-and-link requirement is real, and web ADR 0002's separate-layer resolution preserves the calm-overview identity without opening write capabilities.
-- **Also summon a Day Events Popover from the Events Overflow marker.** Rejected for this slice: a separate feature with its own design questions; the marker's inertness is deliberately reconfirmed.
+- **Also summon a Day Events Popover from the Events Overflow marker.** Rejected for this slice: a separate feature with its own design questions; the marker's inertness is deliberately reconfirmed. _(The #99–#102 series later builds exactly this, recorded in the Status above.)_
 - **A custom web-like overlay instead of the native popover.** Rejected: hand-rolled anchoring, clamping, dismissal, and accessibility for chrome that would feel non-native on iOS; UI-logic parity does not require chrome parity.

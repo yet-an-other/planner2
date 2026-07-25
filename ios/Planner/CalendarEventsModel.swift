@@ -712,11 +712,28 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// Selects one canonical Calendar Event by its canonical occurrence
     /// identity. Layout items carry that identity, but the popover detail
     /// is resolved here so it never retains the tapped item's stale payload.
+    /// The surface's overlays are mutually exclusive: summoning the Event
+    /// Detail Popover closes any open Day Events Popover.
     func selectEvent(withID id: String) {
         guard let selection = detailSelection(forEventID: id) else {
             return
         }
+        selectedDayEvents = nil
         selectedEvent = selection
+    }
+
+    /// Whether the selected Calendar Event is attributed to the given Date
+    /// Cell's day. A cap-hidden event drilled from the Day Events Popover
+    /// has no visible Calendar Event Bar or Row to anchor its Event Detail
+    /// Popover, so the marker of a Date Cell it is attributed to anchors
+    /// the popover instead.
+    func selectedEventIsAttributed(toDay date: Date) -> Bool {
+        guard let selectedEvent else {
+            return false
+        }
+        return dayEventsSelection(
+            for: environment.calendar.startOfDay(for: date)
+        ).items.contains { $0.id == selectedEvent.id }
     }
 
     /// Dismisses the Event Detail Popover without changing Calendar Events.
@@ -728,8 +745,11 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// ordered day — Calendar Event Bars crossing the cell in lane order,
     /// then its Calendar Event Rows by start time ascending, visible and
     /// hidden alike — projected from memory-only Calendar Events with no
-    /// network call.
+    /// network call. The surface's overlays are mutually exclusive:
+    /// summoning the Day Events Popover closes any open Event Detail
+    /// Popover.
     func selectDayEvents(on date: Date) {
+        selectedEvent = nil
         selectedDayEvents = dayEventsSelection(
             for: environment.calendar.startOfDay(for: date)
         )

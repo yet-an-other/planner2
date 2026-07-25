@@ -792,4 +792,165 @@ struct DayEventsSelectionTests {
         )
         #expect(model.selectedDayEvents?.items.map(\.title) == ["Standup"])
     }
+
+    @Test("Selecting a day-list item summons its Event Detail and closes the day list")
+    func dayListItemDrillsThroughToEventDetail() async {
+        let (model, adapter, _, _) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: (1...6).map { index in
+                    GoogleCalendarEvent(
+                        id: "dense-\(index)",
+                        summary: "Dense \(index)",
+                        start: .timed(Self.gmt(2026, 7, 15, 7 + index, 0)),
+                        end: .timed(Self.gmt(2026, 7, 15, 7 + index, 30)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    )
+                }
+            )
+        }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil
+            }
+        )
+        model.selectDayEvents(on: Self.gmt(2026, 7, 15))
+        #expect(model.selectedDayEvents?.items.count == 6)
+
+        // The drill-through trigger: a cap-hidden item summons its Event
+        // Detail Popover as the Day Events Popover closes.
+        model.selectEvent(withID: canonicalID("dense-5"))
+
+        #expect(model.selectedEvent?.id == canonicalID("dense-5"))
+        #expect(model.selectedEvent?.detail.title == "Dense 5")
+        #expect(model.selectedDayEvents == nil)
+    }
+
+    @Test("Summoning the day list closes an open Event Detail Popover")
+    func summoningDayListClosesEventDetail() async {
+        let (model, adapter, _, _) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: (1...6).map { index in
+                    GoogleCalendarEvent(
+                        id: "dense-\(index)",
+                        summary: "Dense \(index)",
+                        start: .timed(Self.gmt(2026, 7, 15, 7 + index, 0)),
+                        end: .timed(Self.gmt(2026, 7, 15, 7 + index, 30)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    )
+                }
+            )
+        }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil
+            }
+        )
+        // Summoning the Event Detail Popover from a visible Calendar
+        // Event Row, then tapping "+N more".
+        model.selectEvent(withID: canonicalID("dense-1"))
+        #expect(model.selectedEvent != nil)
+
+        model.selectDayEvents(on: Self.gmt(2026, 7, 15))
+
+        #expect(model.selectedEvent == nil)
+        #expect(model.selectedDayEvents?.items.count == 6)
+    }
+
+    @Test("At most one overlay is selected at a time and the day list re-opens")
+    func overlaysAreMutuallyExclusiveAndTheDayListReopens() async {
+        let (model, adapter, _, _) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: (1...6).map { index in
+                    GoogleCalendarEvent(
+                        id: "dense-\(index)",
+                        summary: "Dense \(index)",
+                        start: .timed(Self.gmt(2026, 7, 15, 7 + index, 0)),
+                        end: .timed(Self.gmt(2026, 7, 15, 7 + index, 30)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    )
+                }
+            )
+        }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil
+            }
+        )
+
+        model.selectDayEvents(on: Self.gmt(2026, 7, 15))
+        #expect(model.selectedDayEvents != nil && model.selectedEvent == nil)
+
+        model.selectEvent(withID: canonicalID("dense-2"))
+        #expect(model.selectedEvent != nil && model.selectedDayEvents == nil)
+
+        // After the detail closes, the day list re-opens via "+N more".
+        model.dismissEventDetail()
+        model.selectDayEvents(on: Self.gmt(2026, 7, 15))
+        #expect(model.selectedDayEvents?.items.count == 6)
+        #expect(model.selectedEvent == nil)
+    }
+
+    @Test("A cap-hidden selected event is attributed to its Date Cell's day")
+    func capHiddenSelectedEventIsAttributedToItsDay() async {
+        let (model, adapter, _, _) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: (1...6).map { index in
+                    GoogleCalendarEvent(
+                        id: "dense-\(index)",
+                        summary: "Dense \(index)",
+                        start: .timed(Self.gmt(2026, 7, 15, 7 + index, 0)),
+                        end: .timed(Self.gmt(2026, 7, 15, 7 + index, 30)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    )
+                }
+            )
+        }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil
+            }
+        )
+        #expect(model.selectedEventIsAttributed(toDay: Self.gmt(2026, 7, 15)) == false)
+
+        // "dense-5" is beyond the visible cap: it has no visible Calendar
+        // Event Row to anchor its Event Detail Popover, so the marker of
+        // its Date Cell anchors instead.
+        model.selectEvent(withID: canonicalID("dense-5"))
+
+        #expect(model.selectedEventIsAttributed(toDay: Self.gmt(2026, 7, 15)))
+        #expect(model.selectedEventIsAttributed(toDay: Self.gmt(2026, 7, 16)) == false)
+    }
+
+    @Test("Both overlays share the compact and regular presentation policy")
+    func overlaysSharePresentationPolicy() {
+        #expect(IOSDayEventsPopover.compactDetents == IOSEventDetailPopover.compactDetents)
+        #expect(
+            IOSDayEventsPopover.contentMaxWidth(for: .compact)
+                == IOSEventDetailPopover.contentMaxWidth(for: .compact)
+        )
+        #expect(
+            IOSDayEventsPopover.contentMaxWidth(for: .regular)
+                == IOSEventDetailPopover.contentMaxWidth(for: .regular)
+        )
+    }
 }
