@@ -168,6 +168,23 @@ private final class FakeEventsConnectivityMonitor:
     }
 }
 
+/// The deterministic Source Calendar recovery fake: it records each live
+/// reload request and resolves the reconciled selection from a
+/// test-supplied handler, so forbidden/not-found recovery is asserted
+/// through the same interface the Source Calendars module satisfies.
+@MainActor
+private final class FakeSourceCalendarRecovery: SourceCalendarRecoveryHandling {
+    var callCount = 0
+    var handler: () async -> [GoogleSourceCalendar]? = { nil }
+
+    func reconcileSelectionAfterSourceFailure() async
+        -> [GoogleSourceCalendar]?
+    {
+        callCount += 1
+        return await handler()
+    }
+}
+
 @Suite("Calendar Events Model")
 @MainActor
 struct CalendarEventsModelTests {
@@ -640,6 +657,129 @@ struct CalendarEventsModelTests {
 
         model.selectEvent(withID: "planning")
         #expect(model.selectedEvent?.sourceCalendar == sourceCalendar)
+    }
+
+    @Test("A forbidden selected source reloads, reconciles, and retries once")
+    func sourceUnavailableRecoversAndRetriesOnce() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let work = GoogleSourceCalendar(
+            id: "work",
+            summary: "Work",
+            backgroundColorHex: "#7986CB",
+            isPrimary: false
+        )
+        let (model, adapter) = makeModel()
+        let recovery = FakeSourceCalendarRecovery()
+        // The live reload confirms Work is unavailable.
+        recovery.handler = { [primary] }
+        model.sourceCalendarRecovery = recovery
+
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 1 {
+                return .unavailable(.sourceUnavailable)
+            }
+            return .success(
+                calendar: primary,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "standup",
+                        summary: "Standup",
+                        start: .timed(Self.gmt(2026, 7, 15, 9)),
+                        end: .timed(Self.gmt(2026, 7, 15, 10)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ]
+            )
+        }
+
+        model.setSelectedSourceCalendars([primary, work])
+
+        #expect(await eventually { adapter.fetchCallCount == 2 })
+        // One live reload and one aggregate retry against the reconciled
+        // selection.
+        #expect(recovery.callCount == 1)
+        #expect(adapter.fetchedSourceCalendars == [[primary, work], [primary]])
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 13)
+        )
+        #expect(layout?.cells.flatMap(\.rows).map(\.id) == ["standup"])
+        #expect(model.status.message == nil)
+    }
+
+    @Test("A repeated forbidden failure stops after one aggregate retry")
+    func sourceUnavailableRetriesOnlyOnce() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let work = GoogleSourceCalendar(
+            id: "work",
+            summary: "Work",
+            backgroundColorHex: "#7986CB",
+            isPrimary: false
+        )
+        let (model, adapter) = makeModel()
+        let recovery = FakeSourceCalendarRecovery()
+        recovery.handler = { [primary] }
+        model.sourceCalendarRecovery = recovery
+        adapter.fetchHandler = { _, _ in .unavailable(.sourceUnavailable) }
+
+        model.setSelectedSourceCalendars([primary, work])
+
+        #expect(
+            await eventually {
+                model.status.message == CalendarEventsCopy.failed
+            }
+        )
+        #expect(adapter.fetchCallCount == 2)
+        #expect(recovery.callCount == 1)
+    }
+
+    @Test("A failed recovery reload retains the selection and reports failure")
+    func failedRecoveryReloadRetainsSelection() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let work = GoogleSourceCalendar(
+            id: "work",
+            summary: "Work",
+            backgroundColorHex: "#7986CB",
+            isPrimary: false
+        )
+        let (model, adapter) = makeModel()
+        let recovery = FakeSourceCalendarRecovery()
+        // The live reload cannot confirm anything.
+        recovery.handler = { nil }
+        model.sourceCalendarRecovery = recovery
+        adapter.fetchHandler = { _, _ in .unavailable(.sourceUnavailable) }
+
+        model.setSelectedSourceCalendars([primary, work])
+
+        #expect(
+            await eventually {
+                model.status.message == CalendarEventsCopy.failed
+            }
+        )
+        // No aggregate retry without a confirmed reconciliation; the
+        // durable selection remains for the next attempt.
+        #expect(recovery.callCount == 1)
+        #expect(adapter.fetchCallCount == 1)
+        #expect(adapter.fetchedSourceCalendars == [[primary, work]])
+    }
+
+    @Test("Without a recovery handler a forbidden failure is a plain failure")
+    func sourceUnavailableWithoutRecoveryIsPlainFailure() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in .unavailable(.sourceUnavailable) }
+
+        model.setSelectedSourceCalendars([primary])
+
+        #expect(
+            await eventually {
+                model.status.message == CalendarEventsCopy.failed
+            }
+        )
+        #expect(adapter.fetchCallCount == 1)
     }
 
     @Test("A Primary Source Calendar failure starts no Calendar Event request")

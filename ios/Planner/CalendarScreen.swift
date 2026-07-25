@@ -164,6 +164,7 @@ struct CalendarScreen: View {
             )
             .popover(isPresented: sourceCalendarPickerPresented) {
                 IOSSourceCalendarPicker(
+                    content: sourceCalendars.pickerContent,
                     sourceCalendars: sourceCalendars.availableSourceCalendars,
                     selectedSourceCalendarIDs: Set(
                         sourceCalendars.selectedSourceCalendars.map(\.id)
@@ -173,6 +174,7 @@ struct CalendarScreen: View {
                     toggle: {
                         _ = sourceCalendars.toggleSourceCalendar(id: $0)
                     },
+                    retry: sourceCalendars.retryPickerLoad,
                     done: sourceCalendars.dismissPicker
                 )
                 .presentationCompactAdaptation(.sheet)

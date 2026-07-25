@@ -37,6 +37,9 @@ struct PlannerApp: App {
                 selectionConsumer: events,
                 connectivityMonitor: NWPathConnectivityMonitor()
             )
+            // Forbidden/not-found event failures recover through the Source
+            // Calendars module's one live reload and reconciliation.
+            events.sourceCalendarRecovery = sources
             let connection = GoogleAccountConnection(
                 configuration: configuration,
                 makeAdapter: { configured in

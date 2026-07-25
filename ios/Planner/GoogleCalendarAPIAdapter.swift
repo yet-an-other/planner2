@@ -318,11 +318,11 @@ final class GoogleCalendarAPIAdapter:
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await loadRequest(request)
-        guard
-            let httpResponse = response as? HTTPURLResponse,
-            (200..<300).contains(httpResponse.statusCode)
-        else {
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw FetchError.failed
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw FetchError.httpStatus(httpResponse.statusCode)
         }
 
         do {
@@ -336,6 +336,8 @@ final class GoogleCalendarAPIAdapter:
 
     private enum FetchError: Error {
         case failed
+        /// A completed HTTP response outside 200..<300, by status code.
+        case httpStatus(Int)
     }
 
     private struct CalendarListPageDTO: Decodable, Sendable {
@@ -472,15 +474,17 @@ final class GoogleCalendarAPIAdapter:
     }
 
     /// Maps failures to Planner-relevant outcomes: connectivity loss is
-    /// transient; anything else is a generic failure. Raw errors never
-    /// cross the seam.
+    /// transient; a selected source's forbidden or not-found is the
+    /// revocation signal that triggers one live reload, reconciliation, and
+    /// one aggregate retry; anything else is a generic failure. Raw errors
+    /// never cross the seam.
     private static func classifySourceCalendarsFailure(
         _ error: Error
     ) -> GoogleSourceCalendarsFailure {
         switch classifyFailure(error) {
         case .offline:
             return .offline
-        case .failed:
+        case .sourceUnavailable, .failed:
             return .failed
         }
     }
@@ -488,6 +492,12 @@ final class GoogleCalendarAPIAdapter:
     private static func classifyFailure(
         _ error: Error
     ) -> GoogleCalendarEventsFailure {
+        if case FetchError.httpStatus(let statusCode) = error,
+           statusCode == 403 || statusCode == 404
+        {
+            return .sourceUnavailable
+        }
+
         let connectivityCodes = [
             NSURLErrorNotConnectedToInternet,
             NSURLErrorNetworkConnectionLost,

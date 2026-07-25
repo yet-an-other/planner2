@@ -318,6 +318,9 @@ struct SourceCalendarsModelTests {
         model.presentPicker()
         #expect(model.isPickerPresented)
         #expect(consumer.pickerOpenCallCount == 1)
+        // Opening requests live Source Calendars; the same list keeps the
+        // opening selection intact.
+        #expect(await eventually { model.pickerContent == .ready })
 
         #expect(model.toggleSourceCalendar(id: "work") == .changed)
         #expect(model.selectedSourceCalendars == [Self.primary, Self.work])
@@ -344,8 +347,9 @@ struct SourceCalendarsModelTests {
 
         model.setCalendarDataAccountID("account-a")
         #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
-        let writesAfterLoad = store.saveCallCount
         model.presentPicker()
+        #expect(await eventually { model.pickerContent == .ready })
+        let writesAfterLoad = store.saveCallCount
 
         #expect(
             model.toggleSourceCalendar(id: "primary") == .minimumRequired
@@ -373,12 +377,322 @@ struct SourceCalendarsModelTests {
         model.setCalendarDataAccountID("account-a")
         #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
         model.presentPicker()
+        #expect(await eventually { model.pickerContent == .ready })
         _ = model.toggleSourceCalendar(id: "family")
         _ = model.toggleSourceCalendar(id: "family")
         model.dismissPicker()
 
         #expect(consumer.pickerClosures.last?.0 == [Self.primary])
         #expect(consumer.pickerClosures.last?.1 == false)
+    }
+
+    @Test("Opening the picker refreshes live Source Calendars and reconciles")
+    func openingRefreshReconciles() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        var liveList = [Self.primary, Self.family]
+        adapter.handler = { .success(liveList) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        store.values["account-a"] = ["primary", "family"]
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(
+            await eventually {
+                model.selectedSourceCalendars == [Self.primary, Self.family]
+            }
+        )
+
+        // Family is deleted and Work created since connection: reopening
+        // reconciles the confirmed removal and persists it immediately.
+        liveList = [Self.primary, Self.work]
+        model.presentPicker()
+        #expect(model.pickerContent == .loading)
+        #expect(await eventually { model.pickerContent == .ready })
+        #expect(adapter.callCount == 2)
+        #expect(model.availableSourceCalendars == [Self.primary, Self.work])
+        #expect(model.selectedSourceCalendars == [Self.primary])
+        #expect(store.values["account-a"] == ["primary"])
+        // No direct event publication: dismissal publishes the final
+        // decision, marked changed against the opening selection.
+        #expect(consumer.selections.count == 2)
+
+        model.dismissPicker()
+        #expect(consumer.pickerClosures.last?.0 == [Self.primary])
+        #expect(consumer.pickerClosures.last?.1 == true)
+    }
+
+    @Test("After an initial failure the control is usable and opening retries")
+    func openingRetriesAfterFailure() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        var failing = true
+        adapter.handler = {
+            failing ? .unavailable(.failed) : .success([Self.primary])
+        }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(
+            await eventually {
+                model.status.message == SourceCalendarsCopy.failed
+            }
+        )
+        // The control disables only during the initial load; after the
+        // failure it is usable so the picker can expose recovery.
+        #expect(model.controlPresentation == .ready(selectedCount: 0))
+        #expect(store.saveCallCount == 0)
+
+        // Opening is the automatic retry after the earlier failure.
+        failing = false
+        model.presentPicker()
+        #expect(
+            await eventually {
+                model.pickerContent == .ready && adapter.callCount == 2
+            }
+        )
+        #expect(model.selectedSourceCalendars == [Self.primary])
+        #expect(store.values["account-a"] == ["primary"])
+
+        model.dismissPicker()
+        #expect(consumer.pickerClosures.last?.0 == [Self.primary])
+    }
+
+    @Test("A failed opening refresh keeps the selection and Retry recovers")
+    func pickerFailureAndRetry() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        var failing = false
+        adapter.handler = {
+            failing
+                ? .unavailable(.failed)
+                : .success([Self.primary, Self.family])
+        }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+
+        failing = true
+        model.presentPicker()
+        #expect(
+            await eventually {
+                model.pickerContent == .unavailable(.failed)
+            }
+        )
+        // The failure performs no reconciliation, persistence change, or
+        // event publication; the prior selection remains.
+        #expect(model.selectedSourceCalendars == [Self.primary])
+        #expect(store.values["account-a"] == ["primary"])
+        #expect(store.saveCallCount == 1)
+        #expect(consumer.selections.count == 2)
+        #expect(model.isPickerPresented)
+
+        failing = false
+        model.retryPickerLoad()
+        #expect(await eventually { model.pickerContent == .ready })
+        #expect(model.selectedSourceCalendars == [Self.primary])
+        #expect(adapter.callCount == 3)
+    }
+
+    @Test("Dismissal before the opening refresh completes invalidates it")
+    func dismissalInvalidatesLateRefresh() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        var release: CheckedContinuation<GoogleSourceCalendarsOutcome, Never>?
+        adapter.handler = {
+            if adapter.callCount == 1 {
+                return .success([Self.primary])
+            }
+            return await withCheckedContinuation { release = $0 }
+        }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+
+        model.presentPicker()
+        #expect(await eventually { release != nil })
+        model.dismissPicker()
+        release?.resume(returning: .success([Self.work]))
+        try? await Task.sleep(for: .milliseconds(50))
+
+        // The late result performs no reconciliation, persistence, or
+        // event publication.
+        #expect(store.saveCallCount == 1)
+        #expect(store.values["account-a"] == ["primary"])
+        #expect(model.availableSourceCalendars == [Self.primary])
+        #expect(model.selectedSourceCalendars == [Self.primary])
+        #expect(consumer.pickerClosures.last?.0 == [Self.primary])
+        #expect(consumer.pickerClosures.last?.1 == false)
+    }
+
+    @Test("A zero-source refresh persists the empty exception and clears atomically")
+    func zeroSourceException() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        var liveList = [Self.primary]
+        adapter.handler = { .success(liveList) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+
+        liveList = []
+        model.presentPicker()
+        #expect(
+            await eventually {
+                model.pickerContent == .ready
+                    && model.selectedSourceCalendars.isEmpty
+            }
+        )
+        #expect(store.values["account-a"] == [])
+        // The empty exception publishes immediately so Calendar Events,
+        // Fetched Window, selected Event Detail, and freshness clear
+        // atomically without an event request.
+        #expect(consumer.selections.last == [])
+        #expect(model.controlPresentation == .ready(selectedCount: 0))
+        #expect(model.status.message == SourceCalendarsCopy.noAvailable)
+        #expect(model.status.tone == .error)
+    }
+
+    @Test("Disconnect on This Device closes the picker and retains toggles")
+    func disconnectClosesPicker() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        adapter.handler = { .success([Self.primary, Self.family]) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+        model.presentPicker()
+        #expect(await eventually { model.pickerContent == .ready })
+        #expect(model.toggleSourceCalendar(id: "family") == .changed)
+        #expect(store.values["account-a"] == ["primary", "family"])
+
+        model.setCalendarDataAccountID(nil)
+
+        #expect(!model.isPickerPresented)
+        #expect(model.controlPresentation == .hidden)
+        // In-memory Calendar data suspends through the existing behavior;
+        // the persisted toggles survive for the account's return.
+        #expect(consumer.selections.last! == nil)
+        #expect(store.values["account-a"] == ["primary", "family"])
+    }
+
+    @Test("Recovery removes only a confirmed unavailable source")
+    func recoveryRemovesConfirmedSource() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        var liveList = [Self.primary, Self.work]
+        adapter.handler = { .success(liveList) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        store.values["account-a"] = ["primary", "work"]
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(
+            await eventually {
+                model.selectedSourceCalendars == [Self.primary, Self.work]
+            }
+        )
+
+        // The live response confirms Work is unavailable.
+        liveList = [Self.primary]
+        let recovered = await model.reconcileSelectionAfterSourceFailure()
+
+        #expect(recovered == [Self.primary])
+        #expect(model.selectedSourceCalendars == [Self.primary])
+        #expect(store.values["account-a"] == ["primary"])
+        #expect(model.controlPresentation == .ready(selectedCount: 1))
+        // No direct publication: the caller performs the one aggregate
+        // retry with the reconciled selection.
+        #expect(consumer.selections.count == 2)
+    }
+
+    @Test("A failed recovery reload keeps the durable selection")
+    func failedRecoveryKeepsSelection() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        var failing = false
+        adapter.handler = {
+            failing ? .unavailable(.failed) : .success([Self.primary])
+        }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: nil
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+
+        failing = true
+        let recovered = await model.reconcileSelectionAfterSourceFailure()
+
+        // Without a confirming live response the selection must remain.
+        #expect(recovered == nil)
+        #expect(model.selectedSourceCalendars == [Self.primary])
+        #expect(store.values["account-a"] == ["primary"])
+        #expect(store.saveCallCount == 1)
+    }
+
+    @Test("Recovery with zero available sources publishes the atomic clear")
+    func recoveryZeroSourcePublishesClear() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        var liveList = [Self.primary]
+        adapter.handler = { .success(liveList) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+
+        liveList = []
+        let recovered = await model.reconcileSelectionAfterSourceFailure()
+
+        #expect(recovered == [])
+        #expect(store.values["account-a"] == [])
+        #expect(consumer.selections.last == [])
+        #expect(model.status.message == SourceCalendarsCopy.noAvailable)
     }
 
     private func eventually(

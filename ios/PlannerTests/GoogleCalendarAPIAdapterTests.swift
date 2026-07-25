@@ -198,4 +198,91 @@ struct GoogleCalendarAPIAdapterTests {
         #expect(events.map(\.sourceCalendar.id) == sourceCalendars.map(\.id))
         #expect(events.count == 9)
     }
+
+    @Test("A forbidden or missing event source is the revocation signal")
+    func eventSourceUnavailableClassification() async {
+        for statusCode in [403, 404] {
+            let adapter = GoogleCalendarAPIAdapter(
+                accessTokenProvider: { "test-token" },
+                loadRequest: { request in
+                    try await StatusCodeTransport(statusCode: statusCode)
+                        .load(request)
+                }
+            )
+
+            let outcome = await adapter.fetchEvents(
+                from: [
+                    GoogleSourceCalendar(
+                        id: "revoked",
+                        summary: "Revoked",
+                        backgroundColorHex: "#039BE5",
+                        isPrimary: false
+                    ),
+                ],
+                start: Date(timeIntervalSince1970: 1_784_073_600),
+                end: Date(timeIntervalSince1970: 1_784_160_000)
+            )
+
+            #expect(outcome == .unavailable(.sourceUnavailable))
+        }
+    }
+
+    @Test("Other HTTP event failures stay generic and never surface raw data")
+    func genericEventFailureClassification() async {
+        let adapter = GoogleCalendarAPIAdapter(
+            accessTokenProvider: { "test-token" },
+            loadRequest: { request in
+                try await StatusCodeTransport(statusCode: 500).load(request)
+            }
+        )
+
+        let outcome = await adapter.fetchEvents(
+            from: [
+                GoogleSourceCalendar(
+                    id: "primary",
+                    summary: "Primary",
+                    backgroundColorHex: "#039BE5",
+                    isPrimary: true
+                ),
+            ],
+            start: Date(timeIntervalSince1970: 1_784_073_600),
+            end: Date(timeIntervalSince1970: 1_784_160_000)
+        )
+
+        #expect(outcome == .unavailable(.failed))
+    }
+
+    @Test("A forbidden Source Calendars response is a generic list failure")
+    func sourceCalendarsHTTPFailureClassification() async {
+        let adapter = GoogleCalendarAPIAdapter(
+            accessTokenProvider: { "test-token" },
+            loadRequest: { request in
+                try await StatusCodeTransport(statusCode: 404).load(request)
+            }
+        )
+
+        let outcome = await adapter.fetchSourceCalendars()
+
+        #expect(outcome == .unavailable(.failed))
+    }
+}
+
+/// A transport that answers every request with one HTTP status code and an
+/// empty JSON body, for failure-classification coverage.
+private actor StatusCodeTransport {
+    let statusCode: Int
+
+    init(statusCode: Int) {
+        self.statusCode = statusCode
+    }
+
+    func load(_ request: URLRequest) throws -> (Data, URLResponse) {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: statusCode,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        return (Data("{}".utf8), response)
+    }
 }

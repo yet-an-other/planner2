@@ -90,6 +90,12 @@ enum GoogleCalendarEventsFailure: Equatable, Sendable {
     /// A transient connectivity failure.
     case offline
 
+    /// A selected Source Calendar returned forbidden or not-found, so it may
+    /// no longer be available. One live Source Calendar reload,
+    /// reconciliation, and one aggregate retry follow before this is
+    /// reported as a fetch failure.
+    case sourceUnavailable
+
     /// Any other failure.
     case failed
 }
@@ -417,6 +423,12 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// to every Calendar Event request.
     @ObservationIgnored
     private var sourceCalendars: [GoogleSourceCalendar] = []
+
+    /// The live Source Calendar reload behind forbidden/not-found recovery,
+    /// wired when the Source Calendars module exists. Without it a
+    /// `.sourceUnavailable` failure is reported like any other failure.
+    @ObservationIgnored
+    weak var sourceCalendarRecovery: (any SourceCalendarRecoveryHandling)?
 
     /// The connectivity observer behind offline recovery, when configured;
     /// the same seam the connection module uses.
@@ -761,6 +773,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         let attempt = connectionGeneration
         let resolvedSourceCalendars = sourceCalendars
         let usesResolvedSourceCalendars = usesResolvedSourceCalendars
+        let sourceCalendarRecovery = sourceCalendarRecovery
         Task { [weak self] in
             let requestedSourceCalendars: [GoogleSourceCalendar]
             if usesResolvedSourceCalendars {
@@ -787,7 +800,9 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 }
             }
 
-            let outcome = await adapter.fetchEvents(
+            let result = await Self.fetchEventsRecoveringSource(
+                adapter: adapter,
+                recovery: sourceCalendarRecovery,
                 from: requestedSourceCalendars,
                 start: windowStart,
                 end: windowEnd
@@ -806,10 +821,12 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 return
             }
             isFetchingInitialWindow = false
+            // Adopt the effective selection even when the retry failed: it
+            // is the persisted truth later requests must use.
+            sourceCalendars = result.sourceCalendars
 
-            switch outcome {
+            switch result.outcome {
             case .success(let events, let eventColorBackgrounds):
-                sourceCalendars = requestedSourceCalendars
                 fetchedWindow = (windowStart, windowEnd)
                 normalizedEvents = normalize(
                     events,
@@ -840,12 +857,52 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 message: CalendarEventsCopy.offline,
                 tone: .warning
             )
-        case .failed:
+        case .sourceUnavailable, .failed:
             CalendarEventsStatus(
                 message: CalendarEventsCopy.failed,
                 tone: .error
             )
         }
+    }
+
+    /// One aggregate event request with forbidden/not-found recovery: when a
+    /// selected source proves unavailable, the Source Calendars module
+    /// reloads live Source Calendars, reconciles, and this request retries
+    /// once against the effective selection. The returned selection is the
+    /// effective one the caller adopts; a failed reload keeps the durable
+    /// selection and lets the caller report the original failure.
+    private static func fetchEventsRecoveringSource(
+        adapter: any GoogleCalendarEventsAdapting,
+        recovery: (any SourceCalendarRecoveryHandling)?,
+        from sourceCalendars: [GoogleSourceCalendar],
+        start: Date,
+        end: Date
+    ) async -> (
+        outcome: GoogleCalendarEventsOutcome,
+        sourceCalendars: [GoogleSourceCalendar]
+    ) {
+        let outcome = await adapter.fetchEvents(
+            from: sourceCalendars,
+            start: start,
+            end: end
+        )
+        guard case .unavailable(.sourceUnavailable) = outcome,
+              let recovery
+        else {
+            return (outcome, sourceCalendars)
+        }
+        guard
+            let reconciled =
+                await recovery.reconcileSelectionAfterSourceFailure()
+        else {
+            return (outcome, sourceCalendars)
+        }
+        let retry = await adapter.fetchEvents(
+            from: reconciled,
+            start: start,
+            end: end
+        )
+        return (retry, reconciled)
     }
 
     /// Publishes foreground-active versus inactive scene state. Foreground
@@ -918,8 +975,11 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         isRefreshingEvents = true
         let attempt = connectionGeneration
         let requestedSourceCalendars = sourceCalendars
+        let sourceCalendarRecovery = sourceCalendarRecovery
         Task { [weak self] in
-            let outcome = await adapter.fetchEvents(
+            let result = await Self.fetchEventsRecoveringSource(
+                adapter: adapter,
+                recovery: sourceCalendarRecovery,
                 from: requestedSourceCalendars,
                 start: refreshStart,
                 end: refreshEnd
@@ -932,8 +992,11 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 resumeAfterStaleFetch()
                 return
             }
+            // Adopt the effective selection even when the retry failed: it
+            // is the persisted truth later requests must use.
+            sourceCalendars = result.sourceCalendars
 
-            switch outcome {
+            switch result.outcome {
             case .success(let events, let eventColorBackgrounds):
                 applyRefresh(
                     events,
@@ -1090,7 +1153,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 message: CalendarEventsCopy.refreshOffline,
                 tone: .warning
             )
-        case .failed:
+        case .sourceUnavailable, .failed:
             CalendarEventsStatus(
                 message: CalendarEventsCopy.refreshFailed,
                 tone: .warning
@@ -1286,8 +1349,11 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
             tone: .info
         )
         let requestedSourceCalendars = sourceCalendars
+        let sourceCalendarRecovery = sourceCalendarRecovery
         Task { [weak self] in
-            let outcome = await adapter.fetchEvents(
+            let result = await Self.fetchEventsRecoveringSource(
+                adapter: adapter,
+                recovery: sourceCalendarRecovery,
                 from: requestedSourceCalendars,
                 start: fetchStart,
                 end: fetchEnd
@@ -1307,8 +1373,9 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 resumeAfterStaleFetch()
                 return
             }
+            sourceCalendars = result.sourceCalendars
 
-            switch outcome {
+            switch result.outcome {
             case .success(let events, let eventColorBackgrounds):
                 // Google delivers every event overlapping the requested
                 // range, so an event spanning a previously fetched range's
@@ -1345,7 +1412,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                         message: CalendarEventsCopy.offlinePartial,
                         tone: .warning
                     )
-                case .failed:
+                case .sourceUnavailable, .failed:
                     CalendarEventsStatus(
                         message: CalendarEventsCopy.failedPartial,
                         tone: .warning
@@ -1382,9 +1449,12 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         )
         let attempt = connectionGeneration
         let requestedSourceCalendars = sourceCalendars
+        let sourceCalendarRecovery = sourceCalendarRecovery
 
         Task { [weak self] in
-            let outcome = await adapter.fetchEvents(
+            let result = await Self.fetchEventsRecoveringSource(
+                adapter: adapter,
+                recovery: sourceCalendarRecovery,
                 from: requestedSourceCalendars,
                 start: range.start,
                 end: range.end
@@ -1397,8 +1467,9 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 resumeAfterStaleFetch()
                 return
             }
+            sourceCalendars = result.sourceCalendars
 
-            switch outcome {
+            switch result.outcome {
             case .success(let events, let eventColorBackgrounds):
                 fetchedWindow = range
                 normalizedEvents = normalize(
