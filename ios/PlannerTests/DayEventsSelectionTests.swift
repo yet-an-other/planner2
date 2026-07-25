@@ -828,6 +828,9 @@ struct DayEventsSelectionTests {
         #expect(model.selectedEvent?.id == canonicalID("dense-5"))
         #expect(model.selectedEvent?.detail.title == "Dense 5")
         #expect(model.selectedDayEvents == nil)
+        // The drill-through records the summoned day, so that cell's
+        // Events Overflow marker can anchor the cap-hidden event's detail.
+        #expect(model.selectedEventDrilledFromDay == Self.gmt(2026, 7, 15))
     }
 
     @Test("Summoning the day list closes an open Event Detail Popover")
@@ -859,6 +862,9 @@ struct DayEventsSelectionTests {
         // Event Row, then tapping "+N more".
         model.selectEvent(withID: canonicalID("dense-1"))
         #expect(model.selectedEvent != nil)
+        // Summoned from a visible Calendar Event Row, the selection
+        // carries no drilled-through day.
+        #expect(model.selectedEventDrilledFromDay == nil)
 
         model.selectDayEvents(on: Self.gmt(2026, 7, 15))
 
@@ -897,9 +903,11 @@ struct DayEventsSelectionTests {
 
         model.selectEvent(withID: canonicalID("dense-2"))
         #expect(model.selectedEvent != nil && model.selectedDayEvents == nil)
+        #expect(model.selectedEventDrilledFromDay == Self.gmt(2026, 7, 15))
 
         // After the detail closes, the day list re-opens via "+N more".
         model.dismissEventDetail()
+        #expect(model.selectedEventDrilledFromDay == nil)
         model.selectDayEvents(on: Self.gmt(2026, 7, 15))
         #expect(model.selectedDayEvents?.items.count == 6)
         #expect(model.selectedEvent == nil)
@@ -939,6 +947,59 @@ struct DayEventsSelectionTests {
 
         #expect(model.selectedEventIsAttributed(toDay: Self.gmt(2026, 7, 15)))
         #expect(model.selectedEventIsAttributed(toDay: Self.gmt(2026, 7, 16)) == false)
+    }
+
+    @Test("A cap-hidden drilled event keeps its summoned day across weeks")
+    func capHiddenDrilledEventKeepsItsSummonedDayAcrossWeeks() async {
+        let (model, adapter, _, _) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: (1...5).map { index in
+                    GoogleCalendarEvent(
+                        id: "stacked-\(index)",
+                        summary: "Stacked \(index)",
+                        start: .allDay(year: 2026, month: 7, day: 14),
+                        end: .allDay(year: 2026, month: 7, day: 24),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    )
+                }
+            )
+        }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 20)) != nil
+            }
+        )
+        // Lanes three and four fit no true lane position in either crossed
+        // week: "stacked-5" counts into the Events Overflow of every Date
+        // Cell from July 14 through July 23.
+        #expect(
+            model.layout(forWeekStarting: Self.gmt(2026, 7, 13))?
+                .cells[1].overflowCount == 2
+        )
+        #expect(
+            model.layout(forWeekStarting: Self.gmt(2026, 7, 20))?
+                .cells[2].overflowCount == 2
+        )
+
+        // The UI-paced drill-through: the Day Events Popover leaves its
+        // anchor first, then the selection carries the summoned day.
+        model.selectDayEvents(on: Self.gmt(2026, 7, 22))
+        model.dismissDayEvents()
+        model.selectEvent(
+            withID: canonicalID("stacked-5"),
+            drilledFromDay: Self.gmt(2026, 7, 22)
+        )
+
+        // The event is attributed to earlier Date Cells as well, but the
+        // drilled-through day — the on-screen one — anchors the detail.
+        #expect(model.selectedEventIsAttributed(toDay: Self.gmt(2026, 7, 15)))
+        #expect(model.selectedEventIsAttributed(toDay: Self.gmt(2026, 7, 22)))
+        #expect(model.selectedEventDrilledFromDay == Self.gmt(2026, 7, 22))
     }
 
     @Test("Both overlays share the compact and regular presentation policy")

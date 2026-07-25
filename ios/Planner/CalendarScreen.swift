@@ -282,8 +282,12 @@ struct CalendarScreen: View {
     /// The Date Cell whose Events Overflow marker anchors the Event Detail
     /// Popover when the selected event has no visible Calendar Event Bar or
     /// Row — the drill-through case for cap-hidden events, whose days
-    /// always carry a marker. The earliest qualifying cell in Week Row
-    /// order wins, so exactly one marker presents.
+    /// always carry a marker. The drilled-through Date Cell wins while the
+    /// event stays attributed to it: it summoned the Day Events Popover, so
+    /// it is on screen, unlike an earlier attributed cell the LazyVStack
+    /// may never have rendered. Only when refresh moves the event off that
+    /// day does the earliest qualifying cell in Week Row order take over,
+    /// so exactly one marker presents.
     private func resolvedEventDetailFallbackDate() -> Date? {
         guard let events, events.selectedEvent != nil,
               resolvedEventDetailAnchor() == nil
@@ -291,6 +295,12 @@ struct CalendarScreen: View {
             return nil
         }
         let calendar = currentEnvironment().calendar
+        if let drilledFromDay = events.selectedEventDrilledFromDay,
+           events.selectedEventIsAttributed(toDay: drilledFromDay),
+           carriesEventsOverflowMarker(on: drilledFromDay)
+        {
+            return drilledFromDay
+        }
         for (weekStart, layout) in events.weekLayouts
             .sorted(by: { $0.key < $1.key })
         {
@@ -310,6 +320,25 @@ struct CalendarScreen: View {
             }
         }
         return nil
+    }
+
+    /// Whether the Date Cell for the given day carries an Events Overflow
+    /// marker in its Week Row's current layout.
+    private func carriesEventsOverflowMarker(on day: Date) -> Bool {
+        guard let events else {
+            return false
+        }
+        let calendar = currentEnvironment().calendar
+        return events.weekLayouts.contains { weekStart, layout in
+            layout.cells.enumerated().contains { column, cell in
+                cell.overflowCount != nil
+                    && calendar.date(
+                        byAdding: .day,
+                        value: column,
+                        to: weekStart
+                    ) == day
+            }
+        }
     }
 
     /// Native popover dismissal writes `false` through its source binding both
@@ -786,14 +815,20 @@ private struct DayEventsPopoverPresentation: View {
                 events.dismissDayEvents()
             } onSelectEvent: { eventID in
                 // The drill-through: the Day Events Popover closes as the
-                // Event Detail Popover summons. Native adaptive
-                // presentations never stack — yielding once lets this
-                // popover leave its anchor before the detail presents,
-                // the same pacing as the Source Calendar Picker.
+                // Event Detail Popover summons, and the summoned day
+                // travels with the selection so this cell's Events
+                // Overflow marker can anchor a cap-hidden event's detail.
+                // Native adaptive presentations never stack — yielding
+                // once lets this popover leave its anchor before the
+                // detail presents, the same pacing as the Source Calendar
+                // Picker.
                 events.dismissDayEvents()
                 Task { @MainActor in
                     await Task.yield()
-                    events.selectEvent(withID: eventID)
+                    events.selectEvent(
+                        withID: eventID,
+                        drilledFromDay: selection.date
+                    )
                 }
             }
         }

@@ -537,6 +537,14 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// the selected event disappears or Calendar Events clear.
     private(set) var selectedEvent: CalendarEventDetailSelection?
 
+    /// The Date Cell's day whose Day Events Popover the selected Calendar
+    /// Event was drilled through from, while that selection stands. A
+    /// cap-hidden drilled event has no visible Calendar Event Bar or Row,
+    /// so this day's Events Overflow marker anchors its Event Detail
+    /// Popover — the drilled-through cell summoned the list, so it stays
+    /// on screen unlike any earlier attributed cell.
+    private(set) var selectedEventDrilledFromDay: Date?
+
     /// The Date Cell whose complete ordered day the open Day Events Popover
     /// lists. The selection reconciles with every successful Calendar Event
     /// replacement like the Event Detail selection: edits and moves update
@@ -713,13 +721,18 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// identity. Layout items carry that identity, but the popover detail
     /// is resolved here so it never retains the tapped item's stale payload.
     /// The surface's overlays are mutually exclusive: summoning the Event
-    /// Detail Popover closes any open Day Events Popover.
-    func selectEvent(withID id: String) {
+    /// Detail Popover closes any open Day Events Popover. `drilledFromDay`
+    /// records the Date Cell's day whose Day Events Popover the event was
+    /// drilled through from — an open day selection implies it — so that
+    /// day's Events Overflow marker can anchor a cap-hidden event's detail.
+    func selectEvent(withID id: String, drilledFromDay day: Date? = nil) {
         guard let selection = detailSelection(forEventID: id) else {
             return
         }
+        let drilledFromDay = day ?? selectedDayEvents?.date
         selectedDayEvents = nil
         selectedEvent = selection
+        selectedEventDrilledFromDay = drilledFromDay
     }
 
     /// Whether the selected Calendar Event is attributed to the given Date
@@ -739,6 +752,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// Dismisses the Event Detail Popover without changing Calendar Events.
     func dismissEventDetail() {
         selectedEvent = nil
+        selectedEventDrilledFromDay = nil
     }
 
     /// Summons the Day Events Popover for one Date Cell: the complete
@@ -750,6 +764,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// Popover.
     func selectDayEvents(on date: Date) {
         selectedEvent = nil
+        selectedEventDrilledFromDay = nil
         selectedDayEvents = dayEventsSelection(
             for: environment.calendar.startOfDay(for: date)
         )
@@ -830,6 +845,9 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
             return
         }
         self.selectedEvent = detailSelection(forEventID: selectedEvent.id)
+        if self.selectedEvent == nil {
+            selectedEventDrilledFromDay = nil
+        }
     }
 
     /// Reprojects the summoned day from the canonical collection after
@@ -890,6 +908,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         sourceCalendars = selected
         normalizedEvents = []
         selectedEvent = nil
+        selectedEventDrilledFromDay = nil
         selectedDayEvents = nil
         freshnessCoverage = []
         needsBrowsingFreshnessCheck = false
