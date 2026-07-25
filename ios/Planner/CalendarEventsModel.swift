@@ -442,6 +442,76 @@ struct CalendarEventDetailSelection: Equatable, Sendable, Identifiable {
     let detail: CalendarEventDetail
 }
 
+/// One item in the Day Events Popover's complete ordered day list,
+/// rendering with the Date Cell's own visual language: Calendar Event
+/// Bars as colored bars, Calendar Event Rows with dot, start time, and
+/// title.
+enum CalendarEventDayItem: Equatable, Sendable, Identifiable {
+    /// A Calendar Event Bar crossing the Date Cell, ordered by its lane
+    /// in the cell's Week Row.
+    case bar(Bar)
+
+    /// A Calendar Event Row of the Date Cell, ordered by start time
+    /// ascending.
+    case row(Row)
+
+    /// The bar presentation: color and title with contrast-safe text.
+    struct Bar: Equatable, Sendable, Identifiable {
+        /// The event's canonical occurrence identity.
+        let id: String
+        let title: String
+        /// The Event Color as a `#RRGGBB` hex string.
+        let colorHex: String
+        let textTone: CalendarEventTextTone
+    }
+
+    /// The row presentation: color dot, localized start time, and title.
+    struct Row: Equatable, Sendable, Identifiable {
+        /// The event's canonical occurrence identity.
+        let id: String
+        let title: String
+        let startTimeText: String
+        /// The Event Color as a `#RRGGBB` hex string.
+        let colorHex: String
+    }
+
+    var id: String {
+        switch self {
+        case .bar(let bar):
+            bar.id
+        case .row(let row):
+            row.id
+        }
+    }
+
+    /// The item's title, whichever shape it takes.
+    var title: String {
+        switch self {
+        case .bar(let bar):
+            bar.title
+        case .row(let row):
+            row.title
+        }
+    }
+}
+
+/// The Date Cell whose complete ordered day the open Day Events Popover
+/// lists (Planning glossary). The selection projects from the model's
+/// memory-only Calendar Events when the Events Overflow marker summons it;
+/// it opens with no network call and clears with the events themselves on
+/// Disconnect on This Device.
+struct CalendarEventDaySelection: Equatable, Sendable, Identifiable {
+    /// The Date Cell's local start-of-day, the selection identity.
+    let date: Date
+    var id: Date { date }
+    /// The localized heading naming the Date Cell ("Monday, June 9").
+    let heading: String
+    /// The complete ordered day: Calendar Event Bars in lane order, then
+    /// Calendar Event Rows by start time ascending — visible and hidden
+    /// alike, including multiday and all-day bars crossing the day.
+    let items: [CalendarEventDayItem]
+}
+
 /// The deep native module behind Calendar Events on the iOS Calendar
 /// Surface: it owns the Fetched Window, normalizes Google-shaped events
 /// into Planner's classification, and publishes per-Week-Row layouts. All
@@ -463,6 +533,12 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// updates after successful canonical replacement, and becomes `nil` when
     /// the selected event disappears or Calendar Events clear.
     private(set) var selectedEvent: CalendarEventDetailSelection?
+
+    /// The Date Cell whose complete ordered day the open Day Events Popover
+    /// lists. The selection is a snapshot projected from memory-only
+    /// Calendar Events at summon time; Disconnect on This Device and
+    /// selection replacement clear it with the events themselves.
+    private(set) var selectedDayEvents: CalendarEventDaySelection?
 
     @ObservationIgnored
     private let adapter: (any GoogleCalendarEventsAdapting)?
@@ -642,6 +718,84 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         selectedEvent = nil
     }
 
+    /// Summons the Day Events Popover for one Date Cell: the complete
+    /// ordered day — Calendar Event Bars crossing the cell in lane order,
+    /// then its Calendar Event Rows by start time ascending, visible and
+    /// hidden alike — projected from memory-only Calendar Events with no
+    /// network call.
+    func selectDayEvents(on date: Date) {
+        selectedDayEvents = dayEventsSelection(
+            for: environment.calendar.startOfDay(for: date)
+        )
+    }
+
+    /// Dismisses the Day Events Popover without changing Calendar Events.
+    func dismissDayEvents() {
+        selectedDayEvents = nil
+    }
+
+    /// Projects one Date Cell's complete ordered day from the canonical
+    /// collection. Bars take their lanes from the cell's Week Row so the
+    /// list mirrors the cell's own bars-then-rows ordering, including
+    /// items the visible cap hides and multiday bars crossing the day.
+    private func dayEventsSelection(for date: Date) -> CalendarEventDaySelection {
+        let calendar = environment.calendar
+        let weekStart = startOfMondayWeek(containing: date)
+        let column = calendar.dateComponents(
+            [.day],
+            from: weekStart,
+            to: date
+        ).day ?? 0
+
+        let bars = placedBarSegments(normalizedEvents, weekStart: weekStart)
+            .filter { $0.startColumn <= column && column <= $0.endColumn }
+            .sorted { $0.lane < $1.lane }
+            .map {
+                CalendarEventDayItem.bar(
+                    CalendarEventDayItem.Bar(
+                        id: $0.id,
+                        title: $0.title,
+                        colorHex: $0.colorHex,
+                        textTone: $0.textTone
+                    )
+                )
+            }
+
+        let rows: [CalendarEventDayItem] = normalizedEvents
+            .compactMap { event -> (startsAt: Date, row: CalendarEventDayItem.Row)? in
+                guard
+                    case .row(let rowDate, let startsAt, let startTimeText) =
+                        event.kind,
+                    rowDate == date
+                else {
+                    return nil
+                }
+                return (
+                    startsAt,
+                    CalendarEventDayItem.Row(
+                        id: event.id,
+                        title: event.title,
+                        startTimeText: startTimeText,
+                        colorHex: event.colorHex
+                    )
+                )
+            }
+            .sorted { $0.startsAt < $1.startsAt }
+            .map { .row($0.row) }
+
+        let headingFormatter = DateFormatter()
+        headingFormatter.calendar = calendar
+        headingFormatter.locale = environment.locale
+        headingFormatter.timeZone = environment.timeZone
+        headingFormatter.setLocalizedDateFormatFromTemplate("EEEEMMMMd")
+
+        return CalendarEventDaySelection(
+            date: date,
+            heading: headingFormatter.string(from: date),
+            items: bars + rows
+        )
+    }
+
     /// Reprojects the selected identity from the canonical collection after
     /// replacement. Absence means deletion, decline, or movement outside the
     /// refreshed canonical range and dismisses the popover.
@@ -696,6 +850,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         sourceCalendars = selected
         normalizedEvents = []
         selectedEvent = nil
+        selectedDayEvents = nil
         freshnessCoverage = []
         needsBrowsingFreshnessCheck = false
         isRefreshPending = false
@@ -767,6 +922,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
             sourceCalendars = []
             normalizedEvents = []
             selectedEvent = nil
+            selectedDayEvents = nil
             freshnessCoverage = []
             needsBrowsingFreshnessCheck = false
             // The active request keeps its operation flag until its adapter
@@ -1941,81 +2097,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         weekStart: Date
     ) -> CalendarEventWeekLayout {
         let calendar = environment.calendar
-        let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart)!
-
-        struct PlacedBar {
-            let event: NormalizedEvent
-            let startDate: Date
-            let endDate: Date
-            let startsAt: Date
-            let startColumn: Int
-            let endColumn: Int
-        }
-
-        let bars = events.compactMap { event -> PlacedBar? in
-            guard
-                case .bar(let startDate, let endDate, let startsAt) = event.kind,
-                startDate <= weekEnd,
-                endDate >= weekStart
-            else {
-                return nil
-            }
-
-            let clippedStart = max(startDate, weekStart)
-            let clippedEnd = min(endDate, weekEnd)
-            return PlacedBar(
-                event: event,
-                startDate: startDate,
-                endDate: endDate,
-                startsAt: startsAt,
-                startColumn: calendar.dateComponents(
-                    [.day],
-                    from: weekStart,
-                    to: clippedStart
-                ).day!,
-                endColumn: calendar.dateComponents(
-                    [.day],
-                    from: weekStart,
-                    to: clippedEnd
-                ).day!
-            )
-        }
-        .sorted { left, right in
-            if left.startDate != right.startDate {
-                return left.startDate < right.startDate
-            }
-            if left.startsAt != right.startsAt {
-                return left.startsAt < right.startsAt
-            }
-            return left.endDate > right.endDate
-        }
-
-        var laneEnds: [Int: Int] = [:]
-        var segments: [CalendarEventBarSegment] = []
-        for bar in bars {
-            var lane = 0
-            while let occupiedThrough = laneEnds[lane],
-                  occupiedThrough >= bar.startColumn
-            {
-                lane += 1
-            }
-            laneEnds[lane] = bar.endColumn
-
-            segments.append(
-                CalendarEventBarSegment(
-                    id: bar.event.id,
-                    sourceCalendar: bar.event.sourceCalendar,
-                    title: bar.event.title,
-                    colorHex: bar.event.colorHex,
-                    textTone: bar.event.textTone,
-                    lane: lane,
-                    startColumn: bar.startColumn,
-                    endColumn: bar.endColumn,
-                    isStartTruncated: bar.startDate < weekStart,
-                    isEndTruncated: bar.endDate > weekEnd
-                )
-            )
-        }
+        let segments = placedBarSegments(events, weekStart: weekStart)
 
         var rowsByColumn: [[(startsAt: Date, item: CalendarEventRowItem)]] =
             (0..<7).map { _ in [] }
@@ -2129,6 +2211,95 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         }
 
         return CalendarEventWeekLayout(bars: visibleSegments, cells: cells)
+    }
+
+    /// Every Calendar Event Bar segment of one Week Row with its assigned
+    /// lane, before the visible cap filters: bars clipped to the Week Row,
+    /// lane-packed in global order — start date, then start time, then
+    /// longer duration first. The visible cell layout and the Day Events
+    /// Popover's complete day list share this one placement so their lane
+    /// ordering can never drift.
+    private func placedBarSegments(
+        _ events: [NormalizedEvent],
+        weekStart: Date
+    ) -> [CalendarEventBarSegment] {
+        let calendar = environment.calendar
+        let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart)!
+
+        struct PlacedBar {
+            let event: NormalizedEvent
+            let startDate: Date
+            let endDate: Date
+            let startsAt: Date
+            let startColumn: Int
+            let endColumn: Int
+        }
+
+        let bars = events.compactMap { event -> PlacedBar? in
+            guard
+                case .bar(let startDate, let endDate, let startsAt) = event.kind,
+                startDate <= weekEnd,
+                endDate >= weekStart
+            else {
+                return nil
+            }
+
+            let clippedStart = max(startDate, weekStart)
+            let clippedEnd = min(endDate, weekEnd)
+            return PlacedBar(
+                event: event,
+                startDate: startDate,
+                endDate: endDate,
+                startsAt: startsAt,
+                startColumn: calendar.dateComponents(
+                    [.day],
+                    from: weekStart,
+                    to: clippedStart
+                ).day!,
+                endColumn: calendar.dateComponents(
+                    [.day],
+                    from: weekStart,
+                    to: clippedEnd
+                ).day!
+            )
+        }
+        .sorted { left, right in
+            if left.startDate != right.startDate {
+                return left.startDate < right.startDate
+            }
+            if left.startsAt != right.startsAt {
+                return left.startsAt < right.startsAt
+            }
+            return left.endDate > right.endDate
+        }
+
+        var laneEnds: [Int: Int] = [:]
+        var segments: [CalendarEventBarSegment] = []
+        for bar in bars {
+            var lane = 0
+            while let occupiedThrough = laneEnds[lane],
+                  occupiedThrough >= bar.startColumn
+            {
+                lane += 1
+            }
+            laneEnds[lane] = bar.endColumn
+
+            segments.append(
+                CalendarEventBarSegment(
+                    id: bar.event.id,
+                    sourceCalendar: bar.event.sourceCalendar,
+                    title: bar.event.title,
+                    colorHex: bar.event.colorHex,
+                    textTone: bar.event.textTone,
+                    lane: lane,
+                    startColumn: bar.startColumn,
+                    endColumn: bar.endColumn,
+                    isStartTruncated: bar.startDate < weekStart,
+                    isEndTruncated: bar.endDate > weekEnd
+                )
+            )
+        }
+        return segments
     }
 
     // MARK: Local dates

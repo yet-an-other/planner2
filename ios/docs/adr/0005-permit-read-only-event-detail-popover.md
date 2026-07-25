@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Supersedes the Calendar Events slice's out-of-scope exclusion of "Day Events Popover, Event Detail Popover, and any event interaction, selection, or drill-through" (issue #75) and the "Date Cells remain inert" statement in the iOS calendar-surface spec. The Source Calendar selection specification later extends the popover's canonical identity and content for cross-calendar events.
+Accepted. Supersedes the Calendar Events slice's out-of-scope exclusion of "Day Events Popover, Event Detail Popover, and any event interaction, selection, or drill-through" (issue #75) and the "Date Cells remain inert" statement in the iOS calendar-surface spec. The Source Calendar selection specification later extends the popover's canonical identity and content for cross-calendar events. The Day Events Popover series (issues #99–#102) later lifts the Events Overflow marker's inertness in gated builds — the marker summons the read-only Day Events Popover (iOS calendar-surface spec § Day Events Popover) — superseding the marker's reconfirmed inertness below; the surface stays write-read-only forever.
 
 ## Context
 

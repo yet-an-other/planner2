@@ -58,7 +58,8 @@ struct CalendarScreen: View {
                                 preferredEventDetailAnchor = anchor
                                 events?.selectEvent(withID: eventID)
                             },
-                            onRequestDismiss: requestEventDetailDismissal
+                            onRequestDismiss: requestEventDetailDismissal,
+                            onRequestDayEventsDismiss: requestDayEventsDismissal
                         )
                     }
                 }
@@ -200,6 +201,7 @@ struct CalendarScreen: View {
     /// Event Detail Popover leave its anchor before the picker is presented.
     private func presentSourceCalendarPicker() {
         events?.dismissEventDetail()
+        events?.dismissDayEvents()
         Task { @MainActor in
             await Task.yield()
             sourceCalendars?.presentPicker()
@@ -286,6 +288,20 @@ struct CalendarScreen: View {
                 return
             }
             events?.dismissEventDetail()
+        }
+    }
+
+    /// Native popover dismissal writes `false` through its source binding.
+    /// Defer one turn and dismiss the day selection only when the same Date
+    /// Cell still owns presentation, so summoning another day first never
+    /// loses its selection to a stale dismissal.
+    private func requestDayEventsDismissal(from date: Date) {
+        Task { @MainActor in
+            await Task.yield()
+            guard events?.selectedDayEvents?.date == date else {
+                return
+            }
+            events?.dismissDayEvents()
         }
     }
 
@@ -428,6 +444,7 @@ private struct WeekRowView: View {
     let selectedEventAnchor: CalendarEventDetailAnchor?
     let onSelectEvent: (String, CalendarEventDetailAnchor) -> Void
     let onRequestDismiss: (CalendarEventDetailAnchor) -> Void
+    let onRequestDayEventsDismiss: (Date) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -443,7 +460,8 @@ private struct WeekRowView: View {
                     events: events,
                     selectedEventAnchor: selectedEventAnchor,
                     onSelectEvent: onSelectEvent,
-                    onRequestDismiss: onRequestDismiss
+                    onRequestDismiss: onRequestDismiss,
+                    onRequestDayEventsDismiss: onRequestDayEventsDismiss
                 )
             }
         }
@@ -634,6 +652,70 @@ private struct CalendarEventBarsOverlay: View {
     }
 }
 
+/// The "+N more" Events Overflow marker text, shared by the inert
+/// indicator and the Day Events Popover trigger label so both read
+/// identically.
+private struct EventsOverflowMarkerText: View {
+    let overflowCount: Int
+
+    var body: some View {
+        Text("+\(overflowCount) more")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(PlannerPalette.monthText)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: CalendarEventLayoutMetrics.itemHeight)
+    }
+}
+
+/// The tappable Events Overflow marker that summons the Day Events Popover
+/// for its Date Cell (Planning glossary). Presentation state stays in the
+/// Calendar Events model so refreshed layout replacement cannot strand a
+/// stale payload in this transient view.
+private struct DayEventsPopoverTrigger: View {
+    let date: Date
+    let overflowCount: Int
+    let events: CalendarEventsModel
+    let onRequestDismiss: (Date) -> Void
+
+    var body: some View {
+        let isPresenting = events.selectedDayEvents?.date == date
+
+        Button {
+            events.selectDayEvents(on: date)
+        } label: {
+            EventsOverflowMarkerText(overflowCount: overflowCount)
+        }
+        .buttonStyle(.plain)
+        .popover(
+            isPresented: Binding(
+                get: { isPresenting },
+                set: { presented in
+                    if !presented {
+                        onRequestDismiss(date)
+                    }
+                }
+            )
+        ) {
+            DayEventsPopoverPresentation(events: events)
+        }
+    }
+}
+
+/// Observes the model-owned day selection inside the native popover's
+/// presentation tree.
+private struct DayEventsPopoverPresentation: View {
+    let events: CalendarEventsModel
+
+    var body: some View {
+        if let selection = events.selectedDayEvents {
+            IOSDayEventsPopover(selection: selection) {
+                events.dismissDayEvents()
+            }
+        }
+    }
+}
+
 /// A Calendar Event Row: an Event Color dot, the localized start
 /// time, and the title, truncating at the cell's trailing edge.
 private struct CalendarEventRowView: View {
@@ -687,6 +769,7 @@ struct DateCellView: View {
     var selectedEventAnchor: CalendarEventDetailAnchor?
     var onSelectEvent: (String, CalendarEventDetailAnchor) -> Void = { _, _ in }
     var onRequestDismiss: (CalendarEventDetailAnchor) -> Void = { _ in }
+    var onRequestDayEventsDismiss: (Date) -> Void = { _ in }
 
     private var rowsTop: CGFloat {
         CalendarEventLayoutMetrics.barsTop
@@ -761,14 +844,24 @@ struct DateCellView: View {
                         }
                     }
                     if let overflowCount {
-                        // The inert Events Overflow marker: it reads the
-                        // hidden count and summons nothing.
-                        Text("+\(overflowCount) more")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(PlannerPalette.monthText)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .frame(height: CalendarEventLayoutMetrics.itemHeight)
+                        if let events {
+                            // Gated builds: the Events Overflow marker
+                            // summons the Day Events Popover listing the
+                            // Date Cell's complete ordered day.
+                            DayEventsPopoverTrigger(
+                                date: dateCell.id,
+                                overflowCount: overflowCount,
+                                events: events,
+                                onRequestDismiss: onRequestDayEventsDismiss
+                            )
+                        } else {
+                            // Ungated builds keep the inert Events
+                            // Overflow marker: it reads the hidden count
+                            // and summons nothing.
+                            EventsOverflowMarkerText(
+                                overflowCount: overflowCount
+                            )
+                        }
                     }
                 }
                 .padding(

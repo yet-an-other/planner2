@@ -30,7 +30,7 @@ _Avoid_: Toast, banner, notification bar, status bar
 
 ## Relationships
 
-- **iOS Experience → Planning**: Uses Planning's Calendar Grid, Product Name, Product Version, Today, Week Row, Date Cell, Extended Calendar Range, Month Marker, Visible Month, Today Jump, Google Authorization Grant, Google Account Connection, Disconnect on This Device, Source Calendar, Primary Source Calendar, Selected Source Calendars, Source Calendar Reconciliation, Calendar Event, Event Color, Fetched Window, Calendar Event Refresh, Calendar Event Bar, Calendar Event Row, Event Detail Popover, and Events Overflow language.
+- **iOS Experience → Planning**: Uses Planning's Calendar Grid, Product Name, Product Version, Today, Week Row, Date Cell, Extended Calendar Range, Month Marker, Visible Month, Today Jump, Google Authorization Grant, Google Account Connection, Disconnect on This Device, Source Calendar, Primary Source Calendar, Selected Source Calendars, Source Calendar Reconciliation, Calendar Event, Event Color, Fetched Window, Calendar Event Refresh, Calendar Event Bar, Calendar Event Row, Day Events Popover, Event Detail Popover, and Events Overflow language.
 - **iOS Experience ∥ Web Experience**: The native and web delivery stacks are peers. They share vocabulary but no executable code, packages, generated source, or build tooling.
 
 ## Delivery documentation
@@ -46,3 +46,7 @@ _Avoid_: Toast, banner, notification bar, status bar
 - [`docs/adr/0005-permit-read-only-event-detail-popover.md`](docs/adr/0005-permit-read-only-event-detail-popover.md) — accepted read-only Event Detail Popover applying web ADR 0002 to the iOS surface
 - [`docs/adr/0006-persist-selected-source-calendars-per-account.md`](docs/adr/0006-persist-selected-source-calendars-per-account.md) — accepted per-account, per-device persistence boundary for Selected Source Calendars
 - [`docs/research/google-account-connection-authentication.md`](docs/research/google-account-connection-authentication.md) — supporting primary-source authentication research
+
+## Instructions
+
+- Bump up iOS build version each time a prd or spec implementation is complete (all child issues in the issue tracker are closed).

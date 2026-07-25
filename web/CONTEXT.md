@@ -31,7 +31,3 @@ _Avoid_: Toast, alert, notification bar
 **Saved Busy Block**:
 A privacy-preserving placeholder persisted by the Web Experience for offline use that retains a Calendar Event's timing and color but not its title.
 _Avoid_: Cached event, local event, offline event
-
-**Day Events Popover**:
-A transient, read-only overlay that lists the Calendar Events for one Date Cell.
-_Avoid_: Day list, event popup, agenda, more-events modal, overflow menu

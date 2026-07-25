@@ -96,6 +96,10 @@ _Avoid_: Event chip, pill, card
 The “+N more” indicator shown in a Date Cell when its Calendar Events exceed the visible cap. Each delivery experience decides whether it summons anything.
 _Avoid_: More link, +x item, extra events, expand button, overflow menu
 
+**Day Events Popover**:
+A transient, read-only overlay that lists the Calendar Events for one Date Cell, summoned from that Date Cell's Events Overflow. Each delivery experience presents it in a platform-appropriate form.
+_Avoid_: Day list, event popup, agenda, more-events modal, overflow menu
+
 **Event Detail Popover**:
 A transient, read-only overlay that presents the details of one Calendar Event, including a link to that event in Google Calendar. It is summoned from Calendar Event Bar and Calendar Event Row presentations, and each delivery experience presents it in a platform-appropriate form.
 _Avoid_: Event modal, event popup, detail card, edit dialog
