@@ -497,9 +497,12 @@ enum CalendarEventDayItem: Equatable, Sendable, Identifiable {
 
 /// The Date Cell whose complete ordered day the open Day Events Popover
 /// lists (Planning glossary). The selection projects from the model's
-/// memory-only Calendar Events when the Events Overflow marker summons it;
-/// it opens with no network call and clears with the events themselves on
-/// Disconnect on This Device.
+/// memory-only Calendar Events when the Events Overflow marker summons it,
+/// opens with no network call, and reconciles with every successful
+/// Calendar Event replacement — edits and moves update items in place,
+/// deletions and declines remove them, and the popover dismisses itself
+/// when the day's last Calendar Event disappears. Disconnect on This
+/// Device clears it with the events themselves.
 struct CalendarEventDaySelection: Equatable, Sendable, Identifiable {
     /// The Date Cell's local start-of-day, the selection identity.
     let date: Date
@@ -535,9 +538,12 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     private(set) var selectedEvent: CalendarEventDetailSelection?
 
     /// The Date Cell whose complete ordered day the open Day Events Popover
-    /// lists. The selection is a snapshot projected from memory-only
-    /// Calendar Events at summon time; Disconnect on This Device and
-    /// selection replacement clear it with the events themselves.
+    /// lists. The selection reconciles with every successful Calendar Event
+    /// replacement like the Event Detail selection: edits and moves update
+    /// items in place, deletions and declines remove them, and a failed
+    /// refresh leaves the list unchanged. The popover dismisses itself when
+    /// the day's last Calendar Event disappears, and Disconnect on This
+    /// Device clears the selection with the events themselves.
     private(set) var selectedDayEvents: CalendarEventDaySelection?
 
     @ObservationIgnored
@@ -804,6 +810,20 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
             return
         }
         self.selectedEvent = detailSelection(forEventID: selectedEvent.id)
+    }
+
+    /// Reprojects the summoned day from the canonical collection after
+    /// replacement, so the open Day Events Popover follows refreshed
+    /// Calendar Events like the Event Detail Popover: edits and moves
+    /// update items in place, deletions and declines remove them. When the
+    /// day's last Calendar Event disappears, the popover dismisses itself —
+    /// an empty read-only list is a dead end.
+    private func reconcileSelectedDayEvents() {
+        guard let selectedDayEvents else {
+            return
+        }
+        let projection = dayEventsSelection(for: selectedDayEvents.date)
+        self.selectedDayEvents = projection.items.isEmpty ? nil : projection
     }
 
     /// Projects one canonical normalized event into the popover's observable
@@ -1272,6 +1292,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         normalizedEvents = nextEvents
         weekLayouts = nextLayouts
         reconcileSelectedEvent()
+        reconcileSelectedDayEvents()
     }
 
     /// Whether one normalized event's presented local dates intersect a
@@ -1597,6 +1618,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 normalizedEvents.removeAll { redeliveredIds.contains($0.id) }
                 normalizedEvents.append(contentsOf: slabEvents)
                 reconcileSelectedEvent()
+                reconcileSelectedDayEvents()
                 switch direction {
                 case .forward:
                     fetchedWindow?.end = fetchEnd
@@ -1693,6 +1715,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 refreshFailure = nil
                 isSelectionReplacementPending = false
                 reconcileSelectedEvent()
+                reconcileSelectedDayEvents()
                 clearStatusIfIdle()
                 drainFetchWork()
                 scheduleCadenceIfEligible()

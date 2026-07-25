@@ -48,16 +48,35 @@ struct DayEventsSelectionTests {
         )!
     }
 
+    /// The localized start-time text the model's formatter produces, so
+    /// expectations never hardcode the locale's day-period separator.
+    private static func timeText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = makeEnvironment().calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.setLocalizedDateFormatFromTemplate("jm")
+        return formatter.string(from: date)
+    }
+
     private func makeModel() -> (
         CalendarEventsModel,
-        FakeGoogleCalendarEventsAdapter
+        FakeGoogleCalendarEventsAdapter,
+        FakeEventsConnectivityMonitor,
+        FakeCalendarEventsCadenceScheduler
     ) {
         let adapter = FakeGoogleCalendarEventsAdapter()
+        let monitor = FakeEventsConnectivityMonitor()
+        let scheduler = FakeCalendarEventsCadenceScheduler(
+            now: Self.makeEnvironment().now
+        )
         let model = CalendarEventsModel(
             environment: Self.makeEnvironment(),
-            adapter: adapter
+            adapter: adapter,
+            connectivityMonitor: monitor,
+            cadenceScheduler: scheduler
         )
-        return (model, adapter)
+        return (model, adapter, monitor, scheduler)
     }
 
     private func eventually(
@@ -76,7 +95,7 @@ struct DayEventsSelectionTests {
 
     @Test("The summoned day lists every Calendar Event, not just the visible ones")
     func summonedDayListsEveryEventBeyondTheVisibleCap() async {
-        let (model, adapter) = makeModel()
+        let (model, adapter, _, _) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
                 calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
@@ -133,7 +152,7 @@ struct DayEventsSelectionTests {
 
     @Test("Multiday and all-day bars appear in every crossed day's list")
     func spanningBarsAppearInEveryCrossedDay() async {
-        let (model, adapter) = makeModel()
+        let (model, adapter, _, _) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
                 calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
@@ -176,7 +195,7 @@ struct DayEventsSelectionTests {
 
     @Test("Bars hidden beyond the visible cap still list in lane order")
     func capHiddenBarsListInLaneOrder() async {
-        let (model, adapter) = makeModel()
+        let (model, adapter, _, _) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
                 calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
@@ -217,7 +236,7 @@ struct DayEventsSelectionTests {
 
     @Test("The list orders bars in lane order, then rows by start time")
     func listOrdersBarsByLaneThenRowsByStartTime() async {
-        let (model, adapter) = makeModel()
+        let (model, adapter, _, _) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
                 calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
@@ -293,7 +312,7 @@ struct DayEventsSelectionTests {
 
     @Test("A date heading names the Date Cell")
     func headingNamesTheDateCell() async {
-        let (model, adapter) = makeModel()
+        let (model, adapter, _, _) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
                 calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
@@ -325,7 +344,7 @@ struct DayEventsSelectionTests {
 
     @Test("Row items carry the dot color, localized start time, and title")
     func rowItemsCarryDotStartTimeAndTitle() async {
-        let (model, adapter) = makeModel()
+        let (model, adapter, _, _) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
                 calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
@@ -356,13 +375,13 @@ struct DayEventsSelectionTests {
             return
         }
         #expect(row.title == "Design Review")
-        #expect(row.startTimeText == "1:00 PM")
+        #expect(row.startTimeText == Self.timeText(Self.gmt(2026, 7, 15, 13, 0)))
         #expect(row.colorHex == "#039BE5")
     }
 
     @Test("Bar items carry the Event Color, contrast-safe text, and title")
     func barItemsCarryColorContrastSafeTextAndTitle() async {
-        let (model, adapter) = makeModel()
+        let (model, adapter, _, _) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
                 calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
@@ -402,7 +421,7 @@ struct DayEventsSelectionTests {
 
     @Test("Summoning the day opens from memory with no network call")
     func summoningMakesNoNetworkCall() async {
-        let (model, adapter) = makeModel()
+        let (model, adapter, _, _) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
                 calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
@@ -446,7 +465,7 @@ struct DayEventsSelectionTests {
 
     @Test("Dismissal and Disconnect on This Device clear the summoned day")
     func dismissalAndDisconnectClearTheSummonedDay() async {
-        let (model, adapter) = makeModel()
+        let (model, adapter, _, _) = makeModel()
         adapter.fetchHandler = { _, _ in
             .success(
                 calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
@@ -481,5 +500,296 @@ struct DayEventsSelectionTests {
         #expect(model.selectedDayEvents != nil)
         model.setConnected(false)
         #expect(model.selectedDayEvents == nil)
+    }
+
+    @Test("An open Day Events Popover follows edits and moves across a refresh")
+    func openDayFollowsEditsAndMovesAcrossRefresh() async {
+        let (model, adapter, _, _) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 1 {
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "offsite",
+                            summary: "Offsite",
+                            start: .allDay(year: 2026, month: 7, day: 15),
+                            end: .allDay(year: 2026, month: 7, day: 16),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                        GoogleCalendarEvent(
+                            id: "standup",
+                            summary: "Standup",
+                            start: .timed(Self.gmt(2026, 7, 15, 9, 30)),
+                            end: .timed(Self.gmt(2026, 7, 15, 10, 0)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                        GoogleCalendarEvent(
+                            id: "review",
+                            summary: "Design Review",
+                            start: .timed(Self.gmt(2026, 7, 15, 13, 0)),
+                            end: .timed(Self.gmt(2026, 7, 15, 14, 0)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            }
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    // Edited in place: new title and explicit Event Color.
+                    GoogleCalendarEvent(
+                        id: "offsite",
+                        summary: "Team Offsite",
+                        colorId: "updated-color",
+                        start: .allDay(year: 2026, month: 7, day: 15),
+                        end: .allDay(year: 2026, month: 7, day: 16),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "standup",
+                        summary: "Daily Standup",
+                        start: .timed(Self.gmt(2026, 7, 15, 9, 45)),
+                        end: .timed(Self.gmt(2026, 7, 15, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    // Moved within the refreshed range, out of the open
+                    // day: it leaves the day's list.
+                    GoogleCalendarEvent(
+                        id: "review",
+                        summary: "Design Review",
+                        start: .timed(Self.gmt(2026, 7, 16, 13, 0)),
+                        end: .timed(Self.gmt(2026, 7, 16, 14, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    // Added into the open day.
+                    GoogleCalendarEvent(
+                        id: "demo",
+                        summary: "Demo",
+                        start: .timed(Self.gmt(2026, 7, 15, 16, 0)),
+                        end: .timed(Self.gmt(2026, 7, 15, 17, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                ],
+                eventColorBackgrounds: ["updated-color": "#D50000"]
+            )
+        }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil
+            }
+        )
+        model.selectDayEvents(on: Self.gmt(2026, 7, 15))
+        #expect(
+            model.selectedDayEvents?.items.map(\.title)
+                == ["Offsite", "Standup", "Design Review"]
+        )
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(
+            await eventually {
+                model.selectedDayEvents?.items.map(\.title)
+                    == ["Team Offsite", "Daily Standup", "Demo"]
+            }
+        )
+        // The edited bar's Event Color and the edited row's start time
+        // update in place with the same successful replacement.
+        guard case .bar(let bar) = model.selectedDayEvents?.items.first,
+              case .row(let row) = model.selectedDayEvents?.items[1]
+        else {
+            Issue.record("Expected the reconciled bar and row items")
+            return
+        }
+        #expect(bar.colorHex == "#D50000")
+        #expect(row.startTimeText == Self.timeText(Self.gmt(2026, 7, 15, 9, 45)))
+    }
+
+    @Test("Deleted and declined events leave the open day's list")
+    func deletedAndDeclinedEventsLeaveTheOpenDay() async {
+        let (model, adapter, _, _) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 1 {
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "standup",
+                            summary: "Standup",
+                            start: .timed(Self.gmt(2026, 7, 15, 9, 30)),
+                            end: .timed(Self.gmt(2026, 7, 15, 10, 0)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                        GoogleCalendarEvent(
+                            id: "review",
+                            summary: "Design Review",
+                            start: .timed(Self.gmt(2026, 7, 15, 13, 0)),
+                            end: .timed(Self.gmt(2026, 7, 15, 14, 0)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                        GoogleCalendarEvent(
+                            id: "sync",
+                            summary: "Sync",
+                            start: .timed(Self.gmt(2026, 7, 15, 15, 0)),
+                            end: .timed(Self.gmt(2026, 7, 15, 16, 0)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            }
+            // "review" is deleted (absent from the aggregate) and "sync"
+            // now arrives declined: both leave the open list.
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: [
+                    GoogleCalendarEvent(
+                        id: "standup",
+                        summary: "Standup",
+                        start: .timed(Self.gmt(2026, 7, 15, 9, 30)),
+                        end: .timed(Self.gmt(2026, 7, 15, 10, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: false
+                    ),
+                    GoogleCalendarEvent(
+                        id: "sync",
+                        summary: "Sync",
+                        start: .timed(Self.gmt(2026, 7, 15, 15, 0)),
+                        end: .timed(Self.gmt(2026, 7, 15, 16, 0)),
+                        isCancelled: false,
+                        isDeclinedByViewer: true
+                    ),
+                ]
+            )
+        }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil
+            }
+        )
+        model.selectDayEvents(on: Self.gmt(2026, 7, 15))
+        #expect(model.selectedDayEvents?.items.count == 3)
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(
+            await eventually {
+                model.selectedDayEvents?.items.map(\.title) == ["Standup"]
+            }
+        )
+    }
+
+    @Test("The popover dismisses itself when the day's last event disappears")
+    func popoverDismissesItselfWhenTheDayEmpties() async {
+        let (model, adapter, _, _) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            return .success(
+                calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                events: fetchNumber == 1
+                    ? [
+                        GoogleCalendarEvent(
+                            id: "standup",
+                            summary: "Standup",
+                            start: .timed(Self.gmt(2026, 7, 15, 9, 30)),
+                            end: .timed(Self.gmt(2026, 7, 15, 10, 0)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                    : []
+            )
+        }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil
+            }
+        )
+        model.selectDayEvents(on: Self.gmt(2026, 7, 15))
+        #expect(model.selectedDayEvents != nil)
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(await eventually { model.selectedDayEvents == nil })
+    }
+
+    @Test("A failed refresh leaves the open day's list unchanged")
+    func failedRefreshLeavesTheOpenDayUnchanged() async {
+        let (model, adapter, _, _) = makeModel()
+        var fetchNumber = 0
+        adapter.fetchHandler = { _, _ in
+            fetchNumber += 1
+            if fetchNumber == 1 {
+                return .success(
+                    calendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
+                    events: [
+                        GoogleCalendarEvent(
+                            id: "standup",
+                            summary: "Standup",
+                            start: .timed(Self.gmt(2026, 7, 15, 9, 30)),
+                            end: .timed(Self.gmt(2026, 7, 15, 10, 0)),
+                            isCancelled: false,
+                            isDeclinedByViewer: false
+                        ),
+                    ]
+                )
+            }
+            return .unavailable(.failed)
+        }
+
+        model.setConnected(true)
+        #expect(
+            await eventually {
+                model.layout(forWeekStarting: Self.gmt(2026, 7, 13)) != nil
+            }
+        )
+        model.selectDayEvents(on: Self.gmt(2026, 7, 15))
+        #expect(model.selectedDayEvents?.items.map(\.title) == ["Standup"])
+
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        // The failed refresh completes without touching the open list.
+        #expect(
+            await eventually {
+                model.status.message == CalendarEventsCopy.refreshFailed
+            }
+        )
+        #expect(model.selectedDayEvents?.items.map(\.title) == ["Standup"])
     }
 }
