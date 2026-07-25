@@ -98,6 +98,78 @@ enum SourceCalendarsCopy {
     static let minimumSelection = "Select at least one calendar"
     static let retry = "Retry"
     static let noAvailable = "No calendars available"
+    static let untitledCalendar = "Untitled calendar"
+    static let selectAll = "Select All"
+    static let resetToPrimary = "Reset to Primary"
+    static let actionsMenu = "Calendar actions"
+    static let primaryMarker = "Primary"
+
+    /// The iOS Source Calendar Control's accessibility label, announcing
+    /// the selected count the glyph deliberately does not badge.
+    static func controlAccessibilityLabel(selectedCount: Int) -> String {
+        "Choose calendars, \(selectedCount) selected"
+    }
+}
+
+/// One picker row's presentation: the Source Calendar's color, its
+/// privacy-preserving disambiguated label, the Primary marker, and the
+/// checked state — selection is never communicated through color alone.
+struct SourceCalendarPickerRow: Equatable, Sendable, Identifiable {
+    /// The Source Calendar's stable Google ID.
+    let id: String
+    /// The display label: the trimmed Google summary, "Untitled calendar"
+    /// for a blank one — never a calendar ID — with a deterministic
+    /// ordinal suffix disambiguating duplicates.
+    let summary: String
+    let backgroundColorHex: String
+    let isPrimary: Bool
+    let isSelected: Bool
+}
+
+/// Pure presentation mapping for the picker: blank summaries present as
+/// "Untitled calendar" and duplicate display summaries receive
+/// deterministic ordinal suffixes in the picker's deterministic order —
+/// "Work", "Work (2)" — so visual and VoiceOver labels never rely on
+/// color or position to distinguish sources.
+enum SourceCalendarPresentation {
+    static func rows(
+        available: [GoogleSourceCalendar],
+        selectedIDs: Set<String>
+    ) -> [SourceCalendarPickerRow] {
+        var totals: [String: Int] = [:]
+        for source in available {
+            totals[baseSummary(source), default: 0] += 1
+        }
+
+        var ordinals: [String: Int] = [:]
+        return available.map { source in
+            let base = baseSummary(source)
+            var label = base
+            if (totals[base] ?? 1) > 1 {
+                let ordinal = (ordinals[base] ?? 0) + 1
+                ordinals[base] = ordinal
+                if ordinal > 1 {
+                    label = "\(base) (\(ordinal))"
+                }
+            }
+            return SourceCalendarPickerRow(
+                id: source.id,
+                summary: label,
+                backgroundColorHex: source.backgroundColorHex,
+                isPrimary: source.isPrimary,
+                isSelected: selectedIDs.contains(source.id)
+            )
+        }
+    }
+
+    private static func baseSummary(
+        _ sourceCalendar: GoogleSourceCalendar
+    ) -> String {
+        let trimmed = sourceCalendar.summary.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        return trimmed.isEmpty ? SourceCalendarsCopy.untitledCalendar : trimmed
+    }
 }
 
 /// Pure, deterministic Source Calendar ordering and reconciliation.
@@ -307,6 +379,15 @@ final class SourceCalendarsModel: CalendarDataAccountConsuming {
         )
     }
 
+    /// The presented picker's rows in the deterministic order with their
+    /// privacy-preserving disambiguated labels and checked states.
+    var pickerRows: [SourceCalendarPickerRow] {
+        SourceCalendarPresentation.rows(
+            available: availableSourceCalendars,
+            selectedIDs: Set(selectedSourceCalendars.map(\.id))
+        )
+    }
+
     /// Immediately persists one user toggle while enforcing the minimum-one
     /// invariant. Calendar Event replacement remains deferred until dismissal.
     @discardableResult
@@ -331,14 +412,62 @@ final class SourceCalendarsModel: CalendarDataAccountConsuming {
         let nextSelection = availableSourceCalendars.filter {
             nextIDs.contains($0.id)
         }
+        persistSelection(nextSelection, accountID: accountID)
+        return .changed
+    }
+
+    /// Selects every available Source Calendar at once. No product-level
+    /// count limit applies; the per-request concurrency bound stays the
+    /// adapter's concern. Persists immediately like a row toggle.
+    @discardableResult
+    func selectAllSourceCalendars() -> Bool {
+        guard isPickerPresented,
+              let accountID,
+              !availableSourceCalendars.isEmpty
+        else {
+            return false
+        }
+        let nextSelection = availableSourceCalendars
+        guard nextSelection != selectedSourceCalendars else {
+            return false
+        }
+        persistSelection(nextSelection, accountID: accountID)
+        return true
+    }
+
+    /// Resets the selection to the Primary Source Calendar — or the
+    /// deterministic fallback default when Google supplies no primary
+    /// marker, the same default reconciliation uses. Persists immediately
+    /// and always satisfies the minimum-one invariant.
+    @discardableResult
+    func resetToPrimarySourceCalendar() -> Bool {
+        guard isPickerPresented,
+              let accountID,
+              let defaultSource = availableSourceCalendars.first
+        else {
+            return false
+        }
+        guard selectedSourceCalendars != [defaultSource] else {
+            return false
+        }
+        persistSelection([defaultSource], accountID: accountID)
+        return true
+    }
+
+    /// The shared immediate-persistence core for toggles and bulk actions:
+    /// the effective selection writes to the per-account store at once,
+    /// while Calendar Event replacement stays deferred until dismissal.
+    private func persistSelection(
+        _ selection: [GoogleSourceCalendar],
+        accountID: String
+    ) {
         store.saveSelectedSourceCalendarIDs(
-            nextSelection.map(\.id),
+            selection.map(\.id),
             for: accountID
         )
-        selectedSourceCalendars = nextSelection
+        selectedSourceCalendars = selection
         minimumSelectionMessage = nil
-        controlPresentation = .ready(selectedCount: nextSelection.count)
-        return .changed
+        controlPresentation = .ready(selectedCount: selection.count)
     }
 
     /// Why a live Source Calendar request runs. Account loads are the

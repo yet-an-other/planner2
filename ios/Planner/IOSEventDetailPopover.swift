@@ -197,7 +197,6 @@ struct IOSEventDetailPopover: View {
     private static let notesSectionTitle = "Notes"
     private static let attendeesSectionTitle = "Attendees"
     private static let openInGoogleCalendarTitle = "Open in Google Calendar →"
-    private static let untitledCalendarSummary = "Untitled calendar"
 
     /// The source row's summary: a blank Google summary never presents as
     /// empty text or a calendar ID.
@@ -207,7 +206,9 @@ struct IOSEventDetailPopover: View {
         let trimmed = sourceCalendar.summary.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
-        return trimmed.isEmpty ? untitledCalendarSummary : trimmed
+        return trimmed.isEmpty
+            ? SourceCalendarsCopy.untitledCalendar
+            : trimmed
     }
 
     /// The Notes section's height cap, the web popover's 10-rem cap.

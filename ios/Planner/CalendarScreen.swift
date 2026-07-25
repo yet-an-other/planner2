@@ -165,14 +165,17 @@ struct CalendarScreen: View {
             .popover(isPresented: sourceCalendarPickerPresented) {
                 IOSSourceCalendarPicker(
                     content: sourceCalendars.pickerContent,
-                    sourceCalendars: sourceCalendars.availableSourceCalendars,
-                    selectedSourceCalendarIDs: Set(
-                        sourceCalendars.selectedSourceCalendars.map(\.id)
-                    ),
+                    rows: sourceCalendars.pickerRows,
                     minimumSelectionMessage:
                         sourceCalendars.minimumSelectionMessage,
                     toggle: {
                         _ = sourceCalendars.toggleSourceCalendar(id: $0)
+                    },
+                    selectAll: {
+                        _ = sourceCalendars.selectAllSourceCalendars()
+                    },
+                    resetToPrimary: {
+                        _ = sourceCalendars.resetToPrimarySourceCalendar()
                     },
                     retry: sourceCalendars.retryPickerLoad,
                     done: sourceCalendars.dismissPicker

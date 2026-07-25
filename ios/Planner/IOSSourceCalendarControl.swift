@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The compact, connected-only iOS Source Calendar Control. Its stable
-/// calendar glyph carries no visual count badge and keeps a 44-point native
-/// activation target in every presentation.
+/// calendar glyph carries no visual count badge — VoiceOver announces the
+/// selected count instead — and keeps a 44-point native activation target
+/// in every presentation.
 struct IOSSourceCalendarControl: View {
     let presentation: SourceCalendarControlPresentation
     let presentPicker: () -> Void
@@ -45,7 +46,7 @@ struct IOSSourceCalendarControl: View {
         .hoverEffect()
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.6)
-        .accessibilityLabel("Choose calendars")
+        .accessibilityLabel(accessibilityLabel)
     }
 
     private var isEnabled: Bool {
@@ -53,5 +54,16 @@ struct IOSSourceCalendarControl: View {
             return true
         }
         return false
+    }
+
+    /// The glyph carries no visual count badge; VoiceOver announces the
+    /// selected count instead, for example “Choose calendars, 3 selected.”
+    private var accessibilityLabel: String {
+        if case .ready(let selectedCount) = presentation {
+            return SourceCalendarsCopy.controlAccessibilityLabel(
+                selectedCount: selectedCount
+            )
+        }
+        return "Choose calendars"
     }
 }

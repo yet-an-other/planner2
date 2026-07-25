@@ -695,6 +695,182 @@ struct SourceCalendarsModelTests {
         #expect(model.status.message == SourceCalendarsCopy.noAvailable)
     }
 
+    @Test("Select All persists every Source Calendar with no count limit")
+    func selectAll() async {
+        let extra = (0..<8).map { index in
+            GoogleSourceCalendar(
+                id: "extra-\(index)",
+                summary: "Extra \(index)",
+                backgroundColorHex: "#039BE5",
+                isPrimary: false
+            )
+        }
+        let all = [Self.primary, Self.family, Self.work] + extra
+        let adapter = FakeSourceCalendarsAdapter()
+        adapter.handler = { .success(all) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let consumer = RecordingSelectionConsumer()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: consumer
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+        model.presentPicker()
+        #expect(await eventually { model.pickerContent == .ready })
+        let ordered = SourceCalendarReconciliation.ordered(all)
+
+        #expect(model.selectAllSourceCalendars())
+        #expect(model.selectedSourceCalendars == ordered)
+        #expect(store.values["account-a"] == ordered.map(\.id))
+        #expect(
+            model.controlPresentation
+                == .ready(selectedCount: ordered.count)
+        )
+        // Already complete: a repeated Select All writes nothing.
+        let writesAfterSelectAll = store.saveCallCount
+        #expect(!model.selectAllSourceCalendars())
+        #expect(store.saveCallCount == writesAfterSelectAll)
+
+        // Dismissal triggers at most one selection reload decision.
+        model.dismissPicker()
+        #expect(consumer.pickerClosures.count == 1)
+        #expect(consumer.pickerClosures.last?.0 == ordered)
+        #expect(consumer.pickerClosures.last?.1 == true)
+    }
+
+    @Test("Reset to Primary persists the Primary Source Calendar alone")
+    func resetToPrimary() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        adapter.handler = { .success([Self.primary, Self.family, Self.work]) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: nil
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+        model.presentPicker()
+        #expect(await eventually { model.pickerContent == .ready })
+        #expect(model.selectAllSourceCalendars())
+
+        #expect(model.resetToPrimarySourceCalendar())
+        #expect(model.selectedSourceCalendars == [Self.primary])
+        #expect(store.values["account-a"] == ["primary"])
+        #expect(model.controlPresentation == .ready(selectedCount: 1))
+        // Already the default: a repeated Reset writes nothing.
+        #expect(!model.resetToPrimarySourceCalendar())
+    }
+
+    @Test("Reset uses the deterministic default without a primary marker")
+    func resetToDeterministicFallback() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        adapter.handler = { .success([Self.work, Self.family]) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: nil
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        // "Family" precedes "Work" and becomes the first-selection default.
+        #expect(await eventually { model.selectedSourceCalendars == [Self.family] })
+        model.presentPicker()
+        #expect(await eventually { model.pickerContent == .ready })
+        #expect(model.toggleSourceCalendar(id: "work") == .changed)
+
+        #expect(model.resetToPrimarySourceCalendar())
+        #expect(model.selectedSourceCalendars == [Self.family])
+        #expect(store.values["account-a"] == ["family"])
+    }
+
+    @Test("Bulk actions require the presented picker")
+    func bulkActionsRequirePicker() async {
+        let adapter = FakeSourceCalendarsAdapter()
+        adapter.handler = { .success([Self.primary, Self.family]) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: nil
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars == [Self.primary] })
+        let writesAfterLoad = store.saveCallCount
+
+        #expect(!model.selectAllSourceCalendars())
+        #expect(!model.resetToPrimarySourceCalendar())
+        #expect(store.saveCallCount == writesAfterLoad)
+        #expect(model.selectedSourceCalendars == [Self.primary])
+    }
+
+    @Test("Blank and duplicate summaries present privacy-preserving labels")
+    func presentationLabels() async {
+        let blankA = GoogleSourceCalendar(
+            id: "blank-a",
+            summary: "   ",
+            backgroundColorHex: "#039BE5",
+            isPrimary: true
+        )
+        let blankB = GoogleSourceCalendar(
+            id: "blank-b",
+            summary: "",
+            backgroundColorHex: "#7CB342",
+            isPrimary: false
+        )
+        let workA = GoogleSourceCalendar(
+            id: "work-a",
+            summary: "Work",
+            backgroundColorHex: "#7986CB",
+            isPrimary: false
+        )
+        let workB = GoogleSourceCalendar(
+            id: "work-b",
+            summary: "Work",
+            backgroundColorHex: "#D50000",
+            isPrimary: false
+        )
+        let adapter = FakeSourceCalendarsAdapter()
+        adapter.handler = { .success([blankA, workB, blankB, workA]) }
+        let store = RecordingSelectedSourceCalendarsStore()
+        store.values["account-a"] = ["blank-a", "work-b"]
+        let model = SourceCalendarsModel(
+            adapter: adapter,
+            store: store,
+            selectionConsumer: nil
+        )
+
+        model.setCalendarDataAccountID("account-a")
+        #expect(await eventually { model.selectedSourceCalendars.count == 2 })
+
+        // Deterministic order: primary first, then folded summary, exact
+        // summary, stable ID — "Untitled calendar" folds before "Work".
+        let rows = model.pickerRows
+        #expect(rows.map(\.id) == ["blank-a", "blank-b", "work-a", "work-b"])
+        #expect(
+            rows.map(\.summary) == [
+                "Untitled calendar",
+                "Untitled calendar (2)",
+                "Work",
+                "Work (2)",
+            ]
+        )
+        // No calendar ID ever appears as fallback text.
+        #expect(
+            rows.allSatisfy {
+                $0.summary != $0.id && !$0.summary.isEmpty
+            }
+        )
+        #expect(rows.map(\.isSelected) == [true, false, false, true])
+        #expect(rows.map(\.isPrimary) == [true, false, false, false])
+    }
+
     private func eventually(
         timeout: Duration = .seconds(2),
         condition: @MainActor () -> Bool
