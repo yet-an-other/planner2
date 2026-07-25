@@ -41,6 +41,12 @@ struct GoogleCalendarEventAttendee: Equatable, Sendable {
 /// model, and raw Google errors never cross this boundary.
 struct GoogleCalendarEvent: Equatable, Sendable {
     let id: String
+    /// Google's `iCalUID`, when supplied: the stable half of canonical
+    /// cross-calendar occurrence identity.
+    let iCalUID: String?
+    /// Google's `originalStartTime`, when supplied: a moved recurring
+    /// instance's original slot, the occurrence half of canonical identity.
+    let originalStartTime: GoogleCalendarEventTime?
     let summary: String?
     /// Google's explicit event color id, when the event carries one.
     let colorId: String?
@@ -60,6 +66,8 @@ struct GoogleCalendarEvent: Equatable, Sendable {
 
     init(
         id: String,
+        iCalUID: String? = nil,
+        originalStartTime: GoogleCalendarEventTime? = nil,
         summary: String?,
         colorId: String? = nil,
         start: GoogleCalendarEventTime,
@@ -72,6 +80,8 @@ struct GoogleCalendarEvent: Equatable, Sendable {
         attendees: [GoogleCalendarEventAttendee] = []
     ) {
         self.id = id
+        self.iCalUID = iCalUID
+        self.originalStartTime = originalStartTime
         self.summary = summary
         self.colorId = colorId
         self.start = start
@@ -271,6 +281,42 @@ extension CalendarEventsCopy {
     static let updatingSelection = "Updating events…"
 }
 
+/// Canonical cross-calendar occurrence identity: the same occurrence
+/// returned through multiple Selected Source Calendars presents once.
+/// Google's `iCalUID` plus `originalStartTime` when supplied — otherwise
+/// the occurrence's all-day date or timed start — identifies one
+/// occurrence across sources, so distinct recurring instances, including
+/// moved ones, never collapse. Without an `iCalUID`, identity falls back
+/// to Source Calendar ID plus Google's event ID: Planner never guesses
+/// that unrelated fallback events across calendars are duplicates.
+enum CalendarEventCanonicalIdentity {
+    /// The canonical occurrence identity of one fetched copy, used as the
+    /// Calendar Event's identity for deduplication, layout, and the Event
+    /// Detail selection. Opaque beyond its uniqueness and stability
+    /// guarantees; memory-only like every Calendar Event.
+    static func id(of sourceEvent: GoogleSourceCalendarEvent) -> String {
+        let event = sourceEvent.event
+        if let iCalUID = event.iCalUID?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ), !iCalUID.isEmpty {
+            let occurrence = event.originalStartTime ?? event.start
+            return "ical:\(iCalUID):occurrence:\(occurrenceStamp(occurrence))"
+        }
+        return "src:\(sourceEvent.sourceCalendar.id):event:\(event.id)"
+    }
+
+    private static func occurrenceStamp(
+        _ time: GoogleCalendarEventTime
+    ) -> String {
+        switch time {
+        case .allDay(let year, let month, let day):
+            return "date-\(year)-\(month)-\(day)"
+        case .timed(let instant):
+            return "time-\(instant.timeIntervalSince1970)"
+        }
+    }
+}
+
 /// The readable text tone on top of an Event Color.
 enum CalendarEventTextTone: Equatable, Sendable {
     case dark
@@ -329,11 +375,11 @@ struct EventColorRGB: Equatable, Sendable {
 /// One week's segment of a Calendar Event Bar: a multiday or all-day event
 /// clipped to the Week Row it crosses, in its assigned lane.
 struct CalendarEventBarSegment: Equatable, Sendable, Identifiable {
-    /// Unique within the Week Row: the event's id (one segment per event per
-    /// week).
+    /// Unique within the Week Row: the event's canonical occurrence
+    /// identity (one segment per event per week).
     let id: String
-    /// The originating Source Calendar for this fetched copy,
-    /// retained in memory for later canonical cross-calendar identity.
+    /// The winning Source Calendar for this canonical occurrence,
+    /// retained in memory for the Event Detail source row.
     let sourceCalendar: GoogleSourceCalendar
     let title: String
     let colorHex: String
@@ -352,9 +398,10 @@ struct CalendarEventBarSegment: Equatable, Sendable, Identifiable {
 /// A Calendar Event Row: an intraday event presented in its Date Cell with a
 /// dot, a localized start time, and a title.
 struct CalendarEventRowItem: Equatable, Sendable, Identifiable {
+    /// The event's canonical occurrence identity.
     let id: String
-    /// The originating Source Calendar for this fetched copy,
-    /// retained in memory for later canonical cross-calendar identity.
+    /// The winning Source Calendar for this canonical occurrence,
+    /// retained in memory for the Event Detail source row.
     let sourceCalendar: GoogleSourceCalendar
     let title: String
     let startTimeText: String
@@ -383,13 +430,14 @@ struct CalendarEventWeekLayout: Equatable, Sendable {
 }
 
 /// The one Calendar Event currently presented in the Event Detail Popover.
-/// Its stable Google event id is the selection identity; the detail is a
-/// projection of the model's canonical normalized event and is reconciled
-/// whenever that collection changes.
+/// Its canonical occurrence identity is the selection identity; the detail
+/// is a projection of the model's canonical normalized event and is
+/// reconciled whenever that collection changes.
 struct CalendarEventDetailSelection: Equatable, Sendable, Identifiable {
     let id: String
-    /// Source identity and presentation data remain memory-only with the
-    /// selected Calendar Event; this slice does not yet present a source row.
+    /// The winning Source Calendar's identity and presentation data,
+    /// memory-only with the selected Calendar Event and presented as the
+    /// Event Detail source row.
     let sourceCalendar: GoogleSourceCalendar
     let detail: CalendarEventDetail
 }
@@ -579,7 +627,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         weekLayouts[weekStart]
     }
 
-    /// Selects one canonical Calendar Event by its current source event
+    /// Selects one canonical Calendar Event by its canonical occurrence
     /// identity. Layout items carry that identity, but the popover detail
     /// is resolved here so it never retains the tapped item's stale payload.
     func selectEvent(withID id: String) {
@@ -1020,16 +1068,19 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     }
 
     /// Atomically replaces Calendar Events intersecting one successful
-    /// bounded refresh while preserving unrelated events. Raw returned ids
-    /// also evict an old off-range form of an event that moved into the
-    /// refreshed range; cancelled and declined events therefore remove their
-    /// prior presentation even though normalization drops them.
+    /// bounded refresh while preserving unrelated events. Returned canonical
+    /// identities also evict an old off-range form of an occurrence that
+    /// moved into the refreshed range; cancelled and declined events
+    /// therefore remove their prior presentation even though normalization
+    /// drops them.
     private func applyRefresh(
         _ events: [GoogleSourceCalendarEvent],
         eventColorBackgrounds: [String: String],
         range: (start: Date, end: Date)
     ) {
-        let returnedIDs = Set(events.map(\.event.id))
+        let returnedIDs = Set(
+            events.map { CalendarEventCanonicalIdentity.id(of: $0) }
+        )
         let removedEvents = normalizedEvents.filter {
             intersects($0, range: range) || returnedIDs.contains($0.id)
         }
@@ -1649,9 +1700,11 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
             case row(date: Date, startsAt: Date, startTimeText: String)
         }
 
+        /// The canonical cross-calendar occurrence identity: one entry per
+        /// occurrence across every Selected Source Calendar.
         let id: String
-        /// The Source Calendar identity and presentation attributes that
-        /// crossed the adapter seam with this event.
+        /// The winning Source Calendar's identity and presentation
+        /// attributes, kept intact from the winning copy.
         let sourceCalendar: GoogleSourceCalendar
         let title: String
         let colorHex: String
@@ -1664,8 +1717,12 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     }
 
     /// Applies Planner's product rules: cancelled and declined events drop
-    /// out, blank titles become "Busy", all-day ends turn inclusive, and
-    /// every event classifies as a bar or a row in the environment's local
+    /// out, duplicate copies of one canonical occurrence collapse to their
+    /// deterministic winner — the Primary Source Calendar copy when
+    /// present, otherwise the earliest in the deterministic Source
+    /// Calendar order, kept intact with nothing combined across copies —
+    /// blank titles become "Busy", all-day ends turn inclusive, and every
+    /// event classifies as a bar or a row in the environment's local
     /// dates.
     private func normalize(
         _ events: [GoogleSourceCalendarEvent],
@@ -1683,12 +1740,37 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
             timeZone: environment.timeZone
         )
 
-        return events.compactMap { sourceEvent in
-            let sourceCalendar = sourceEvent.sourceCalendar
-            let event = sourceEvent.event
-            guard !event.isCancelled, !event.isDeclinedByViewer else {
+        // Collapse duplicate copies of one canonical occurrence, keeping
+        // first-appearance order of identities so layout stays
+        // deterministic regardless of copy order.
+        var identityOrder: [String] = []
+        var winners: [String: GoogleSourceCalendarEvent] = [:]
+        for sourceEvent in events {
+            guard !sourceEvent.event.isCancelled,
+                  !sourceEvent.event.isDeclinedByViewer
+            else {
+                continue
+            }
+            let identity = CalendarEventCanonicalIdentity.id(of: sourceEvent)
+            if let current = winners[identity] {
+                if SourceCalendarReconciliation.precedes(
+                    sourceEvent.sourceCalendar,
+                    current.sourceCalendar
+                ) {
+                    winners[identity] = sourceEvent
+                }
+            } else {
+                winners[identity] = sourceEvent
+                identityOrder.append(identity)
+            }
+        }
+
+        return identityOrder.compactMap { identity in
+            guard let sourceEvent = winners[identity] else {
                 return nil
             }
+            let sourceCalendar = sourceEvent.sourceCalendar
+            let event = sourceEvent.event
 
             let title = event.summary?.trimmedToNil ?? "Busy"
             // The Event Color (Planning glossary): the explicit Google
@@ -1754,7 +1836,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                     return nil
                 }
                 return NormalizedEvent(
-                    id: event.id,
+                    id: identity,
                     sourceCalendar: sourceCalendar,
                     title: title,
                     colorHex: colorHex,
@@ -1778,7 +1860,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 let endDate = calendar.startOfDay(for: endsAt)
                 if endDate > startDate {
                     return NormalizedEvent(
-                        id: event.id,
+                        id: identity,
                         sourceCalendar: sourceCalendar,
                         title: title,
                         colorHex: colorHex,
@@ -1799,7 +1881,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                     )
                 }
                 return NormalizedEvent(
-                    id: event.id,
+                    id: identity,
                     sourceCalendar: sourceCalendar,
                     title: title,
                     colorHex: colorHex,

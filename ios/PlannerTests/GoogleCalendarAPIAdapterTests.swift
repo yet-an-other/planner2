@@ -265,6 +265,62 @@ struct GoogleCalendarAPIAdapterTests {
 
         #expect(outcome == .unavailable(.failed))
     }
+
+    @Test("Event decoding retains iCalUID and originalStartTime")
+    func eventDecodingRetainsOccurrenceIdentity() async {
+        let adapter = GoogleCalendarAPIAdapter(
+            accessTokenProvider: { "test-token" },
+            loadRequest: { request in
+                let url = request.url!
+                let json =
+                    url.path == "/calendar/v3/colors"
+                    ? #"{"event":{}}"#
+                    : """
+                    {"items":[{
+                      "id":"standup_20260721T090000Z",
+                      "iCalUID":"uid-standup@google.com",
+                      "summary":"Standup",
+                      "start":{"dateTime":"2026-07-22T11:00:00Z"},
+                      "end":{"dateTime":"2026-07-22T11:30:00Z"},
+                      "originalStartTime":{"dateTime":"2026-07-21T09:00:00Z"}
+                    }]}
+                    """
+                let response = HTTPURLResponse(
+                    url: url,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (Data(json.utf8), response)
+            }
+        )
+
+        let outcome = await adapter.fetchEvents(
+            from: [
+                GoogleSourceCalendar(
+                    id: "primary",
+                    summary: "Primary",
+                    backgroundColorHex: "#039BE5",
+                    isPrimary: true
+                ),
+            ],
+            start: Date(timeIntervalSince1970: 1_784_073_600),
+            end: Date(timeIntervalSince1970: 1_785_000_000)
+        )
+
+        guard case .success(let events, _) = outcome,
+              let event = events.first?.event
+        else {
+            Issue.record("Expected one decoded event")
+            return
+        }
+        #expect(event.id == "standup_20260721T090000Z")
+        #expect(event.iCalUID == "uid-standup@google.com")
+        #expect(
+            event.originalStartTime
+                == .timed(Date(timeIntervalSince1970: 1_784_624_400))
+        )
+    }
 }
 
 /// A transport that answers every request with one HTTP status code and an

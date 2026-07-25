@@ -62,6 +62,17 @@ private extension GoogleSourceCalendar {
     }
 }
 
+/// The canonical identity a test event without an `iCalUID` takes when
+/// fetched through the default test Source Calendar — the production
+/// fallback form, spelled out so assertions pin it.
+private func canonicalID(
+    _ eventID: String,
+    source: GoogleSourceCalendar = FakeGoogleCalendarEventsAdapter
+        .defaultCalendar
+) -> String {
+    "src:\(source.id):event:\(eventID)"
+}
+
 /// Test convenience: a success without event color metadata, so the many
 /// tests that never exercise explicit Google event colors stay terse.
 extension GoogleCalendarEventsOutcome {
@@ -227,6 +238,415 @@ struct CalendarEventsModelTests {
         )!
     }
 
+    // MARK: Cross-calendar occurrence identity
+
+    /// Two Source Calendars used throughout the cross-calendar identity
+    /// tests: the default Primary and a secondary Family calendar.
+    private static let familySource = GoogleSourceCalendar(
+        id: "family",
+        summary: "Family",
+        backgroundColorHex: "#7CB342",
+        isPrimary: false
+    )
+
+    private static func duplicateCopy(
+        source: GoogleSourceCalendar,
+        id: String,
+        iCalUID: String?,
+        summary: String,
+        originalStartTime: GoogleCalendarEventTime? = nil,
+        start: GoogleCalendarEventTime,
+        end: GoogleCalendarEventTime
+    ) -> GoogleSourceCalendarEvent {
+        GoogleSourceCalendarEvent(
+            sourceCalendar: source,
+            event: GoogleCalendarEvent(
+                id: id,
+                iCalUID: iCalUID,
+                originalStartTime: originalStartTime,
+                summary: summary,
+                start: start,
+                end: end,
+                isCancelled: false,
+                isDeclinedByViewer: false
+            )
+        )
+    }
+
+    @Test("Duplicate copies of one occurrence present once with the Primary copy intact")
+    func duplicateInvitationCollapsesToPrimaryCopy() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let family = Self.familySource
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                events: [
+                    // The Family copy arrives first; the Primary copy still
+                    // wins, and no field is combined across copies.
+                    Self.duplicateCopy(
+                        source: family,
+                        id: "invite-family",
+                        iCalUID: "uid-invite@google.com",
+                        summary: "Family copy",
+                        start: .timed(Self.gmt(2026, 7, 21, 9)),
+                        end: .timed(Self.gmt(2026, 7, 21, 10))
+                    ),
+                    Self.duplicateCopy(
+                        source: primary,
+                        id: "invite-primary",
+                        iCalUID: "uid-invite@google.com",
+                        summary: "Primary copy",
+                        start: .timed(Self.gmt(2026, 7, 21, 9)),
+                        end: .timed(Self.gmt(2026, 7, 21, 10))
+                    ),
+                ],
+                eventColorBackgrounds: [:]
+            )
+        }
+
+        model.setSelectedSourceCalendars([primary, family])
+
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        )
+        let rows = layout?.cells[1].rows ?? []
+        #expect(rows.count == 1)
+        #expect(rows.first?.title == "Primary copy")
+        #expect(rows.first?.colorHex == primary.backgroundColorHex)
+        #expect(rows.first?.sourceCalendar == primary)
+
+        // The Event Detail selection retains the winning source identity.
+        guard let id = rows.first?.id else {
+            Issue.record("Expected one canonical row")
+            return
+        }
+        model.selectEvent(withID: id)
+        #expect(model.selectedEvent?.sourceCalendar == primary)
+        #expect(model.selectedEvent?.detail.title == "Primary copy")
+        #expect(
+            model.selectedEvent?.detail.colorHex == primary.backgroundColorHex
+        )
+    }
+
+    @Test("Without a Primary copy the deterministic-first source wins")
+    func deterministicNonPrimaryWinner() async {
+        let family = Self.familySource
+        let work = GoogleSourceCalendar(
+            id: "work",
+            summary: "Work",
+            backgroundColorHex: "#7986CB",
+            isPrimary: false
+        )
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                events: [
+                    // Work arrives first; "Family" precedes "Work" in the
+                    // picker's deterministic order, so its copy wins.
+                    Self.duplicateCopy(
+                        source: work,
+                        id: "invite-work",
+                        iCalUID: "uid-invite@google.com",
+                        summary: "Work copy",
+                        start: .timed(Self.gmt(2026, 7, 21, 9)),
+                        end: .timed(Self.gmt(2026, 7, 21, 10))
+                    ),
+                    Self.duplicateCopy(
+                        source: family,
+                        id: "invite-family",
+                        iCalUID: "uid-invite@google.com",
+                        summary: "Family copy",
+                        start: .timed(Self.gmt(2026, 7, 21, 9)),
+                        end: .timed(Self.gmt(2026, 7, 21, 10))
+                    ),
+                ],
+                eventColorBackgrounds: [:]
+            )
+        }
+
+        model.setSelectedSourceCalendars([family, work])
+
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        )
+        let rows = layout?.cells[1].rows ?? []
+        #expect(rows.count == 1)
+        #expect(rows.first?.title == "Family copy")
+        #expect(rows.first?.sourceCalendar == family)
+    }
+
+    @Test("Separate instances of a recurring event never collapse")
+    func recurringInstancesStayDistinct() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let family = Self.familySource
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                events: [
+                    // Two occurrences of one recurring event: same iCalUID,
+                    // distinct originalStartTimes. The Tuesday occurrence
+                    // also arrives through Family and collapses there.
+                    Self.duplicateCopy(
+                        source: family,
+                        id: "standup-tue-family",
+                        iCalUID: "uid-standup@google.com",
+                        summary: "Standup",
+                        originalStartTime: .timed(Self.gmt(2026, 7, 21, 9)),
+                        start: .timed(Self.gmt(2026, 7, 21, 9)),
+                        end: .timed(Self.gmt(2026, 7, 21, 9, 30))
+                    ),
+                    Self.duplicateCopy(
+                        source: primary,
+                        id: "standup-tue",
+                        iCalUID: "uid-standup@google.com",
+                        summary: "Standup",
+                        originalStartTime: .timed(Self.gmt(2026, 7, 21, 9)),
+                        start: .timed(Self.gmt(2026, 7, 21, 9)),
+                        end: .timed(Self.gmt(2026, 7, 21, 9, 30))
+                    ),
+                    Self.duplicateCopy(
+                        source: primary,
+                        id: "standup-wed",
+                        iCalUID: "uid-standup@google.com",
+                        summary: "Standup",
+                        originalStartTime: .timed(Self.gmt(2026, 7, 22, 9)),
+                        start: .timed(Self.gmt(2026, 7, 22, 9)),
+                        end: .timed(Self.gmt(2026, 7, 22, 9, 30))
+                    ),
+                ],
+                eventColorBackgrounds: [:]
+            )
+        }
+
+        model.setSelectedSourceCalendars([primary, family])
+
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        )
+        #expect(layout?.cells[1].rows.count == 1)
+        #expect(layout?.cells[2].rows.count == 1)
+        #expect(
+            layout?.cells[1].rows.first?.sourceCalendar == primary
+        )
+        #expect(
+            layout?.cells[1].rows.first?.id
+                != layout?.cells[2].rows.first?.id
+        )
+    }
+
+    @Test("A moved instance never collapses with the occurrence at its current start")
+    func movedInstanceKeepsOccurrenceIdentity() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                events: [
+                    // The Tuesday occurrence moved to Wednesday 11:00: its
+                    // originalStartTime keeps its occurrence identity, so it
+                    // never collapses with the regular Wednesday occurrence.
+                    Self.duplicateCopy(
+                        source: primary,
+                        id: "standup-moved",
+                        iCalUID: "uid-standup@google.com",
+                        summary: "Moved standup",
+                        originalStartTime: .timed(Self.gmt(2026, 7, 21, 9)),
+                        start: .timed(Self.gmt(2026, 7, 22, 11)),
+                        end: .timed(Self.gmt(2026, 7, 22, 11, 30))
+                    ),
+                    Self.duplicateCopy(
+                        source: primary,
+                        id: "standup-wed",
+                        iCalUID: "uid-standup@google.com",
+                        summary: "Standup",
+                        originalStartTime: .timed(Self.gmt(2026, 7, 22, 11)),
+                        start: .timed(Self.gmt(2026, 7, 22, 11)),
+                        end: .timed(Self.gmt(2026, 7, 22, 11, 30))
+                    ),
+                ],
+                eventColorBackgrounds: [:]
+            )
+        }
+
+        model.setSelectedSourceCalendars([primary])
+
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        )
+        let rows = layout?.cells[2].rows ?? []
+        #expect(rows.count == 2)
+        #expect(rows.map(\.title) == ["Moved standup", "Standup"])
+    }
+
+    @Test("A missing iCalUID never guesses duplicates across sources")
+    func missingICalUIDKeepsEverySourceCopy() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let family = Self.familySource
+        let (model, adapter) = makeModel()
+        adapter.fetchHandler = { _, _ in
+            .success(
+                events: [
+                    // The same Google event id without an iCalUID: identity
+                    // falls back to Source Calendar ID plus event ID, and
+                    // Planner does not guess that the copies are duplicates.
+                    Self.duplicateCopy(
+                        source: primary,
+                        id: "shared",
+                        iCalUID: nil,
+                        summary: "Shared",
+                        start: .timed(Self.gmt(2026, 7, 21, 9)),
+                        end: .timed(Self.gmt(2026, 7, 21, 10))
+                    ),
+                    Self.duplicateCopy(
+                        source: family,
+                        id: "shared",
+                        iCalUID: nil,
+                        summary: "Shared",
+                        start: .timed(Self.gmt(2026, 7, 21, 9)),
+                        end: .timed(Self.gmt(2026, 7, 21, 10))
+                    ),
+                ],
+                eventColorBackgrounds: [:]
+            )
+        }
+
+        model.setSelectedSourceCalendars([primary, family])
+
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        )
+        let rows = layout?.cells[1].rows ?? []
+        #expect(rows.count == 2)
+        #expect(
+            Set(rows.map(\.id)) == [
+                canonicalID("shared"),
+                canonicalID("shared", source: family),
+            ]
+        )
+    }
+
+    @Test("Refresh keeps Event Detail current when the winning copy changes")
+    func refreshTracksWinningCopyChange() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let family = Self.familySource
+        let (model, adapter) = makeModel()
+        var primaryCopyPresent = true
+        adapter.fetchHandler = { _, _ in
+            var events = [
+                Self.duplicateCopy(
+                    source: family,
+                    id: "invite-family",
+                    iCalUID: "uid-invite@google.com",
+                    summary: "Family copy",
+                    start: .timed(Self.gmt(2026, 7, 21, 9)),
+                    end: .timed(Self.gmt(2026, 7, 21, 10))
+                ),
+            ]
+            if primaryCopyPresent {
+                events.append(
+                    Self.duplicateCopy(
+                        source: primary,
+                        id: "invite-primary",
+                        iCalUID: "uid-invite@google.com",
+                        summary: "Primary copy",
+                        start: .timed(Self.gmt(2026, 7, 21, 9)),
+                        end: .timed(Self.gmt(2026, 7, 21, 10))
+                    )
+                )
+            }
+            return .success(events: events, eventColorBackgrounds: [:])
+        }
+
+        model.setSelectedSourceCalendars([primary, family])
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        )
+        guard let canonicalRowID = layout?.cells[1].rows.first?.id else {
+            Issue.record("Expected one canonical row")
+            return
+        }
+        model.selectEvent(withID: canonicalRowID)
+        #expect(model.selectedEvent?.sourceCalendar == primary)
+        #expect(model.selectedEvent?.detail.title == "Primary copy")
+
+        // The Primary copy disappears; the Family copy becomes the winner
+        // under the same canonical identity, so the open popover updates
+        // instead of dismissing.
+        primaryCopyPresent = false
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(
+            await eventually {
+                model.selectedEvent?.detail.title == "Family copy"
+            }
+        )
+        #expect(model.selectedEvent?.id == canonicalRowID)
+        #expect(model.selectedEvent?.sourceCalendar == family)
+    }
+
+    @Test("Refresh dismisses Event Detail when the occurrence disappears")
+    func refreshDismissesRemovedOccurrence() async {
+        let primary = FakeGoogleCalendarEventsAdapter.defaultCalendar
+        let family = Self.familySource
+        let (model, adapter) = makeModel()
+        var occurrencePresent = true
+        adapter.fetchHandler = { _, _ in
+            .success(
+                events: occurrencePresent
+                    ? [
+                        Self.duplicateCopy(
+                            source: primary,
+                            id: "invite-primary",
+                            iCalUID: "uid-invite@google.com",
+                            summary: "Primary copy",
+                            start: .timed(Self.gmt(2026, 7, 21, 9)),
+                            end: .timed(Self.gmt(2026, 7, 21, 10))
+                        ),
+                        Self.duplicateCopy(
+                            source: family,
+                            id: "invite-family",
+                            iCalUID: "uid-invite@google.com",
+                            summary: "Family copy",
+                            start: .timed(Self.gmt(2026, 7, 21, 9)),
+                            end: .timed(Self.gmt(2026, 7, 21, 10))
+                        ),
+                    ]
+                    : [],
+                eventColorBackgrounds: [:]
+            )
+        }
+
+        model.setSelectedSourceCalendars([primary, family])
+        let layout = await layoutEventually(
+            model,
+            weekStart: Self.gmt(2026, 7, 20)
+        )
+        guard let canonicalRowID = layout?.cells[1].rows.first?.id else {
+            Issue.record("Expected one canonical row")
+            return
+        }
+        model.selectEvent(withID: canonicalRowID)
+        #expect(model.selectedEvent != nil)
+
+        occurrencePresent = false
+        model.showVisibleRange(
+            from: Self.gmt(2026, 7, 13),
+            through: Self.gmt(2026, 7, 27)
+        )
+        model.refreshOnForeground()
+
+        #expect(await eventually { model.selectedEvent == nil })
+    }
+
     // MARK: Connection-driven fetching
 
     @Test("Opaque Source Calendar IDs occupy one Google API path segment")
@@ -351,7 +771,7 @@ struct CalendarEventsModelTests {
         #expect(model.status.message == CalendarEventsCopy.updatingSelection)
         #expect(
             model.layout(forWeekStarting: weekStart)?
-                .cells[0].rows.map(\.id) == ["old"]
+                .cells[0].rows.map(\.id) == [canonicalID("old")]
         )
 
         releaseReplacement?.resume(
@@ -376,7 +796,7 @@ struct CalendarEventsModelTests {
         #expect(
             await eventually {
                 model.layout(forWeekStarting: weekStart)?
-                    .cells[0].rows.map(\.id) == ["new"]
+                    .cells[0].rows.map(\.id) == [canonicalID("new", source: family)]
             }
         )
         #expect(model.status.message == nil)
@@ -433,7 +853,7 @@ struct CalendarEventsModelTests {
         )
         #expect(
             model.layout(forWeekStarting: weekStart)?
-                .cells[0].rows.map(\.id) == ["old"]
+                .cells[0].rows.map(\.id) == [canonicalID("old")]
         )
     }
 
@@ -616,7 +1036,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         )
-        #expect(layout?.cells[0].rows.map(\.id) == ["latest"])
+        #expect(layout?.cells[0].rows.map(\.id) == [canonicalID("latest", source: work)])
     }
 
     @Test("Source Calendar identity and presentation remain on Calendar Events")
@@ -655,7 +1075,7 @@ struct CalendarEventsModelTests {
         #expect(row?.sourceCalendar == sourceCalendar)
         #expect(row?.colorHex == sourceCalendar.backgroundColorHex)
 
-        model.selectEvent(withID: "planning")
+        model.selectEvent(withID: canonicalID("planning", source: sourceCalendar))
         #expect(model.selectedEvent?.sourceCalendar == sourceCalendar)
     }
 
@@ -706,7 +1126,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 13)
         )
-        #expect(layout?.cells.flatMap(\.rows).map(\.id) == ["standup"])
+        #expect(layout?.cells.flatMap(\.rows).map(\.id) == [canonicalID("standup")])
         #expect(model.status.message == nil)
     }
 
@@ -864,7 +1284,7 @@ struct CalendarEventsModelTests {
         #expect(
             layout?.cells[0].rows == [
                 CalendarEventRowItem(
-                    id: "standup",
+                    id: canonicalID("standup"),
                     sourceCalendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
                     title: "Standup",
                     startTimeText: timeFormatter.string(
@@ -904,7 +1324,7 @@ struct CalendarEventsModelTests {
         #expect(
             layout?.bars == [
                 CalendarEventBarSegment(
-                    id: "holiday",
+                    id: canonicalID("holiday"),
                     sourceCalendar: FakeGoogleCalendarEventsAdapter.defaultCalendar,
                     title: "Holiday",
                     colorHex: "#039BE5",
@@ -1113,7 +1533,7 @@ struct CalendarEventsModelTests {
         model.setConnected(true)
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        #expect(layout?.bars.map(\.id) == ["early", "allday", "late"])
+        #expect(layout?.bars.map(\.id) == ["early", "allday", "late"].map { canonicalID($0) })
         #expect(layout?.bars.map(\.lane) == [0, 1, 2])
     }
 
@@ -1147,7 +1567,7 @@ struct CalendarEventsModelTests {
         model.setConnected(true)
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        #expect(layout?.bars.map(\.id) == ["long", "short"])
+        #expect(layout?.bars.map(\.id) == ["long", "short"].map { canonicalID($0) })
         #expect(layout?.bars.map(\.lane) == [0, 1])
     }
 
@@ -1217,7 +1637,7 @@ struct CalendarEventsModelTests {
         model.setConnected(true)
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        #expect(layout?.cells[2].rows.map(\.id) == ["morning", "afternoon"])
+        #expect(layout?.cells[2].rows.map(\.id) == ["morning", "afternoon"].map { canonicalID($0) })
     }
 
     // MARK: Filtering, titles, and color tone
@@ -1260,7 +1680,7 @@ struct CalendarEventsModelTests {
         model.setConnected(true)
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        #expect(layout?.cells[2].rows.map(\.id) == ["kept"])
+        #expect(layout?.cells[2].rows.map(\.id) == [canonicalID("kept")])
     }
 
     @Test("Blank and missing titles become Busy, padded titles trim")
@@ -1636,7 +2056,7 @@ struct CalendarEventsModelTests {
         let layout = await layoutEventually(model, weekStart: weekStart)
         // Locally the event is Wednesday 13:30–14:30: a row, never a bar.
         #expect(layout?.bars == [])
-        #expect(layout?.cells[2].rows.map(\.id) == ["island-time"])
+        #expect(layout?.cells[2].rows.map(\.id) == [canonicalID("island-time")])
     }
 
     // MARK: Calendar Event Refresh
@@ -1792,8 +2212,8 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
-        model.selectEvent(withID: "selected")
-        #expect(model.selectedEvent?.id == "selected")
+        model.selectEvent(withID: canonicalID("selected"))
+        #expect(model.selectedEvent?.id == canonicalID("selected"))
         #expect(model.selectedEvent?.detail.title == "Before")
 
         model.showVisibleRange(
@@ -1808,7 +2228,7 @@ struct CalendarEventsModelTests {
             }
         )
         let detail = model.selectedEvent?.detail
-        #expect(model.selectedEvent?.id == "selected")
+        #expect(model.selectedEvent?.id == canonicalID("selected"))
         #expect(detail?.colorHex == "#D50000")
         #expect(
             detail?.timingText
@@ -1828,7 +2248,7 @@ struct CalendarEventsModelTests {
         #expect(detail?.googleLink == "https://calendar.google.com/after")
         #expect(
             model.layout(forWeekStarting: Self.gmt(2026, 7, 20))?
-                .cells[1].rows.map(\.id) == ["selected"]
+                .cells[1].rows.map(\.id) == [canonicalID("selected")]
         )
     }
 
@@ -1860,7 +2280,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
-        model.selectEvent(withID: "selected")
+        model.selectEvent(withID: canonicalID("selected"))
         #expect(model.selectedEvent != nil)
         model.showVisibleRange(
             from: Self.gmt(2026, 7, 13),
@@ -1897,7 +2317,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
-        model.selectEvent(withID: "selected")
+        model.selectEvent(withID: canonicalID("selected"))
         model.showVisibleRange(
             from: Self.gmt(2026, 7, 13),
             through: Self.gmt(2026, 7, 27)
@@ -1937,7 +2357,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
-        model.selectEvent(withID: "selected")
+        model.selectEvent(withID: canonicalID("selected"))
         let selectedBeforeRefresh = model.selectedEvent
         model.showVisibleRange(
             from: Self.gmt(2026, 7, 13),
@@ -2051,7 +2471,7 @@ struct CalendarEventsModelTests {
         #expect(
             await eventually {
                 model.layout(forWeekStarting: julyWeek)?
-                    .cells[1].rows.map(\.id) == ["moved"]
+                    .cells[1].rows.map(\.id) == [canonicalID("moved")]
             }
         )
         #expect(model.layout(forWeekStarting: julyWeek)?
@@ -2428,12 +2848,12 @@ struct CalendarEventsModelTests {
         #expect(
             await eventually {
                 model.layout(forWeekStarting: weekStart)?
-                    .cells[0].rows.map(\.id) == ["new"]
+                    .cells[0].rows.map(\.id) == [canonicalID("new")]
             }
         )
         #expect(
             model.layout(forWeekStarting: weekStart)?
-                .cells[0].rows.contains(where: { $0.id == "stale" })
+                .cells[0].rows.contains(where: { $0.id == canonicalID("stale") })
                 == false
         )
     }
@@ -3307,7 +3727,7 @@ struct CalendarEventsModelTests {
             await eventually {
                 model.layout(forWeekStarting: Self.gmt(2026, 10, 12))?
                     .cells.flatMap(\.rows).map(\.id)
-                    == ["initial-event", "slab-event"]
+                    == ["initial-event", "slab-event"].map { canonicalID($0) }
             }
         )
     }
@@ -3341,7 +3761,7 @@ struct CalendarEventsModelTests {
         _ = await layoutEventually(model, weekStart: Self.gmt(2026, 10, 12))
         #expect(
             model.layout(forWeekStarting: Self.gmt(2026, 10, 12))?
-                .bars.map(\.id) == ["spanning-event"]
+                .bars.map(\.id) == [canonicalID("spanning-event")]
         )
 
         model.showVisibleRange(
@@ -3357,11 +3777,11 @@ struct CalendarEventsModelTests {
         // break SwiftUI's ForEach identity within the Week Row.
         #expect(
             model.layout(forWeekStarting: Self.gmt(2026, 10, 12))?
-                .bars.map(\.id) == ["spanning-event"]
+                .bars.map(\.id) == [canonicalID("spanning-event")]
         )
         #expect(
             model.layout(forWeekStarting: Self.gmt(2026, 10, 19))?
-                .bars.map(\.id) == ["spanning-event"]
+                .bars.map(\.id) == [canonicalID("spanning-event")]
         )
     }
 
@@ -3601,7 +4021,7 @@ struct CalendarEventsModelTests {
         model.setConnected(true)
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        #expect(layout?.cells[2].rows.map(\.id) == ["first", "second", "third", "fourth"])
+        #expect(layout?.cells[2].rows.map(\.id) == ["first", "second", "third", "fourth"].map { canonicalID($0) })
         #expect(layout?.cells[2].overflowCount == nil)
     }
 
@@ -3627,7 +4047,7 @@ struct CalendarEventsModelTests {
         model.setConnected(true)
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        #expect(layout?.cells[2].rows.map(\.id) == ["row-0", "row-1", "row-2"])
+        #expect(layout?.cells[2].rows.map(\.id) == ["row-0", "row-1", "row-2"].map { canonicalID($0) })
         #expect(layout?.cells[2].overflowCount == 2)
     }
 
@@ -3688,7 +4108,7 @@ struct CalendarEventsModelTests {
         // Two lanes cross Wednesday, then rows: the cell shows one row and
         // counts the remaining two.
         #expect(layout?.cells[2].maxBarLane == 1)
-        #expect(layout?.cells[2].rows.map(\.id) == ["row-a"])
+        #expect(layout?.cells[2].rows.map(\.id) == [canonicalID("row-a")])
         #expect(layout?.cells[2].overflowCount == 2)
     }
 
@@ -3808,7 +4228,7 @@ struct CalendarEventsModelTests {
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
         #expect(layout?.cells[2].maxBarLane == 2)
-        #expect(layout?.cells[2].rows.map(\.id) == ["row-a"])
+        #expect(layout?.cells[2].rows.map(\.id) == [canonicalID("row-a")])
         #expect(layout?.cells[2].overflowCount == nil)
     }
 
@@ -3844,7 +4264,7 @@ struct CalendarEventsModelTests {
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
         #expect(layout?.cells[2].overflowCount == 2)
-        #expect(layout?.cells[3].rows.map(\.id) == ["quiet"])
+        #expect(layout?.cells[3].rows.map(\.id) == [canonicalID("quiet")])
         #expect(layout?.cells[3].overflowCount == nil)
     }
 
@@ -4165,9 +4585,9 @@ struct CalendarEventsModelTests {
         model.setConnected(true)
 
         let layout = await layoutEventually(model, weekStart: Self.gmt(2026, 7, 20))
-        #expect(layout?.bars.first?.id == "holiday")
+        #expect(layout?.bars.first?.id == canonicalID("holiday"))
         #expect(
-            selectedDetail(model, id: "holiday")
+            selectedDetail(model, id: canonicalID("holiday"))
                 == CalendarEventDetail(
                     title: "Holiday",
                     colorHex: "#039BE5",
@@ -4204,7 +4624,7 @@ struct CalendarEventsModelTests {
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
         #expect(
-            selectedDetail(model, id: "trip")?.timingText
+            selectedDetail(model, id: canonicalID("trip"))?.timingText
                 == "All day · \(Self.dayMonthYearText(Self.gmt(2026, 7, 22)))"
                     + " – \(Self.dayMonthYearText(Self.gmt(2026, 7, 24)))"
         )
@@ -4236,7 +4656,7 @@ struct CalendarEventsModelTests {
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
         #expect(
-            selectedDetail(model, id: "hackathon")?.timingText
+            selectedDetail(model, id: canonicalID("hackathon"))?.timingText
                 == "\(Self.dayMonthYearText(Self.gmt(2026, 7, 21))), "
                     + "\(Self.timeText(Self.gmt(2026, 7, 21, 22, 0)))"
                     + " – \(Self.dayMonthYearText(Self.gmt(2026, 7, 23))), "
@@ -4268,9 +4688,9 @@ struct CalendarEventsModelTests {
         #expect(await layoutEventually(model, weekStart: Self.gmt(2026, 7, 27)) != nil)
         let firstWeek = model.layout(forWeekStarting: Self.gmt(2026, 7, 20))
         let secondWeek = model.layout(forWeekStarting: Self.gmt(2026, 7, 27))
-        #expect(firstWeek?.bars.first?.id == "conference")
-        #expect(secondWeek?.bars.first?.id == "conference")
-        #expect(selectedDetail(model, id: "conference")?.title == "Conference")
+        #expect(firstWeek?.bars.first?.id == canonicalID("conference"))
+        #expect(secondWeek?.bars.first?.id == canonicalID("conference"))
+        #expect(selectedDetail(model, id: canonicalID("conference"))?.title == "Conference")
     }
 
     @Test("The timing line follows the environment's timezone")
@@ -4329,7 +4749,7 @@ struct CalendarEventsModelTests {
         timeFormatter.locale = Locale(identifier: "en_US_POSIX")
         timeFormatter.timeZone = kiritimati
         timeFormatter.setLocalizedDateFormatFromTemplate("jm")
-        let timingText = selectedDetail(model, id: "island-time")?.timingText
+        let timingText = selectedDetail(model, id: canonicalID("island-time"))?.timingText
         #expect(
             timingText
                 == fullDateFormatter.string(from: localDate)
@@ -4362,7 +4782,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
-        model.selectEvent(withID: "event")
+        model.selectEvent(withID: canonicalID("event"))
         #expect(model.selectedEvent != nil)
 
         model.setConnected(false)
@@ -4400,7 +4820,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
-        let detail = selectedDetail(model, id: "review")
+        let detail = selectedDetail(model, id: canonicalID("review"))
         #expect(detail?.location == "Studio 4, King Street")
         #expect(
             detail?.googleLink
@@ -4452,7 +4872,7 @@ struct CalendarEventsModelTests {
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
         let details = ["sparse", "blank-location", "blank-link"].compactMap {
-            selectedDetail(model, id: $0)
+            selectedDetail(model, id: canonicalID($0))
         }
         // Sparse events stay clean: no Where section, no footer.
         #expect(details.map(\.location) == [nil, nil, nil])
@@ -4487,7 +4907,7 @@ struct CalendarEventsModelTests {
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
         #expect(
-            selectedDetail(model, id: "picnic")?.notes
+            selectedDetail(model, id: canonicalID("picnic"))?.notes
                 == "Bring snacks & water.\nSee https://example.com/plan"
         )
     }
@@ -4526,7 +4946,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
-        #expect(selectedDetail(model, id: "flight-os-368")?.notes == notes)
+        #expect(selectedDetail(model, id: canonicalID("flight-os-368"))?.notes == notes)
     }
 
     @Test("Compact Event Detail Popovers fill the sheet width")
@@ -4574,7 +4994,7 @@ struct CalendarEventsModelTests {
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
         #expect(
-            selectedDetail(model, id: "flight")?.notes
+            selectedDetail(model, id: canonicalID("flight"))?.notes
                 == "Flight to Copenhagen, CPH arrival 11:05."
         )
     }
@@ -4680,7 +5100,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
-        let detail = selectedDetail(model, id: "workshop")
+        let detail = selectedDetail(model, id: canonicalID("workshop"))
         #expect(
             detail?.attendees == [
                 CalendarEventAttendee(label: "Ada Lovelace", status: .accepted),
@@ -4729,7 +5149,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
-        let detail = selectedDetail(model, id: "all-hands")
+        let detail = selectedDetail(model, id: canonicalID("all-hands"))
         #expect(detail?.attendees.map(\.label) == (1...5).map { "Person \($0)" })
         #expect(detail?.hiddenAttendeeCount == 2)
     }
@@ -4759,7 +5179,7 @@ struct CalendarEventsModelTests {
             model,
             weekStart: Self.gmt(2026, 7, 20)
         ) != nil)
-        let detail = selectedDetail(model, id: "focus")
+        let detail = selectedDetail(model, id: canonicalID("focus"))
         #expect(detail?.attendees == [])
         #expect(detail?.hiddenAttendeeCount == 0)
     }

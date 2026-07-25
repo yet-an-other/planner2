@@ -395,6 +395,7 @@ final class GoogleCalendarAPIAdapter:
         let colorId: String?
         let start: Point?
         let end: Point?
+        let originalStartTime: Point?
         let attendees: [Attendee]?
         let htmlLink: String?
         let location: String?
@@ -415,6 +416,8 @@ final class GoogleCalendarAPIAdapter:
         let summary = dto.summary
         return GoogleCalendarEvent(
             id: dto.id ?? dto.iCalUID ?? "\(start)-\(summary ?? "")",
+            iCalUID: dto.iCalUID,
+            originalStartTime: mapPoint(dto.originalStartTime),
             summary: summary,
             colorId: dto.colorId,
             start: start,

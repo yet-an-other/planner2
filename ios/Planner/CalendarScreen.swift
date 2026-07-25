@@ -549,7 +549,10 @@ private struct CalendarEventDetailPresentation: View {
 
     var body: some View {
         if let selectedEvent = events.selectedEvent {
-            IOSEventDetailPopover(detail: selectedEvent.detail) {
+            IOSEventDetailPopover(
+                detail: selectedEvent.detail,
+                sourceCalendar: selectedEvent.sourceCalendar
+            ) {
                 events.dismissEventDetail()
             }
         }

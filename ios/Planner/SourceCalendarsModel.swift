@@ -128,7 +128,10 @@ enum SourceCalendarReconciliation {
         return survivors.isEmpty ? [available[0]] : survivors
     }
 
-    private static func precedes(
+    /// The one locale-independent Source Calendar order: Primary first,
+    /// then Unicode-case-folded summary, exact summary, and stable ID.
+    /// Cross-calendar duplicate winners use this same order.
+    static func precedes(
         _ lhs: GoogleSourceCalendar,
         _ rhs: GoogleSourceCalendar
     ) -> Bool {

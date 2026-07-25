@@ -13,8 +13,23 @@ struct IOSEventDetailPopover: View {
     /// The selected event's model-published canonical detail projection.
     let detail: CalendarEventDetail
 
+    /// The winning Source Calendar for the selected canonical occurrence,
+    /// presented as a subdued source row so source identity never relies
+    /// on color alone. `nil` omits the row (deterministic previews).
+    let sourceCalendar: GoogleSourceCalendar?
+
     /// Closes the popover: the small close affordance's action.
     let onClose: () -> Void
+
+    init(
+        detail: CalendarEventDetail,
+        sourceCalendar: GoogleSourceCalendar? = nil,
+        onClose: @escaping () -> Void
+    ) {
+        self.detail = detail
+        self.sourceCalendar = sourceCalendar
+        self.onClose = onClose
+    }
 
     var body: some View {
         ScrollView {
@@ -43,6 +58,36 @@ struct IOSEventDetailPopover: View {
                                 .padding(6)
                         }
                         .accessibilityLabel(Self.closeAccessibilityLabel)
+                    }
+
+                    if let sourceCalendar {
+                        // The subdued source row: the winning Source
+                        // Calendar's color and summary as text, so source
+                        // identity is available without relying on color
+                        // alone.
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(
+                                    Color(
+                                        eventHex: sourceCalendar
+                                            .backgroundColorHex
+                                    )
+                                )
+                                .frame(width: 10, height: 10)
+                                .overlay {
+                                    Circle()
+                                        .strokeBorder(
+                                            PlannerPalette.separator,
+                                            lineWidth: 0.5
+                                        )
+                                }
+                            Text(Self.sourceSummary(sourceCalendar))
+                                .font(.footnote)
+                                .foregroundStyle(PlannerPalette.monthText)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        .accessibilityElement(children: .combine)
                     }
 
                     IOSEventDetailPopoverSection(title: Self.whenSectionTitle) {
@@ -152,6 +197,18 @@ struct IOSEventDetailPopover: View {
     private static let notesSectionTitle = "Notes"
     private static let attendeesSectionTitle = "Attendees"
     private static let openInGoogleCalendarTitle = "Open in Google Calendar →"
+    private static let untitledCalendarSummary = "Untitled calendar"
+
+    /// The source row's summary: a blank Google summary never presents as
+    /// empty text or a calendar ID.
+    private static func sourceSummary(
+        _ sourceCalendar: GoogleSourceCalendar
+    ) -> String {
+        let trimmed = sourceCalendar.summary.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        return trimmed.isEmpty ? untitledCalendarSummary : trimmed
+    }
 
     /// The Notes section's height cap, the web popover's 10-rem cap.
     private static let notesMaxHeight: CGFloat = 160
