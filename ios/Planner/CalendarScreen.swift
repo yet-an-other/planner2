@@ -1230,7 +1230,7 @@ struct DateCellView: View {
                 )
             ),
             status: GoogleAccountConnection.Status(
-                message: GoogleAccountConnectionCopy.connected,
+                message: nil,
                 tone: .info
             )
         )
@@ -1254,7 +1254,7 @@ struct DateCellView: View {
                 )
             ),
             status: GoogleAccountConnection.Status(
-                message: GoogleAccountConnectionCopy.connected,
+                message: nil,
                 tone: .info
             )
         )
@@ -1419,7 +1419,7 @@ private func previewConnectedConnection() -> GoogleAccountConnection {
             )
         ),
         status: GoogleAccountConnection.Status(
-            message: GoogleAccountConnectionCopy.connected,
+            message: nil,
             tone: .info
         )
     )

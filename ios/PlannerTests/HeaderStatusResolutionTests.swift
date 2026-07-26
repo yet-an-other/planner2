@@ -39,11 +39,11 @@ struct HeaderStatusResolutionTests {
         #expect(content.tone == .warning)
     }
 
-    @Test("Source Calendar loading leads over event and resting connection status")
+    @Test("Source Calendar loading leads over event and connection status")
     func sourceCalendarsLeadCalendarPipeline() {
         let content = resolveHeaderStatus(
             connection: Self.connection(
-                GoogleAccountConnectionCopy.connected,
+                GoogleAccountConnectionCopy.restoring,
                 .info
             ),
             sourceCalendars: Self.sourceCalendars(
@@ -57,11 +57,11 @@ struct HeaderStatusResolutionTests {
         #expect(content.tone == .info)
     }
 
-    @Test("Events progress overrides the connection's resting information")
-    func eventsProgressOverridesRestingInfo() {
+    @Test("Events progress overrides the connection's transient information")
+    func eventsProgressOverridesTransientInfo() {
         let content = resolveHeaderStatus(
             connection: Self.connection(
-                GoogleAccountConnectionCopy.connected,
+                GoogleAccountConnectionCopy.restoring,
                 .info
             ),
             events: Self.events(CalendarEventsCopy.loading, .info)
@@ -71,13 +71,12 @@ struct HeaderStatusResolutionTests {
         #expect(content.tone == .info)
     }
 
-    @Test("An events fetch issue shows while the connection stays resting")
-    func eventsIssueShowsOverRestingConnection() {
+    @Test("An events fetch issue shows while the connection rests silent")
+    func eventsIssueShowsOverSilentConnection() {
+        // The resting connection publishes nothing, so an events fetch
+        // issue is the only candidate.
         let content = resolveHeaderStatus(
-            connection: Self.connection(
-                GoogleAccountConnectionCopy.connected,
-                .info
-            ),
+            connection: Self.connection(nil, .info),
             events: Self.events(CalendarEventsCopy.failedPartial, .warning)
         )
 

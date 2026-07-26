@@ -211,10 +211,12 @@ struct GoogleAccountConnectionTests {
 
         #expect(await controlEventuallyEquals(.connected(Self.profile), in: connection))
         #expect(connection.connectedAccountID == Self.stableAccountID)
+        // The restored connection settles silently: the connection dot,
+        // not the status line, carries the resting connected state.
         #expect(
             connection.status
                 == GoogleAccountConnection.Status(
-                    message: GoogleAccountConnectionCopy.connected,
+                    message: nil,
                     tone: .info
                 )
         )
@@ -331,7 +333,7 @@ struct GoogleAccountConnectionTests {
         #expect(
             connection.status
                 == GoogleAccountConnection.Status(
-                    message: GoogleAccountConnectionCopy.connected,
+                    message: nil,
                     tone: .info
                 )
         )
@@ -455,7 +457,7 @@ struct GoogleAccountConnectionTests {
         #expect(
             connection.status
                 == GoogleAccountConnection.Status(
-                    message: GoogleAccountConnectionCopy.connected,
+                    message: nil,
                     tone: .info
                 )
         )
@@ -484,13 +486,14 @@ struct GoogleAccountConnectionTests {
         )
         #expect(connection.control == .connected(Self.profile))
 
-        // The next return retries again and recovers.
+        // The next return retries again and recovers; the settled
+        // connection clears the warning and rests silent.
         adapter.restoreHandler = { .restored(Self.authorizedAccount()) }
         monitor.simulateConnectivityReturn()
         #expect(
             await statusEventuallyEquals(
                 GoogleAccountConnection.Status(
-                    message: GoogleAccountConnectionCopy.connected,
+                    message: nil,
                     tone: .info
                 ),
                 in: connection
@@ -579,7 +582,7 @@ struct GoogleAccountConnectionTests {
         #expect(
             connection.status
                 == GoogleAccountConnection.Status(
-                    message: GoogleAccountConnectionCopy.connected,
+                    message: nil,
                     tone: .info
                 )
         )
@@ -607,10 +610,13 @@ struct GoogleAccountConnectionTests {
 
         #expect(adapter.signOutCallCount == 1)
         #expect(connection.control == .disconnected(connectEnabled: true))
+        // Disconnect publishes no confirmation: the control's
+        // transformation and the gray connection dot are the feedback, and
+        // the blank status supersedes the offline warning.
         #expect(
             connection.status
                 == GoogleAccountConnection.Status(
-                    message: GoogleAccountConnectionCopy.disconnectedOnThisDevice,
+                    message: nil,
                     tone: .info
                 )
         )
@@ -882,6 +888,9 @@ struct GoogleAccountConnectionTests {
         #expect(connection.explanation == nil)
         #expect(store.acknowledgedVersion == 3)
         #expect(consumer.accountIDs.last == Self.stableAccountID)
+        // The settled connection rests silent: no "connected" message
+        // follows the acknowledgement.
+        #expect(connection.status.message == nil)
     }
 
     @Test("Cancelling a restored upgrade preserves connection and reoffers on foreground")
@@ -1043,7 +1052,7 @@ struct GoogleAccountConnectionTests {
         #expect(
             connection.status
                 == GoogleAccountConnection.Status(
-                    message: GoogleAccountConnectionCopy.connected,
+                    message: nil,
                     tone: .info
                 )
         )
@@ -1242,10 +1251,12 @@ struct GoogleAccountConnectionTests {
             selections.selectedSourceCalendarIDs(for: Self.stableAccountID)
                 == ["primary", "family"]
         )
+        // No "disconnected on this device" confirmation: the control's
+        // transformation and the gray connection dot are the feedback.
         #expect(
             connection.status
                 == GoogleAccountConnection.Status(
-                    message: GoogleAccountConnectionCopy.disconnectedOnThisDevice,
+                    message: nil,
                     tone: .info
                 )
         )

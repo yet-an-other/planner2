@@ -95,11 +95,13 @@ extension IOSHeaderStatus.Tone {
     }
 }
 
-/// Resolves the single iOS Header Status content from its two publishers.
+/// Resolves the single iOS Header Status content from its three publishers.
 /// The connection's warnings and errors — authorization and connectivity
-/// problems — lead; event-fetch progress and issues override the
-/// connection's resting information; the connection's own information
-/// shows when neither has anything to say.
+/// problems — lead; Source Calendar loading follows; event-fetch progress
+/// and issues override the connection's transient information; the
+/// connection's own information shows when neither has anything to say.
+/// Resting connection states publish nothing, so a settled connection
+/// leaves the row to the calendar pipelines or blank.
 func resolveHeaderStatus(
     connection: GoogleAccountConnection.Status?,
     sourceCalendars: SourceCalendarsStatus? = nil,

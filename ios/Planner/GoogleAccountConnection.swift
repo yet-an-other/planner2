@@ -428,8 +428,10 @@ final class GoogleAccountConnection {
             guard let connectedAccountID else {
                 return
             }
+            // The acknowledged upgrade settles silently: the connection
+            // dot carries the resting connected state.
             status = Status(
-                message: GoogleAccountConnectionCopy.connected,
+                message: nil,
                 tone: .info
             )
             calendarDataConsumer?.setCalendarDataAccountID(connectedAccountID)
@@ -554,7 +556,9 @@ final class GoogleAccountConnection {
     /// Disconnect on This Device: one activation immediately removes the
     /// local connection with no confirmation and no connectivity — including
     /// while offline. The seam can only express local sign-out, so SDK
-    /// disconnect and Google revocation are unreachable here.
+    /// disconnect and Google revocation are unreachable here. No
+    /// confirmation text follows: the control's transformation and the gray
+    /// connection dot are the feedback.
     func disconnectOnThisDevice() {
         guard case .connected = control else {
             return
@@ -568,7 +572,7 @@ final class GoogleAccountConnection {
         clearConnectedAccount()
         control = .disconnected(connectEnabled: true)
         status = Status(
-            message: GoogleAccountConnectionCopy.disconnectedOnThisDevice,
+            message: nil,
             tone: .info
         )
     }
@@ -695,8 +699,11 @@ final class GoogleAccountConnection {
                 imageURL: account.imageURL
             )
         )
+        // The resting connected state publishes no Header Status message:
+        // the connection dot on the iOS Account Control carries it, and the
+        // blank status supersedes any in-flight progress message.
         status = Status(
-            message: GoogleAccountConnectionCopy.connected,
+            message: nil,
             tone: .info
         )
 
@@ -755,13 +762,6 @@ extension GoogleAccountConnectionCopy {
 
     /// Shown while the Google authorization flow is in flight.
     static let connecting = "Connecting Google account…"
-
-    /// Shown after identity and Calendar read authorization succeed.
-    static let connected = "Google account connected"
-
-    /// Shown after Disconnect on This Device removes the local connection.
-    static let disconnectedOnThisDevice =
-        "Google account disconnected on this device"
 
     /// Shown when the user cancels Google's authorization UI.
     static let cancelled = "Google connection cancelled"
