@@ -7,7 +7,7 @@ import Foundation
 /// `PlannerGoogleConnectionEnabled` Info.plist value, substituted from the
 /// `PLANNER_GOOGLE_CONNECTION_ENABLED` build setting. While the gate is off,
 /// the app initializes no connection behavior and mounts neither the iOS
-/// Account Control nor the iOS Header Status, leaving the accepted 100-point
+/// Account Control nor the iOS Header Status, leaving the accepted 88-point
 /// iOS Calendar Header unchanged.
 ///
 /// While the gate is on, the iOS OAuth client ID, reversed callback scheme,

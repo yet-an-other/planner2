@@ -70,7 +70,7 @@ enum HeaderCollisionLayout {
 /// than the default side reservation.
 ///
 /// When both seams are left at their default, the header renders neither and
-/// keeps its accepted 64-point title row plus 36-point weekday row: the
+/// keeps its accepted 52-point title row plus 36-point weekday row: the
 /// trailing-controls overlay and the header-status row contribute nothing when
 /// they are empty, so today's event-free header is unchanged.
 struct IOSCalendarHeader<TrailingControls: View, HeaderStatus: View>: View {
@@ -182,7 +182,7 @@ struct IOSCalendarHeader<TrailingControls: View, HeaderStatus: View>: View {
                     .padding(.horizontal, 16)
             }
         }
-        .frame(height: 64)
+        .frame(height: 52)
         .background(PlannerPalette.canvas)
     }
 

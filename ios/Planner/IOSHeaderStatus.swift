@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The single-line iOS Header Status row.
 ///
-/// While the connection gate is on, the row always reserves its 20 points so
+/// While the connection gate is on, the row always reserves its 16 points so
 /// messages never move the Calendar Grid. It spans the full width between the
 /// 16-point header margins, aligns to the trailing edge (mirroring naturally
 /// for right-to-left), stays on one visual line with tail truncation, and
@@ -28,15 +28,15 @@ struct IOSHeaderStatus: View {
     var body: some View {
         Text(message ?? "")
             .font(.footnote)
-            // The row height is fixed, so the text size is bounded; the
-            // complete message always reaches VoiceOver regardless.
-            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+            // The compact 16-point row bounds the text size; the complete
+            // message always reaches VoiceOver regardless.
+            .dynamicTypeSize(...DynamicTypeSize.xLarge)
             .foregroundStyle(foregroundColor)
             .lineLimit(1)
             .truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.horizontal, 16)
-            .frame(height: 20)
+            .frame(height: 16)
             .frame(maxWidth: .infinity)
             .background(PlannerPalette.canvas)
             .accessibilityAddTraits(.updatesFrequently)

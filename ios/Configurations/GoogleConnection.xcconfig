@@ -2,7 +2,7 @@
 // Google Account Connection.
 //
 // The committed defaults keep the gate OFF: the app initializes no
-// connection behavior, the iOS Calendar Header keeps its accepted 100-point
+// connection behavior, the iOS Calendar Header keeps its accepted 88-point
 // form, and CI and ordinary builds need no Google credentials.
 //
 // To enable the gate in a development build, copy
