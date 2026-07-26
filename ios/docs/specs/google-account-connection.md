@@ -15,7 +15,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 
 ### Release gate and configuration
 
-- A build-time release gate controls the entire addition. While off — every committed and production configuration — the app initializes no connection behavior, mounts neither the iOS Account Control nor the iOS Header Status, and renders the accepted 100-point iOS Calendar Header.
+- A build-time release gate controls the entire addition. While off — every committed and production configuration — the app initializes no connection behavior, mounts neither the iOS Account Control nor the iOS Header Status, and renders the accepted 88-point iOS Calendar Header.
 - The gate remains off for production until the external release inputs below are complete. Calendar Events and the disclosure-gated Source Calendar restoration path have landed behind it. Disclosure version 3 states the Selected Source Calendar persistence behavior specified in [`source-calendar-selection.md`](source-calendar-selection.md); the user-facing picker remains a later slice.
 - With the gate on, the iOS OAuth client ID, reversed callback scheme, and HTTPS Privacy Policy URL arrive as environment-specific build settings substituted into the app bundle. No client secret setting exists anywhere.
 - A gate-on build with missing or invalid values leaves the iOS Calendar Surface usable, disables Connect through the control's dimmed, non-interactive state, and reports "Google connection is not configured".
@@ -23,7 +23,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 
 ### Header composition
 
-- With the gate on, the fixed iOS Calendar Header presents a 64-point title/control row, a fixed 20-point iOS Header Status row, and the 36-point weekday row. The Product Name stays leading, the Visible Month stays geometrically centered and remains the Today Jump, and the iOS Account Control stays trailing.
+- With the gate on, the fixed iOS Calendar Header presents a 52-point title/control row, a fixed 16-point iOS Header Status row, and the 36-point weekday row. The Product Name stays leading, the Visible Month stays geometrically centered and remains the Today Jump, and the iOS Account Control stays trailing.
 - The iOS Header Status always reserves its height so messages never move the Calendar Grid. It uses the full width between the 16-point margins, aligns trailing (mirroring naturally), stays on one visual line with tail truncation, exposes the complete message to VoiceOver, and announces changes as a polite live region. Informational, recoverable-warning, and error tones come from the palette; the message copy carries meaning without color. The latest message remains until superseded; a first launch with no saved connection leaves the row blank.
 - Account transitions never change calendar scroll identity, the topmost Week Row, or Today Jump behavior.
 
@@ -32,6 +32,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 - The disconnected presentation is a Planner-styled capsule mirroring the connected form: a person-glyph circle, a "Connect Google" label only when the measured width fits, and an enter-style affordance glyph distinct from the connected form's disconnect glyph. The capsule uses no Google logo and no "Sign in with Google" phrasing; its copy is English-only. Every form provides at least a 44-point activation target.
 - The connected presentation is a Planner-styled capsule with the account avatar — profile image once loaded, initials underneath at all times so a broken image never appears, a neutral person glyph without a display name — the Disconnect on This Device affordance, and the display name only when the measured width fits. Compact-versus-labeled selection always uses actual available width, never device category.
 - Restoration and Connect in flight present the same capsule dimmed and non-interactive; every control state preserves focus, pointer, hover, RTL, and accessibility behavior. VoiceOver labels lead with the visible button text when disconnected ("Connect Google") and announce the connected account identity with the local disconnect action when connected.
+- Every form carries the connection dot: a badge overlapping the capsule's top-trailing corner that presents the Google Account Connection state at a glance — green when connected, gray when disconnected, pulsing gray while restoring or connecting. Connection warnings and errors never change the dot; the iOS Header Status text carries them. The dot adds no width to the trailing control cluster, mirrors naturally for right-to-left, and is folded into the control's own accessibility rather than exposed as a separate element.
 
 ### Connect
 
@@ -46,14 +47,14 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 ### Restoration and recovery
 
 - Startup enters a restoring presentation with the control disabled and "Restoring Google account…" in the status row instead of flashing a false Connect.
-- A valid saved connection with the required scope restores connected identity ("Google account connected"); Google Sign-In refreshes expired access credentials when refresh is available. No saved Google Account Connection becomes an ordinary blank disconnected state. Planner imposes no arbitrary connection expiry.
+- A valid saved connection with the required scope restores connected identity; the resting connected state publishes no status message — the connection dot carries it — and the status row settles blank. Google Sign-In refreshes expired access credentials when refresh is available. No saved Google Account Connection becomes an ordinary blank disconnected state. Planner imposes no arbitrary connection expiry.
 - Confirmed invalid or revoked authorization clears the local connection and reports "Google connection expired. Connect again".
-- A transient connectivity failure preserves the connected state and reports "You're offline. Google connection will be checked when online". Validation retries when connectivity returns and when the app next becomes active, event-driven with no polling, timers, or background processing. Recovery success replaces the warning with connected status without user action. Only confirmed invalidation transitions to disconnected.
+- A transient connectivity failure preserves the connected state and reports "You're offline. Google connection will be checked when online". Validation retries when connectivity returns and when the app next becomes active, event-driven with no polling, timers, or background processing. Recovery success clears the warning and the status row settles blank without user action. Only confirmed invalidation transitions to disconnected.
 - Stale asynchronous completions never overwrite newer user intent.
 
 ### Disconnect on This Device
 
-- One activation of the connected control immediately Disconnects on This Device without confirmation or connectivity, through the SDK's local sign-out only, and reports "Google account disconnected on this device".
+- One activation of the connected control immediately Disconnects on This Device without confirmation or connectivity, through the SDK's local sign-out only. No confirmation text follows: the control's transformation and the gray connection dot are the feedback.
 - Disconnect never invokes SDK disconnect or Google revocation: the project-wide Google Authorization Grant and every other Planner connection — web, other iOS devices, other browser profiles — remain intact.
 
 ### Installation boundary
@@ -90,6 +91,7 @@ Swift Testing drives the Google Account Connection module through a fake Google 
 - Offline and recovery: preservation with warning, connectivity-return retry, repeated transitions, invalidation from the warning state, silent generic failure, offline disconnect, disconnect race, idle return, module lifetime end
 - Installation boundary: first install, relaunch, update-equivalent state, reinstall, migrated backup, mismatch, corruption, and module clearing integration
 - Disconnect on This Device: immediate local sign-out and guards
+- Connection dot appearance: the pure mapping from control presentation to green, gray, and pulsing-gray forms, with connection warnings and errors unable to reach it
 
 Deterministic SwiftUI previews cover gate-off, unconfigured, restoring, connecting, explanation, disconnected, connected (compact, wide, long-name, no-name), offline, cancelled, failed, and expired presentations across compact, wide, long-month, RTL, landscape, and large-text layouts. The Calendar Grid model suite remains unchanged and passing.
 
@@ -99,9 +101,9 @@ Results recorded honestly. Cases requiring production-like OAuth configuration i
 
 | Scenario | Environment | Result |
 | --- | --- | --- |
-| Gate-off build keeps the 100-point header | iPhone/iPad simulator, committed configuration | Pass: no control, no status row, unchanged surface |
+| Gate-off build keeps the 88-point header | iPhone/iPad simulator, committed configuration | Pass: no control, no status row, unchanged surface |
 | Unconfigured gate-on build | iPhone simulator, gate on without values | Pass: disabled control, "Google connection is not configured", surface usable |
-| Disconnected/restoring/connected/offline presentations | iPhone/iPad simulator, deterministic module presentations | Pass: adaptive compact/labeled capsule forms, RTL mirroring, centered month preserved |
+| Disconnected/restoring/connected/offline presentations | iPhone/iPad simulator, deterministic module presentations | Pass: adaptive compact/labeled capsule forms, connection dot state presentation, RTL mirroring, centered month preserved |
 | Custom connect control | iPhone SE (3rd generation) and 11-inch iPad Pro, iOS 18.5 Simulators | Pass: compact capsule at compact width, labeled "Connect Google" capsule at wide width, no Google button assets; the dimmed non-interactive in-flight state is covered by the deterministic previews |
 | Long-name compact fallback | iPhone/iPad simulator | Pass: compact capsule without name at both widths |
 | First Connect with disclosure | Production-like iOS OAuth client and consent screen | Pending — external OAuth configuration required |

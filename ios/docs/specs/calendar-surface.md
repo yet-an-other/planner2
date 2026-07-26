@@ -26,7 +26,7 @@ The iOS delivery stack is independent from the Web Experience. It shares vocabul
 ### Header and Today Jump
 
 - Keep the iOS Calendar Header fixed while Week Rows scroll below it.
-- Use a 64-point title row and 36-point weekday row beneath the top safe area. _Superseded for builds with the Google connection release gate enabled (development only): the enabled iOS Calendar Header uses a 64-point title/control row with trailing iOS Source Calendar and Account Controls, a fixed 20-point iOS Header Status row, and the 36-point weekday row. The gate stays off in all committed and production configurations, where the dimensions and behavior here remain in force._
+- Use a 52-point title row and 36-point weekday row beneath the top safe area. _Superseded for builds with the Google connection release gate enabled (development only): the enabled iOS Calendar Header uses a 52-point title/control row with trailing iOS Source Calendar and Account Controls, a fixed 16-point iOS Header Status row, and the 36-point weekday row. The gate stays off in all committed and production configurations, where the dimensions and behavior here remain in force._
 - Place the Product Name on the leading side and the Visible Month at the geometric center.
 - Display the Product Version directly beneath the Product Name, sized like the iOS Header Status, in the palette's muted olive (the web Product Version's tone), trailing-aligned under the name and mirroring for right-to-left. Compose it from the bundle marketing version and build number as `v1.0.1`, prefixing `v` only when the marketing version starts with a digit; when the build number is absent, show the marketing version alone; when the marketing version is absent, omit the Product Version entirely.
 - Derive Visible Month from the Monday of the topmost Week Row and update it while scrolling, not only after deceleration.
@@ -113,7 +113,7 @@ _Development-only: every statement in this section applies only to builds with t
 ### Availability and status
 
 - Calendar Events are memory-only (ADR 0003): they are never persisted, they vanish on Disconnect on This Device, and they refetch per process run. There are no offline placeholders. Every detail the Event Detail Popover presents shares this boundary.
-- The iOS Header Status presents fetch progress, fetch and refresh failures, and offline conditions in Planner-owned copy; raw Google errors never reach it. Connection warnings and errors lead; event-fetch progress and issues override resting connection information. Routine Calendar Event Refresh presents no progress message.
+- The iOS Header Status presents fetch progress, fetch and refresh failures, and offline conditions in Planner-owned copy; raw Google errors never reach it. Connection warnings and errors lead, then Source Calendar and event-fetch progress and issues; resting connection states publish nothing, so a settled connection leaves the row to the calendar pipelines or blank. The status row reserves its height even while blank, so appearing and disappearing messages never move the Calendar Grid. Routine Calendar Event Refresh presents no progress message.
 - An offline initial fetch leaves the bare, usable Calendar Grid with a warning and retries event-driven on connectivity return; an initial fetch that fails for any other reason reports an error. A failed slab keeps already-fetched events visible with a fetch-issue message and recovers on connectivity return or the next edge approach.
 
 ## Interaction and product exclusions
