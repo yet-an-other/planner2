@@ -213,7 +213,7 @@ struct CalendarScreen: View {
     }
 
     /// The iOS Header Status mounted through the header's status seam. While
-    /// the gate is on, the row always reserves its 16 points so messages
+    /// the gate is on, the row always reserves its 14 points so messages
     /// never move the Calendar Grid; the connection and the events module
     /// publish into it through the shared resolution.
     @ViewBuilder

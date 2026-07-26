@@ -24,7 +24,7 @@ Simulator builds and tests do not require a development team. To run on a physic
 
 ## Google connection release gate
 
-The iOS Account Control and iOS Header Status sit behind a build-time release gate that stays **off** in every committed configuration: the app then initializes no connection behavior and the iOS Calendar Header keeps its accepted 88-point form. The gate remains off for production until a Calendar-data feature provides visible value for the sensitive scope. That feature has landed behind the same gate: Calendar Events on the iOS Calendar Surface, described below.
+The iOS Account Control and iOS Header Status sit behind a build-time release gate that stays **off** in every committed configuration: the app then initializes no connection behavior and the iOS Calendar Header keeps its accepted 80-point form. The gate remains off for production until a Calendar-data feature provides visible value for the sensitive scope. That feature has landed behind the same gate: Calendar Events on the iOS Calendar Surface, described below.
 
 To enable the connection in a development build, copy [`Configurations/GoogleConnection.local.xcconfig.example`](Configurations/GoogleConnection.local.xcconfig.example) to `Configurations/GoogleConnection.local.xcconfig` (git-ignored) and supply the environment-specific inputs: the iOS OAuth client ID, its reversed form (the OAuth callback URL scheme), and the public HTTPS Privacy Policy URL. With the gate on, missing or invalid values leave the iOS Calendar Surface usable, disable Connect, and report “Google connection is not configured” in the iOS Header Status. Planner accepts no Google client secret: an installed app cannot keep one, so no such setting exists.
 

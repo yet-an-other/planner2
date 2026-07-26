@@ -15,7 +15,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 
 ### Release gate and configuration
 
-- A build-time release gate controls the entire addition. While off — every committed and production configuration — the app initializes no connection behavior, mounts neither the iOS Account Control nor the iOS Header Status, and renders the accepted 88-point iOS Calendar Header.
+- A build-time release gate controls the entire addition. While off — every committed and production configuration — the app initializes no connection behavior, mounts neither the iOS Account Control nor the iOS Header Status, and renders the accepted 80-point iOS Calendar Header.
 - The gate remains off for production until the external release inputs below are complete. Calendar Events and the disclosure-gated Source Calendar restoration path have landed behind it. Disclosure version 3 states the Selected Source Calendar persistence behavior specified in [`source-calendar-selection.md`](source-calendar-selection.md); the user-facing picker remains a later slice.
 - With the gate on, the iOS OAuth client ID, reversed callback scheme, and HTTPS Privacy Policy URL arrive as environment-specific build settings substituted into the app bundle. No client secret setting exists anywhere.
 - A gate-on build with missing or invalid values leaves the iOS Calendar Surface usable, disables Connect through the control's dimmed, non-interactive state, and reports "Google connection is not configured".
@@ -23,7 +23,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 
 ### Header composition
 
-- With the gate on, the fixed iOS Calendar Header presents a 52-point title/control row, a fixed 16-point iOS Header Status row, and the 36-point weekday row. The Product Name stays leading, the Visible Month stays geometrically centered and remains the Today Jump, and the iOS Account Control stays trailing.
+- With the gate on, the fixed iOS Calendar Header presents a 44-point title/control row, a fixed 14-point iOS Header Status row, and the 36-point weekday row. The Product Name stays leading, the Visible Month stays geometrically centered and remains the Today Jump, and the iOS Account Control stays trailing.
 - The iOS Header Status always reserves its height so messages never move the Calendar Grid. It uses the full width between the 16-point margins, aligns trailing (mirroring naturally), stays on one visual line with tail truncation, exposes the complete message to VoiceOver, and announces changes as a polite live region. Informational, recoverable-warning, and error tones come from the palette; the message copy carries meaning without color. The latest message remains until superseded; a first launch with no saved connection leaves the row blank.
 - Account transitions never change calendar scroll identity, the topmost Week Row, or Today Jump behavior.
 
@@ -101,7 +101,7 @@ Results recorded honestly. Cases requiring production-like OAuth configuration i
 
 | Scenario | Environment | Result |
 | --- | --- | --- |
-| Gate-off build keeps the 88-point header | iPhone/iPad simulator, committed configuration | Pass: no control, no status row, unchanged surface |
+| Gate-off build keeps the 80-point header | iPhone/iPad simulator, committed configuration | Pass: no control, no status row, unchanged surface |
 | Unconfigured gate-on build | iPhone simulator, gate on without values | Pass: disabled control, "Google connection is not configured", surface usable |
 | Disconnected/restoring/connected/offline presentations | iPhone/iPad simulator, deterministic module presentations | Pass: adaptive compact/labeled capsule forms, connection dot state presentation, RTL mirroring, centered month preserved |
 | Custom connect control | iPhone SE (3rd generation) and 11-inch iPad Pro, iOS 18.5 Simulators | Pass: compact capsule at compact width, labeled "Connect Google" capsule at wide width, no Google button assets; the dimmed non-interactive in-flight state is covered by the deterministic previews |

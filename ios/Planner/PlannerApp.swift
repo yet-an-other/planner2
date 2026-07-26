@@ -5,7 +5,7 @@ struct PlannerApp: App {
     /// The Google Account Connection module, created only when the
     /// build-time release gate is on. While the gate is off, no connection
     /// behavior is initialized and the Calendar Screen renders the accepted
-    /// 88-point iOS Calendar Header with neither connection seam mounted.
+    /// 80-point iOS Calendar Header with neither connection seam mounted.
     private let accountConnection: GoogleAccountConnection?
 
     /// The Calendar Events module, created only when the build-time release
