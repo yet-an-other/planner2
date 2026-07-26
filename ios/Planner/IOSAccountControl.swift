@@ -108,7 +108,7 @@ enum ConnectionDotAppearance: Equatable, Sendable {
 }
 
 /// The connection dot badge: a small filled circle overlaid on the account
-/// capsule's top-trailing corner, nudged six points outward past the edge.
+/// capsule's top-trailing corner, nudged eight points outward past the edge.
 /// As an overlay it contributes nothing to the capsule's measured
 /// footprint, so the trailing control cluster's width budget, the Visible
 /// Month's centering, and every neighboring control's position are
@@ -118,14 +118,14 @@ enum ConnectionDotAppearance: Equatable, Sendable {
 private struct ConnectionDotBadge: View {
     let appearance: ConnectionDotAppearance
 
-    /// The outward nudge mirrors with the capsule: six points past the
+    /// The outward nudge mirrors with the capsule: eight points past the
     /// trailing edge in either layout direction.
     @Environment(\.layoutDirection) private var layoutDirection
 
     var body: some View {
         badge
             .offset(
-                x: layoutDirection == .rightToLeft ? -6 : 6,
+                x: layoutDirection == .rightToLeft ? -8 : 8,
                 y: -3
             )
     }
