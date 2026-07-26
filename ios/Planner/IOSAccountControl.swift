@@ -21,8 +21,8 @@ import SwiftUI
 /// pointer, and hover behavior native, and announces its action and the
 /// connected account identity to VoiceOver.
 ///
-/// Every form also carries the connection dot: a badge overlapping the
-/// capsule's top-trailing corner that presents the Google Account
+/// Every form also carries the connection dot: a badge floating just past
+/// the capsule's top-trailing corner that presents the Google Account
 /// Connection state at a glance — green when connected, gray when
 /// disconnected, pulsing gray while restoring or connecting. The dot is an
 /// overlay, so it adds no width to the trailing control cluster; it is
@@ -108,16 +108,30 @@ enum ConnectionDotAppearance: Equatable, Sendable {
 }
 
 /// The connection dot badge: a small filled circle overlaid on the account
-/// capsule's top-trailing corner. As an overlay it contributes nothing to
-/// the capsule's measured footprint, so the trailing control cluster's
-/// width budget and the Visible Month's centering are unaffected. The
-/// in-flight form pulses; the settled forms are steady. The dot is hidden
-/// from VoiceOver — the control's own label and hint already carry the
-/// connection state.
+/// capsule's top-trailing corner, nudged six points outward past the edge.
+/// As an overlay it contributes nothing to the capsule's measured
+/// footprint, so the trailing control cluster's width budget, the Visible
+/// Month's centering, and every neighboring control's position are
+/// unaffected. The in-flight form pulses; the settled forms are steady.
+/// The dot is hidden from VoiceOver — the control's own label and hint
+/// already carry the connection state.
 private struct ConnectionDotBadge: View {
     let appearance: ConnectionDotAppearance
 
+    /// The outward nudge mirrors with the capsule: six points past the
+    /// trailing edge in either layout direction.
+    @Environment(\.layoutDirection) private var layoutDirection
+
     var body: some View {
+        badge
+            .offset(
+                x: layoutDirection == .rightToLeft ? -6 : 6,
+                y: -3
+            )
+    }
+
+    @ViewBuilder
+    private var badge: some View {
         if appearance == .inFlight {
             dot
                 .phaseAnimator([1.0, 0.3]) { content, phase in
@@ -214,7 +228,6 @@ private struct DisconnectedAccountControl: View {
         .frame(height: 36)
         .overlay(alignment: .topTrailing) {
             ConnectionDotBadge(appearance: dotAppearance)
-                .offset(y: -3)
         }
     }
 }
@@ -276,7 +289,6 @@ private struct ConnectedAccountControl: View {
         .frame(height: 36)
         .overlay(alignment: .topTrailing) {
             ConnectionDotBadge(appearance: dotAppearance)
-                .offset(y: -3)
         }
     }
 
