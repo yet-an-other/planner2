@@ -47,6 +47,7 @@
 		A00000000000000000000164 /* DayEventsSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000163 /* DayEventsSelectionTests.swift */; };
 		A00000000000000000000166 /* CalendarEventsTestingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000165 /* CalendarEventsTestingSupport.swift */; };
 		A00000000000000000000168 /* EventDetailDrillThroughPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000167 /* EventDetailDrillThroughPresentationTests.swift */; };
+		A00000000000000000000170 /* ConnectionDotAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000169 /* ConnectionDotAppearanceTests.swift */; };
 		A00000000000000000000158 /* IOSSourceCalendarControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000157 /* IOSSourceCalendarControl.swift */; };
 		A00000000000000000000160 /* IOSSourceCalendarPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000159 /* IOSSourceCalendarPicker.swift */; };
 /* End PBXBuildFile section */
@@ -106,6 +107,7 @@
 		A00000000000000000000163 /* DayEventsSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayEventsSelectionTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000165 /* CalendarEventsTestingSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventsTestingSupport.swift; sourceTree = "<group>"; };
 		A00000000000000000000167 /* EventDetailDrillThroughPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDetailDrillThroughPresentationTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000169 /* ConnectionDotAppearanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionDotAppearanceTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000157 /* IOSSourceCalendarControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSourceCalendarControl.swift; sourceTree = "<group>"; };
 		A00000000000000000000159 /* IOSSourceCalendarPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSourceCalendarPicker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -200,6 +202,7 @@
 				A00000000000000000000163 /* DayEventsSelectionTests.swift */,
 				A00000000000000000000165 /* CalendarEventsTestingSupport.swift */,
 				A00000000000000000000167 /* EventDetailDrillThroughPresentationTests.swift */,
+				A00000000000000000000169 /* ConnectionDotAppearanceTests.swift */,
 			);
 			path = PlannerTests;
 			sourceTree = "<group>";
@@ -357,6 +360,7 @@
 				A00000000000000000000164 /* DayEventsSelectionTests.swift in Sources */,
 				A00000000000000000000166 /* CalendarEventsTestingSupport.swift in Sources */,
 				A00000000000000000000168 /* EventDetailDrillThroughPresentationTests.swift in Sources */,
+				A00000000000000000000170 /* ConnectionDotAppearanceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
