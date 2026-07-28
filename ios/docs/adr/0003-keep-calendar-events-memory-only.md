@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. ADR 0006 narrows this decision's broader data-persistence language for Selected Source Calendar configuration; Calendar Events remain memory-only.
+Superseded by [ADR 0007](0007-persist-stored-calendar-events.md), which persists full Calendar Events as Stored Calendar Events. At acceptance: ADR 0006 narrows this decision's broader data-persistence language for Selected Source Calendar configuration; Calendar Events remain memory-only.
 
 ## Context
 

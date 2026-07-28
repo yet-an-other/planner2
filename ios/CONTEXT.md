@@ -24,6 +24,10 @@ _Avoid_: Settings button, calendar filter, gear, preferences
 The native configuration surface for changing the Selected Source Calendars.
 _Avoid_: Settings screen, calendar filter, Event Detail Popover, preferences
 
+**Stored Calendar Events**:
+The per-account, device-local copy of the Fetched Window's Calendar Events, excluded from backup, presented at process start and replaced by Calendar Event Refresh, wiped by Disconnect on This Device.
+_Avoid_: cached events, local events, offline events, snapshot
+
 **iOS Header Status**:
 The single-line iOS Calendar Header area for brief progress, error, and other system messages.
 _Avoid_: Toast, banner, notification bar, status bar
@@ -45,6 +49,7 @@ _Avoid_: Toast, banner, notification bar, status bar
 - [`docs/adr/0004-rank-bar-text-tone-by-apca.md`](docs/adr/0004-rank-bar-text-tone-by-apca.md) — accepted APCA ranking for bar title text tone
 - [`docs/adr/0005-permit-read-only-event-detail-popover.md`](docs/adr/0005-permit-read-only-event-detail-popover.md) — accepted read-only Event Detail Popover applying web ADR 0002 to the iOS surface
 - [`docs/adr/0006-persist-selected-source-calendars-per-account.md`](docs/adr/0006-persist-selected-source-calendars-per-account.md) — accepted per-account, per-device persistence boundary for Selected Source Calendars
+- [`docs/adr/0007-persist-stored-calendar-events.md`](docs/adr/0007-persist-stored-calendar-events.md) — accepted Stored Calendar Events persistence, superseding ADR 0003
 - [`docs/research/google-account-connection-authentication.md`](docs/research/google-account-connection-authentication.md) — supporting primary-source authentication research
 
 ## Instructions

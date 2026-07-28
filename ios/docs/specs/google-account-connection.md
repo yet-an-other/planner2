@@ -36,9 +36,9 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 
 ### Connect
 
-- The first Connect for disclosure version 3 presents a compact native explanation before any Google authorization UI: Planner reads events from the Selected Source Calendars, stores their IDs on this device, stores no Calendar Events, and cannot modify Google Calendar. Continue, Cancel, and Privacy Policy actions remain; the Privacy Policy action opens the configured HTTPS URL.
+- The first Connect for disclosure version 4 presents a compact native explanation before any Google authorization UI: Planner reads events from the Selected Source Calendars, stores their IDs on this device, stores Calendar Events on this device only — excluded from backups and removed on Disconnect on This Device — and cannot modify Google Calendar. Continue, Cancel, and Privacy Policy actions remain; the Privacy Policy action opens the configured HTTPS URL.
 - Continue acknowledges the disclosure version through an install-local, non-identifying marker and resumes the same Connect flow; acknowledging suppresses the sheet until the version increments. Cancel or interactive dismissal opens no Google UI and reports "Google connection cancelled".
-- A restored connection whose installation acknowledged an older version presents the version 3 explanation before any Source Calendar request, Calendar Event request, or selection write. Cancellation preserves the Google Account Connection in an event-empty suspended state, keeps Disconnect on This Device available, reports review guidance, and re-presents the explanation on the next foreground entry.
+- A restored connection whose installation acknowledged an older version presents the version 4 explanation before any Source Calendar request, Calendar Event request, Stored Calendar Events write, or selection write. Cancellation preserves the Google Account Connection in an event-empty suspended state, keeps Disconnect on This Device available, reports review guidance, and re-presents the explanation on the next foreground entry.
 - One authorization request obtains `openid`, `email`, `profile`, and `https://www.googleapis.com/auth/calendar.readonly` through the configured iOS OAuth client, so existing project-wide consent is reused without a redundant prompt. The reversed-client-ID callback route returns through the app's URL handling to the SDK.
 - Connected state is published only when the Calendar scope is present. Identity without it clears the partial local sign-in, remains disconnected, and reports "Calendar read access is required".
 - User cancellation remains disconnected and reports "Google connection cancelled". Other failures map to stable Planner-owned copy: "Google connection failed. Try again". Raw Google errors never reach the iOS Header Status.
@@ -64,14 +64,14 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 
 ### Data minimization
 
-- Google Sign-In owns Google credential persistence and refresh in its Keychain storage. Planner persists no access tokens, refresh tokens, email, display name, profile image URL, Source Calendar presentation data, or Calendar Events. ADR 0006 permits stable opaque account identifiers associated with stored per-account selections and their Selected Source Calendar IDs in app-local preferences. Other presentation state is memory-only; the profile image loads through an ephemeral `URLSession`. Planner logs no tokens, OAuth codes, profile identifiers, Calendar IDs, or raw SDK responses.
+- Google Sign-In owns Google credential persistence and refresh in its Keychain storage. Planner persists no access tokens, refresh tokens, email, display name, profile image URL, or Source Calendar presentation data. ADR 0006 permits stable opaque account identifiers associated with stored per-account selections and their Selected Source Calendar IDs in app-local preferences. ADR 0007 permits per-account Stored Calendar Events in backup-excluded Application Support storage, wiped by Disconnect on This Device. Other presentation state is memory-only; the profile image loads through an ephemeral `URLSession`. Planner logs no tokens, OAuth codes, profile identifiers, Calendar IDs, or raw SDK responses.
 
 ## Interaction and product exclusions
 
 This slice contains no:
 
 - Google Calendar API request, Source Calendar, Calendar Event, or any other Calendar resource fetch
-- Persistence of account profile fields, Google tokens, Source Calendar presentation data, or Calendar Events beyond the SDK-owned credentials, non-identifying disclosure and installation markers, and the narrow Selected Source Calendar ID exception in ADR 0006
+- Persistence of account profile fields, Google tokens, or Source Calendar presentation data beyond the SDK-owned credentials, non-identifying disclosure and installation markers, the narrow Selected Source Calendar ID exception in ADR 0006, and the Stored Calendar Events boundary in ADR 0007
 - Account switcher or more than one connected account
 - Project-wide Revoke Planner Access action, Google Account Connection list, or remote device management
 - Native Planner backend connection, web-cookie protocol reuse, or embedded client secret

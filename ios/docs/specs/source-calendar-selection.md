@@ -19,7 +19,7 @@ This capability remains behind the existing Google connection release gate. It i
 
 ### Disclosure and connection gate
 
-- Planner increments the Google connection disclosure version before enabling this capability. The revised explanation states that Planner reads events from the user's Selected Source Calendars, stores the selected Source Calendar IDs on this device, and stores no Calendar Events.
+- Planner increments the Google connection disclosure version to 4 before enabling Stored Calendar Events (ADR 0007). The revised explanation states that Planner reads events from the user's Selected Source Calendars, stores the selected Source Calendar IDs on this device, and stores Calendar Events on this device only — excluded from backups and removed on Disconnect on This Device.
 - An installation that acknowledged an older disclosure must acknowledge the revised explanation before Planner loads or persists multi-calendar configuration, including when an existing Google Account Connection restores after an app update. After restoration, Planner presents the revised explanation before any Source Calendar or Calendar Event request.
 - Continuing records the new disclosure version and begins eager Source Calendar loading. Cancelling or dismissing the upgrade explanation preserves the Google Account Connection but performs no Calendar request or selection write, leaves the Calendar Grid event-empty, disables the iOS Source Calendar Control, and reports “Review Calendar access update to load events.” Planner offers the explanation again on the next foreground entry; Disconnect on This Device remains available.
 - The iOS Source Calendar Control exists only while the release gate is on and the Google Account Connection is connected. It is usable only after current disclosure is acknowledged; restoration, expiration, or Disconnect on This Device never exposes a usable picker without both connection and acknowledgement.
@@ -123,7 +123,7 @@ Results requiring production-like OAuth configuration remain pending until perfo
 | First connection | Real Google account with multiple calendars | Revised disclosure appears first; Primary Source Calendar is the sole default |
 | Secondary and shared calendars | Real account with readable secondary/shared calendars | Every readable, non-hidden source appears and selected events load atomically |
 | Hidden and free/busy-only calendars | Suitable Google account | Entries do not appear |
-| Selection persistence | Relaunch, disconnect, and reconnect same account | Selection returns; Calendar Events refetch and remain memory-only |
+| Selection persistence | Relaunch, disconnect, and reconnect same account | Selection returns; relaunch presents Stored Calendar Events immediately and refreshes behind them, and Disconnect on This Device wipes the store so reconnect refetches |
 | Account isolation | Two Google accounts connected sequentially | Each restores only its own selection |
 | Installation boundary | Reinstall and migrated-device harness | Stored selections clear with local sign-in state |
 | Adaptive picker | Compact iPhone and regular-width iPad | Sheet on iPhone, anchored popover on iPad, every dismissal applies identically |
