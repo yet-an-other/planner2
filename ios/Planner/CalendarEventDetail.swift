@@ -4,9 +4,9 @@ import Foundation
 /// (Planning glossary). The Calendar Events model projects it from the
 /// canonical event selected by primary Source Calendar event identity, so
 /// successful replacement updates an open popover and disappearance or
-/// Disconnect on This Device dismisses it (iOS ADR 0005). Every field is
-/// memory-only (iOS ADR 0003).
-struct CalendarEventDetail: Equatable, Sendable {
+/// Disconnect on This Device dismisses it (iOS ADR 0005). Every field may
+/// persist inside Stored Calendar Events (iOS ADR 0007).
+struct CalendarEventDetail: Equatable, Sendable, Codable {
     let title: String
     /// The Event Color as a `#RRGGBB` hex string.
     let colorHex: String
@@ -360,7 +360,7 @@ enum CalendarEventPlainTextNotes {
 /// One attendee in the Event Detail Popover: the display name when
 /// Google provides one, the email otherwise, and the response status as
 /// a closed union rendered as text — never color alone.
-struct CalendarEventAttendee: Equatable, Sendable {
+struct CalendarEventAttendee: Equatable, Sendable, Codable {
     /// The attendee's display name when Google provides one, their
     /// email otherwise — the single line the popover shows.
     let label: String
@@ -370,7 +370,7 @@ struct CalendarEventAttendee: Equatable, Sendable {
 /// An attendee's response status in Planner's closed union; Google's
 /// `needsAction` reads as invited and any unrecognized value collapses
 /// to unknown, matching the Web Experience.
-enum CalendarEventResponseStatus: Equatable, Sendable {
+enum CalendarEventResponseStatus: Equatable, Sendable, Codable {
     case accepted
     case declined
     case tentative

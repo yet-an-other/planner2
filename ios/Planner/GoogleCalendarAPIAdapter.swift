@@ -26,7 +26,8 @@ enum GoogleCalendarAPIPath {
 /// data either), and raw Google or URL errors never cross the seam.
 ///
 /// Fetches are memory-only by construction: responses decode straight into
-/// seam values and nothing is written to disk (iOS ADR 0003).
+/// seam values and the adapter itself writes nothing to disk — persistence
+/// lives behind the Stored Calendar Events boundary (iOS ADR 0007).
 final class GoogleCalendarAPIAdapter:
     Sendable,
     GoogleCalendarEventsAdapting,

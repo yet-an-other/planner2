@@ -41,6 +41,9 @@
 		A00000000000000000000146 /* CalendarEventDetailLinksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000145 /* CalendarEventDetailLinksTests.swift */; };
 		A00000000000000000000148 /* SelectedSourceCalendarsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000147 /* SelectedSourceCalendarsStore.swift */; };
 		A00000000000000000000150 /* SelectedSourceCalendarsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000149 /* SelectedSourceCalendarsStoreTests.swift */; };
+		A00000000000000000000172 /* StoredCalendarEventsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000171 /* StoredCalendarEventsStore.swift */; };
+		A00000000000000000000174 /* StoredCalendarEventsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000173 /* StoredCalendarEventsStoreTests.swift */; };
+		A00000000000000000000176 /* StoredCalendarEventsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000175 /* StoredCalendarEventsTests.swift */; };
 		A00000000000000000000152 /* SourceCalendarsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000151 /* SourceCalendarsModel.swift */; };
 		A00000000000000000000154 /* SourceCalendarsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000153 /* SourceCalendarsModelTests.swift */; };
 		A00000000000000000000156 /* GoogleCalendarAPIAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000155 /* GoogleCalendarAPIAdapterTests.swift */; };
@@ -101,6 +104,9 @@
 		A00000000000000000000145 /* CalendarEventDetailLinksTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventDetailLinksTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000147 /* SelectedSourceCalendarsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedSourceCalendarsStore.swift; sourceTree = "<group>"; };
 		A00000000000000000000149 /* SelectedSourceCalendarsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedSourceCalendarsStoreTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000171 /* StoredCalendarEventsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredCalendarEventsStore.swift; sourceTree = "<group>"; };
+		A00000000000000000000173 /* StoredCalendarEventsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredCalendarEventsStoreTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000175 /* StoredCalendarEventsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredCalendarEventsTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000151 /* SourceCalendarsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceCalendarsModel.swift; sourceTree = "<group>"; };
 		A00000000000000000000153 /* SourceCalendarsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceCalendarsModelTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000155 /* GoogleCalendarAPIAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleCalendarAPIAdapterTests.swift; sourceTree = "<group>"; };
@@ -175,6 +181,7 @@
 				A00000000000000000000161 /* IOSDayEventsPopover.swift */,
 				A00000000000000000000143 /* CalendarEventDetailLinks.swift */,
 				A00000000000000000000147 /* SelectedSourceCalendarsStore.swift */,
+				A00000000000000000000171 /* StoredCalendarEventsStore.swift */,
 				A00000000000000000000151 /* SourceCalendarsModel.swift */,
 				A00000000000000000000157 /* IOSSourceCalendarControl.swift */,
 				A00000000000000000000159 /* IOSSourceCalendarPicker.swift */,
@@ -197,6 +204,8 @@
 				A00000000000000000000137 /* HeaderStatusResolutionTests.swift */,
 				A00000000000000000000145 /* CalendarEventDetailLinksTests.swift */,
 				A00000000000000000000149 /* SelectedSourceCalendarsStoreTests.swift */,
+				A00000000000000000000173 /* StoredCalendarEventsStoreTests.swift */,
+				A00000000000000000000175 /* StoredCalendarEventsTests.swift */,
 				A00000000000000000000153 /* SourceCalendarsModelTests.swift */,
 				A00000000000000000000155 /* GoogleCalendarAPIAdapterTests.swift */,
 				A00000000000000000000163 /* DayEventsSelectionTests.swift */,
@@ -335,6 +344,7 @@
 				A00000000000000000000162 /* IOSDayEventsPopover.swift in Sources */,
 				A00000000000000000000144 /* CalendarEventDetailLinks.swift in Sources */,
 				A00000000000000000000148 /* SelectedSourceCalendarsStore.swift in Sources */,
+				A00000000000000000000172 /* StoredCalendarEventsStore.swift in Sources */,
 				A00000000000000000000152 /* SourceCalendarsModel.swift in Sources */,
 				A00000000000000000000158 /* IOSSourceCalendarControl.swift in Sources */,
 				A00000000000000000000160 /* IOSSourceCalendarPicker.swift in Sources */,
@@ -355,6 +365,8 @@
 				A00000000000000000000138 /* HeaderStatusResolutionTests.swift in Sources */,
 				A00000000000000000000146 /* CalendarEventDetailLinksTests.swift in Sources */,
 				A00000000000000000000150 /* SelectedSourceCalendarsStoreTests.swift in Sources */,
+				A00000000000000000000174 /* StoredCalendarEventsStoreTests.swift in Sources */,
+				A00000000000000000000176 /* StoredCalendarEventsTests.swift in Sources */,
 				A00000000000000000000154 /* SourceCalendarsModelTests.swift in Sources */,
 				A00000000000000000000156 /* GoogleCalendarAPIAdapterTests.swift in Sources */,
 				A00000000000000000000164 /* DayEventsSelectionTests.swift in Sources */,
@@ -499,7 +511,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = XRR68Q4FN7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -529,7 +541,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = XRR68Q4FN7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -558,7 +570,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -582,7 +594,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (

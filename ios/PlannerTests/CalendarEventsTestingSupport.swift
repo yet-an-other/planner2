@@ -147,6 +147,30 @@ final class FakeCalendarEventsCadenceScheduler:
     }
 }
 
+/// The deterministic Stored Calendar Events fake: an in-memory snapshot
+/// with recorded writes and wipes, so Stored Calendar Events behavior is
+/// asserted through the same product-oriented boundary the production
+/// file adapter satisfies (ADR 0007).
+final class FakeStoredCalendarEventsStore: StoredCalendarEventsStoring {
+    var snapshot: StoredCalendarEventsSnapshot?
+    private(set) var savedSnapshots: [StoredCalendarEventsSnapshot] = []
+    private(set) var wipeCallCount = 0
+
+    func loadSnapshot() -> StoredCalendarEventsSnapshot? {
+        snapshot
+    }
+
+    func saveSnapshot(_ snapshot: StoredCalendarEventsSnapshot) {
+        savedSnapshots.append(snapshot)
+        self.snapshot = snapshot
+    }
+
+    func wipeSnapshots() {
+        wipeCallCount += 1
+        snapshot = nil
+    }
+}
+
 final class FakeEventsConnectivityMonitor:
     GoogleConnectionConnectivityMonitoring
 {

@@ -238,7 +238,8 @@ struct IOSEventDetailPopover: View {
 }
 
 /// The Where line as an actionable link, presentation-only: the location
-/// data model stays a plain string (memory-only, iOS ADR 0003). A place
+/// data model stays a plain string, persisting only inside Stored
+/// Calendar Events (iOS ADR 0007). A place
 /// or address string renders as text with a Google Maps search link on
 /// the pin affordance; a location that is itself an http(s) URL renders
 /// as a direct link. Mirrors the Web Experience's location-links module.

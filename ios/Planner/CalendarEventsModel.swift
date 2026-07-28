@@ -2,9 +2,10 @@ import Foundation
 import Observation
 
 /// One Source Calendar crossing the Google adapter seam. Its stable Google
-/// identity and presentation attributes remain memory-only with Calendar
-/// Events (iOS ADR 0003).
-struct GoogleSourceCalendar: Equatable, Sendable {
+/// identity and presentation attributes travel with Calendar Events —
+/// including into Stored Calendar Events when a store is wired (iOS ADR
+/// 0007).
+struct GoogleSourceCalendar: Equatable, Sendable, Codable {
     /// Google's stable opaque calendar identifier.
     let id: String
     /// Google's display summary. Presentation fallback for a blank summary
@@ -293,7 +294,8 @@ enum CalendarEventCanonicalIdentity {
     /// The canonical occurrence identity of one fetched copy, used as the
     /// Calendar Event's identity for deduplication, layout, and the Event
     /// Detail selection. Opaque beyond its uniqueness and stability
-    /// guarantees; memory-only like every Calendar Event.
+    /// guarantees; it persists inside Stored Calendar Events exactly so a
+    /// stored event keeps its canonical identity (iOS ADR 0007).
     static func id(of sourceEvent: GoogleSourceCalendarEvent) -> String {
         let event = sourceEvent.event
         if let iCalUID = event.iCalUID?.trimmingCharacters(
@@ -318,7 +320,7 @@ enum CalendarEventCanonicalIdentity {
 }
 
 /// The readable text tone on top of an Event Color.
-enum CalendarEventTextTone: Equatable, Sendable {
+enum CalendarEventTextTone: Equatable, Sendable, Codable {
     case dark
     case light
 }
@@ -436,8 +438,8 @@ struct CalendarEventWeekLayout: Equatable, Sendable {
 struct CalendarEventDetailSelection: Equatable, Sendable, Identifiable {
     let id: String
     /// The winning Source Calendar's identity and presentation data,
-    /// memory-only with the selected Calendar Event and presented as the
-    /// Event Detail source row.
+    /// retained with the selected Calendar Event — and inside Stored
+    /// Calendar Events — and presented as the Event Detail source row.
     let sourceCalendar: GoogleSourceCalendar
     let detail: CalendarEventDetail
 }
@@ -497,7 +499,8 @@ enum CalendarEventDayItem: Equatable, Sendable, Identifiable {
 
 /// The Date Cell whose complete ordered day the open Day Events Popover
 /// lists (Planning glossary). The selection projects from the model's
-/// memory-only Calendar Events when the Events Overflow marker summons it,
+/// Calendar Events — including Stored Calendar Events presented at process
+/// start — when the Events Overflow marker summons it,
 /// opens with no network call, and reconciles with every successful
 /// Calendar Event replacement — edits and moves update items in place,
 /// deletions and declines remove them, and the popover dismisses itself
@@ -517,13 +520,17 @@ struct CalendarEventDaySelection: Equatable, Sendable, Identifiable {
 
 /// The deep native module behind Calendar Events on the iOS Calendar
 /// Surface: it owns the Fetched Window, normalizes Google-shaped events
-/// into Planner's classification, and publishes per-Week-Row layouts. All
-/// events are memory-only: they arrive while the Google Account Connection
-/// is connected, vanish when it disconnects, and are never persisted
-/// (iOS ADR 0003).
+/// into Planner's classification, and publishes per-Week-Row layouts. When
+/// a store is wired, the Fetched Window's events persist as Stored
+/// Calendar Events (iOS ADR 0007): the store is read at process start,
+/// every successful response writes through, and Disconnect on This
+/// Device wipes it. Without a store, events remain memory-only and clear
+/// on Disconnect on This Device.
 @MainActor
 @Observable
-final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
+final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
+    CalendarDataAccountConsuming
+{
     /// The laid-out Week Rows keyed by their Monday-first local start dates.
     private(set) var weekLayouts: [Date: CalendarEventWeekLayout] = [:]
 
@@ -577,6 +584,28 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// cadence. It owns no model state and never persists freshness.
     @ObservationIgnored
     private let cadenceScheduler: any CalendarEventsCadenceScheduling
+
+    /// The Stored Calendar Events boundary (iOS ADR 0007): read at
+    /// process start, written through on every successful response, and
+    /// wiped when the Calendar-data account clears. A `nil` store keeps
+    /// Calendar Events memory-only.
+    @ObservationIgnored
+    private let eventStore: (any StoredCalendarEventsStoring)?
+
+    /// The Google account whose Stored Calendar Events this process
+    /// mirrors, published by the Calendar-data boundary only after the
+    /// current disclosure is acknowledged. Writes happen only while an
+    /// account is published, so an installation that acknowledged only an
+    /// older disclosure never writes.
+    @ObservationIgnored
+    private var storedAccountID: String?
+
+    /// Whether the presented events came from the store at process start
+    /// and no successful response has replaced them yet. They stay on the
+    /// surface while the first fetch runs — the grid never blanks behind
+    /// an in-flight refresh.
+    @ObservationIgnored
+    private var isPresentingStoredEvents = false
 
     @ObservationIgnored
     private var environment: CalendarEnvironment
@@ -633,7 +662,8 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// recompute its boundary Week Row from old and new events together.
     /// At most one entry per event id: slabs redeliver events spanning a
     /// fetched range's boundary, and the fresh copy replaces the retained
-    /// one. Memory-only: cleared on Disconnect on This Device (ADR 0003).
+    /// one. Persisted only through the Stored Calendar Events boundary
+    /// (ADR 0007) and cleared on Disconnect on This Device.
     @ObservationIgnored
     private var normalizedEvents: [NormalizedEvent] = []
 
@@ -692,12 +722,14 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         adapter: (any GoogleCalendarEventsAdapting)?,
         connectivityMonitor: (any GoogleConnectionConnectivityMonitoring)? = nil,
         cadenceScheduler: any CalendarEventsCadenceScheduling =
-            TaskCalendarEventsCadenceScheduler()
+            TaskCalendarEventsCadenceScheduler(),
+        eventStore: (any StoredCalendarEventsStoring)? = nil
     ) {
         self.environment = environment
         self.adapter = adapter
         self.connectivityMonitor = connectivityMonitor
         self.cadenceScheduler = cadenceScheduler
+        self.eventStore = eventStore
         connectivityMonitor?.start { [weak self] in
             self?.handleConnectivityReturn()
         }
@@ -760,7 +792,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     /// Summons the Day Events Popover for one Date Cell: the complete
     /// ordered day — Calendar Event Bars crossing the cell in lane order,
     /// then its Calendar Event Rows by start time ascending, visible and
-    /// hidden alike — projected from memory-only Calendar Events with no
+    /// hidden alike — projected from the presented Calendar Events with no
     /// network call. The surface's overlays are mutually exclusive:
     /// summoning the Day Events Popover closes any open Event Detail
     /// Popover.
@@ -883,8 +915,9 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
     }
 
     /// Publishes the disclosure-gated, reconciled Selected Source Calendars.
-    /// `nil` suspends Calendar data and clears memory-only events; an empty
-    /// selection is the successful no-source exception and starts no request.
+    /// `nil` suspends Calendar data and clears the presented events; an
+    /// empty selection is the successful no-source exception and starts no
+    /// request.
     func setSelectedSourceCalendars(
         _ selectedSourceCalendars: [GoogleSourceCalendar]?
     ) {
@@ -906,9 +939,22 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         cancelCadence()
         isSourceCalendarPickerPresented = false
         isSelectionReplacementPending = false
+        // Stored Calendar Events presented at process start stay on the
+        // surface across selection publications until the first successful
+        // response replaces them atomically: the grid never blanks behind
+        // an in-flight refresh, and a transitional nil publication (the
+        // Source Calendars module resetting on account arrival) never
+        // clears them. The zero-source exception is Calendar-data truth
+        // and clears them with the store.
+        let retainStoredPresentation = isPresentingStoredEvents
+            && fetchedWindow == nil && !(connected && selected.isEmpty)
         fetchedWindow = nil
         sourceCalendars = selected
-        normalizedEvents = []
+        if !retainStoredPresentation {
+            isPresentingStoredEvents = false
+            normalizedEvents = []
+            weekLayouts = [:]
+        }
         selectedEvent = nil
         selectedEventDrilledFromDay = nil
         selectedDayEvents = nil
@@ -917,13 +963,125 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
         isRefreshPending = false
         refreshFailure = nil
         isSlabRetryBlocked = false
-        weekLayouts = [:]
         status = CalendarEventsStatus(message: nil, tone: .info)
 
         guard connected, !selected.isEmpty else {
+            // The zero-source exception mirrors an empty Fetched Window:
+            // the account's Stored Calendar Events empty with it.
+            if connected {
+                writeStore()
+            }
             return
         }
         beginInitialFetch(adapter: adapter)
+    }
+
+    /// The Calendar-data boundary's account publication. An account
+    /// arrives only after the current disclosure is acknowledged, so its
+    /// Stored Calendar Events may then present; moving away from a
+    /// published account — Disconnect on This Device, confirmed
+    /// expiration, or scope loss — wipes the store, and no transition
+    /// ever lets one account's events reach another.
+    func setCalendarDataAccountID(_ accountID: String?) {
+        guard accountID != storedAccountID else {
+            return
+        }
+        if storedAccountID != nil {
+            eventStore?.wipeSnapshots()
+            isPresentingStoredEvents = false
+            normalizedEvents = []
+            weekLayouts = [:]
+            setSelectedSourceCalendars(nil)
+        }
+        storedAccountID = accountID
+        guard let accountID else {
+            return
+        }
+        guard let snapshot = eventStore?.loadSnapshot() else {
+            return
+        }
+        // The store holds at most one account's snapshot; a snapshot that
+        // does not belong to the published account is wiped rather than
+        // presented.
+        guard snapshot.accountID == accountID else {
+            eventStore?.wipeSnapshots()
+            return
+        }
+        presentStoredSnapshot(snapshot)
+    }
+
+    /// Presents Stored Calendar Events at process start, online or
+    /// offline, before any account publication: at most one account's
+    /// snapshot exists, and the composition root calls this only when the
+    /// installation has acknowledged the current disclosure. The stored
+    /// view is always stale — freshness coverage starts empty and the
+    /// ordinary fetching rules schedule requests exactly as if no events
+    /// existed — and the first successful response replaces it
+    /// atomically.
+    func presentStoredCalendarEvents() {
+        guard !isConnected, normalizedEvents.isEmpty,
+              let snapshot = eventStore?.loadSnapshot()
+        else {
+            return
+        }
+        storedAccountID = snapshot.accountID
+        presentStoredSnapshot(snapshot)
+    }
+
+    /// Projects one stored snapshot onto the surface: the normalized
+    /// events and their Week Row layouts, with no freshness, no Fetched
+    /// Window, and no fetch side effects. An empty snapshot presents the
+    /// bare, usable Calendar Grid.
+    private func presentStoredSnapshot(
+        _ snapshot: StoredCalendarEventsSnapshot
+    ) {
+        let stored = snapshot.events.map(Self.normalizedEvent(from:))
+        guard !stored.isEmpty else {
+            return
+        }
+        normalizedEvents = stored
+        isPresentingStoredEvents = true
+
+        let calendar = environment.calendar
+        var first: Date?
+        var last: Date?
+        for event in stored {
+            let dates: (start: Date, end: Date)
+            switch event.kind {
+            case .bar(let startDate, let endDate, _):
+                dates = (startDate, endDate)
+            case .row(let date, _, _):
+                dates = (date, date)
+            }
+            first = min(first ?? dates.start, dates.start)
+            last = max(last ?? dates.end, dates.end)
+        }
+        guard let first, let last,
+              let end = calendar.date(byAdding: .day, value: 1, to: last)
+        else {
+            return
+        }
+        publishWeeks(covering: (start: first, end: end))
+    }
+
+    /// Write-through (iOS ADR 0007): every successful initial, slab, or
+    /// Calendar Event Refresh response updates the store with the
+    /// in-memory model, so process death never resurrects Calendar Events
+    /// older than the last successful response. Entries that fell out of
+    /// the Fetched Window and events from deselected Source Calendars
+    /// disappear with the write; no separate eviction policy exists.
+    /// Writes happen only while a disclosure-acknowledged account is
+    /// published.
+    private func writeStore() {
+        guard let storedAccountID else {
+            return
+        }
+        eventStore?.saveSnapshot(
+            StoredCalendarEventsSnapshot(
+                accountID: storedAccountID,
+                events: normalizedEvents.map(Self.storedEvent(from:))
+            )
+        )
     }
 
     /// Pauses new routine work while the native picker is open. Physical work
@@ -1097,6 +1255,8 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                     events,
                     eventColorBackgrounds: eventColorBackgrounds
                 )
+                isPresentingStoredEvents = false
+                writeStore()
                 weekLayouts = [:]
                 publishWeeks(covering: (start: windowStart, end: windowEnd))
                 recordFreshness(
@@ -1268,6 +1428,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                     eventColorBackgrounds: eventColorBackgrounds,
                     range: (start: refreshStart, end: refreshEnd)
                 )
+                writeStore()
                 recordFreshness(
                     for: (start: refreshStart, end: refreshEnd),
                     completedAt: cadenceScheduler.now
@@ -1658,6 +1819,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                 let redeliveredIds = Set(slabEvents.map(\.id))
                 normalizedEvents.removeAll { redeliveredIds.contains($0.id) }
                 normalizedEvents.append(contentsOf: slabEvents)
+                writeStore()
                 reconcileSelectedEvent()
                 reconcileSelectedDayEvents()
                 switch direction {
@@ -1746,6 +1908,8 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming {
                     events,
                     eventColorBackgrounds: eventColorBackgrounds
                 )
+                isPresentingStoredEvents = false
+                writeStore()
                 weekLayouts = [:]
                 publishWeeks(covering: range)
                 freshnessCoverage = []
@@ -2541,5 +2705,70 @@ private extension String {
     var trimmedToNil: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private extension CalendarEventsModel {
+    /// Maps one in-memory normalized event to its Stored Calendar Event
+    /// record: the full normalized Calendar Event model exactly as the
+    /// surface renders it — never a raw Google payload (iOS ADR 0007).
+    private static func storedEvent(
+        from event: NormalizedEvent
+    ) -> StoredCalendarEvent {
+        let kind: StoredCalendarEvent.Kind
+        switch event.kind {
+        case .bar(let startDate, let endDate, let startsAt):
+            kind = .bar(
+                startDate: startDate,
+                endDate: endDate,
+                startsAt: startsAt
+            )
+        case .row(let date, let startsAt, let startTimeText):
+            kind = .row(
+                date: date,
+                startsAt: startsAt,
+                startTimeText: startTimeText
+            )
+        }
+        return StoredCalendarEvent(
+            id: event.id,
+            sourceCalendar: event.sourceCalendar,
+            title: event.title,
+            colorHex: event.colorHex,
+            textTone: event.textTone,
+            kind: kind,
+            detail: event.detail
+        )
+    }
+
+    /// Maps one Stored Calendar Event record back to the in-memory
+    /// normalized model for launch presentation.
+    private static func normalizedEvent(
+        from stored: StoredCalendarEvent
+    ) -> NormalizedEvent {
+        let kind: NormalizedEvent.Kind
+        switch stored.kind {
+        case .bar(let startDate, let endDate, let startsAt):
+            kind = .bar(
+                startDate: startDate,
+                endDate: endDate,
+                startsAt: startsAt
+            )
+        case .row(let date, let startsAt, let startTimeText):
+            kind = .row(
+                date: date,
+                startsAt: startsAt,
+                startTimeText: startTimeText
+            )
+        }
+        return NormalizedEvent(
+            id: stored.id,
+            sourceCalendar: stored.sourceCalendar,
+            title: stored.title,
+            colorHex: stored.colorHex,
+            textTone: stored.textTone,
+            kind: kind,
+            detail: stored.detail
+        )
     }
 }

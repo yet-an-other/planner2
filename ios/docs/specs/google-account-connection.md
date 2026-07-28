@@ -16,7 +16,7 @@ Planning owns the shared **Google Authorization Grant**, **Google Account Connec
 ### Release gate and configuration
 
 - A build-time release gate controls the entire addition. While off — every committed and production configuration — the app initializes no connection behavior, mounts neither the iOS Account Control nor the iOS Header Status, and renders the accepted 80-point iOS Calendar Header.
-- The gate remains off for production until the external release inputs below are complete. Calendar Events and the disclosure-gated Source Calendar restoration path have landed behind it. Disclosure version 3 states the Selected Source Calendar persistence behavior specified in [`source-calendar-selection.md`](source-calendar-selection.md); the user-facing picker remains a later slice.
+- The gate remains off for production until the external release inputs below are complete. Calendar Events and the disclosure-gated Source Calendar restoration path have landed behind it. Disclosure version 4 states the Stored Calendar Events persistence behavior specified in [`calendar-surface.md`](calendar-surface.md) (ADR 0007).
 - With the gate on, the iOS OAuth client ID, reversed callback scheme, and HTTPS Privacy Policy URL arrive as environment-specific build settings substituted into the app bundle. No client secret setting exists anywhere.
 - A gate-on build with missing or invalid values leaves the iOS Calendar Surface usable, disables Connect through the control's dimmed, non-interactive state, and reports "Google connection is not configured".
 - Ordinary builds, previews, tests, and CI require no Google credentials, account, callback, or network access.
@@ -132,7 +132,7 @@ These gates are deliberately **not complete** and are not reported as such:
 - An iOS OAuth client bound to Planner's bundle identifier in the shared Google Cloud project, with its reversed callback scheme.
 - Google Calendar API enabled and the OAuth consent screen production-ready with the sensitive `calendar.readonly` scope verified as Google requires.
 - A public HTTPS Privacy Policy URL whose content covers current and intended Calendar-data handling.
-- App Privacy answers covering Planner's and the SDK's account and Calendar data behavior, including the account-linked Selected Source Calendar configuration in ADR 0006.
+- App Privacy answers covering Planner's and the SDK's account and Calendar data behavior, including the account-linked Selected Source Calendar configuration in ADR 0006 and the Stored Calendar Events boundary in ADR 0007.
 - A first user-visible Calendar-data consumer, which alone justifies enabling the production release gate. Delivered behind the gate: Calendar Events on the iOS Calendar Surface. The production flip itself remains open.
 
 ## Compliance validation
@@ -143,4 +143,4 @@ These gates are deliberately **not complete** and are not reported as such:
 
 ## Deferred validation and release work
 
-Real-OAuth acceptance per the matrix above, Google OAuth verification administration, App Store submission, TestFlight distribution, signing administration, and release rollout remain outside implementation. Calendar Events and Source Calendar restoration have landed behind the gate, and disclosure version 3 gates the new persistence behavior. The user-facing Source Calendar Picker remains a later implementation slice; the production flip remains coupled to the external release inputs above.
+Real-OAuth acceptance per the matrix above, Google OAuth verification administration, App Store submission, TestFlight distribution, signing administration, and release rollout remain outside implementation. Calendar Events and Source Calendar restoration have landed behind the gate, and disclosure version 4 gates Stored Calendar Events persistence. The user-facing Source Calendar Picker remains a later implementation slice; the production flip remains coupled to the external release inputs above.

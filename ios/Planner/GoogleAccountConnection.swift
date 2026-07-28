@@ -212,8 +212,9 @@ final class GoogleAccountConnection {
     /// The disclosure version describing this build's Calendar-data
     /// behavior. Increment it when the copy's data-behavior claims change,
     /// so installations that acknowledged an earlier version see the
-    /// revised sheet again.
-    static let currentDisclosureVersion = 3
+    /// revised sheet again. Version 4 adds Stored Calendar Events
+    /// persistence (ADR 0007).
+    static let currentDisclosureVersion = 4
 
     /// The scopes Connect requests in one authorization flow: Google identity
     /// plus read-only Calendar access.
@@ -791,13 +792,17 @@ extension GoogleAccountConnectionCopy {
     static let explanationTitle = "Connect Google Calendar"
 
     /// The first-connect explanation: read-only purpose, no-write
-    /// assurance, and this build's actual Calendar-data behavior.
+    /// assurance, and this build's actual Calendar-data behavior —
+    /// version 4 states that Planner stores Calendar Events on this
+    /// device only (ADR 0007).
     static let explanationBody =
         "Planner requests read-only access to Google Calendar to show "
         + "events from your Selected Source Calendars on the Calendar "
         + "Surface. Planner cannot create, edit, or delete anything in your "
         + "Google Calendar. Planner stores the selected Source Calendar IDs "
-        + "on this device and stores no Calendar Events."
+        + "on this device. Planner also stores Calendar Events on this "
+        + "device only, excluded from backups and removed when you "
+        + "disconnect on this device."
 
     /// The explanation action that acknowledges and resumes Connect.
     static let explanationContinue = "Continue"

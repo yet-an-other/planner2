@@ -832,8 +832,8 @@ struct GoogleAccountConnectionTests {
                 acknowledgedVersion: 1
             )
         )
-        // Selected Source Calendar persistence bumped the disclosure again.
-        #expect(GoogleAccountConnection.currentDisclosureVersion == 3)
+        // Stored Calendar Events persistence bumped the disclosure again.
+        #expect(GoogleAccountConnection.currentDisclosureVersion == 4)
         #expect(await settledDisconnected(connection))
         adapter.signInHandler = { .connected(Self.authorizedAccount()) }
 
@@ -854,12 +854,14 @@ struct GoogleAccountConnectionTests {
         )
     }
 
-    @Test("The explanation states selected IDs are stored but events are not")
+    @Test("The explanation states selected IDs and Calendar Events are stored on this device only")
     func explanationCopyStatesSelectionAndEventStorage() {
         let body = GoogleAccountConnectionCopy.explanationBody
         #expect(body.contains("Selected Source Calendars"))
         #expect(body.contains("stores the selected Source Calendar IDs"))
-        #expect(body.contains("stores no Calendar Events"))
+        #expect(body.contains("stores Calendar Events on this device only"))
+        #expect(body.contains("excluded from backups"))
+        #expect(body.contains("removed when you disconnect on this device"))
     }
 
     @Test("A restored older disclosure suspends Calendar data until Continue")
@@ -886,7 +888,10 @@ struct GoogleAccountConnectionTests {
         connection.continueConnect()
 
         #expect(connection.explanation == nil)
-        #expect(store.acknowledgedVersion == 3)
+        #expect(
+            store.acknowledgedVersion
+                == GoogleAccountConnection.currentDisclosureVersion
+        )
         #expect(consumer.accountIDs.last == Self.stableAccountID)
         // The settled connection rests silent: no "connected" message
         // follows the acknowledgement.
