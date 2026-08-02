@@ -376,7 +376,7 @@ struct StoredCalendarEventsTests {
         store.snapshot = StoredCalendarEventsSnapshot(
             accountID: Self.accountID,
             events: [
-                StoredCalendarEvent(
+                CalendarEvent(
                     id: canonicalID("january-event"),
                     sourceCalendar: Self.primary,
                     title: "January",
@@ -567,7 +567,7 @@ struct StoredCalendarEventsTests {
         foreign.snapshot = StoredCalendarEventsSnapshot(
             accountID: "google-account-1",
             events: [
-                StoredCalendarEvent(
+                CalendarEvent(
                     id: canonicalID("account-a-event"),
                     sourceCalendar: Self.primary,
                     title: "A's event",

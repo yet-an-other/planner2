@@ -282,98 +282,6 @@ extension CalendarEventsCopy {
     static let updatingSelection = "Updating events…"
 }
 
-/// Canonical cross-calendar occurrence identity: the same occurrence
-/// returned through multiple Selected Source Calendars presents once.
-/// Google's `iCalUID` plus `originalStartTime` when supplied — otherwise
-/// the occurrence's all-day date or timed start — identifies one
-/// occurrence across sources, so distinct recurring instances, including
-/// moved ones, never collapse. Without an `iCalUID`, identity falls back
-/// to Source Calendar ID plus Google's event ID: Planner never guesses
-/// that unrelated fallback events across calendars are duplicates.
-enum CalendarEventCanonicalIdentity {
-    /// The canonical occurrence identity of one fetched copy, used as the
-    /// Calendar Event's identity for deduplication, layout, and the Event
-    /// Detail selection. Opaque beyond its uniqueness and stability
-    /// guarantees; it persists inside Stored Calendar Events exactly so a
-    /// stored event keeps its canonical identity (iOS ADR 0007).
-    static func id(of sourceEvent: GoogleSourceCalendarEvent) -> String {
-        let event = sourceEvent.event
-        if let iCalUID = event.iCalUID?.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        ), !iCalUID.isEmpty {
-            let occurrence = event.originalStartTime ?? event.start
-            return "ical:\(iCalUID):occurrence:\(occurrenceStamp(occurrence))"
-        }
-        return "src:\(sourceEvent.sourceCalendar.id):event:\(event.id)"
-    }
-
-    private static func occurrenceStamp(
-        _ time: GoogleCalendarEventTime
-    ) -> String {
-        switch time {
-        case .allDay(let year, let month, let day):
-            return "date-\(year)-\(month)-\(day)"
-        case .timed(let instant):
-            return "time-\(instant.timeIntervalSince1970)"
-        }
-    }
-}
-
-/// The readable text tone on top of an Event Color.
-enum CalendarEventTextTone: Equatable, Sendable, Codable {
-    case dark
-    case light
-}
-
-/// An Event Color decomposed from its `#RRGGBB` hex form. A component
-/// that fails to parse reads as zero.
-struct EventColorRGB: Equatable, Sendable {
-    let red: Int
-    let green: Int
-    let blue: Int
-
-    /// Decomposes a `#RRGGBB` hex string, returning `nil` when it is not
-    /// exactly six pairs after one optional leading `#`.
-    init?(hex: String) {
-        var hex = hex
-        if hex.hasPrefix("#") {
-            hex.removeFirst()
-        }
-        guard hex.count == 6 else {
-            return nil
-        }
-        red = Int(hex.prefix(2), radix: 16) ?? 0
-        green = Int(hex.dropFirst(2).prefix(2), radix: 16) ?? 0
-        blue = Int(hex.dropFirst(4).prefix(2), radix: 16) ?? 0
-    }
-
-    /// The WCAG 2.x relative luminance of the color.
-    var relativeLuminance: Double {
-        Self.relativeLuminance(
-            red: Double(red) / 255,
-            green: Double(green) / 255,
-            blue: Double(blue) / 255
-        )
-    }
-
-    /// The WCAG 2.x relative luminance of sRGB channels in 0...1.
-    static func relativeLuminance(
-        red: Double,
-        green: Double,
-        blue: Double
-    ) -> Double {
-        0.2126 * linearized(red) + 0.7152 * linearized(green)
-            + 0.0722 * linearized(blue)
-    }
-
-    /// One sRGB channel's linear form per the WCAG threshold.
-    private static func linearized(_ channel: Double) -> Double {
-        channel <= 0.04045
-            ? channel / 12.92
-            : pow((channel + 0.055) / 1.055, 2.4)
-    }
-}
-
 /// One week's segment of a Calendar Event Bar: a multiday or all-day event
 /// clipped to the Week Row it crosses, in its assigned lane.
 struct CalendarEventBarSegment: Equatable, Sendable, Identifiable {
@@ -665,7 +573,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// one. Persisted only through the Stored Calendar Events boundary
     /// (ADR 0007) and cleared on Disconnect on This Device.
     @ObservationIgnored
-    private var normalizedEvents: [NormalizedEvent] = []
+    private var normalizedEvents: [CalendarEvent] = []
 
     /// Successful initial, slab, and refresh completion coverage. This is
     /// process-local bookkeeping only: it is never persisted and vanishes
@@ -1035,7 +943,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     private func presentStoredSnapshot(
         _ snapshot: StoredCalendarEventsSnapshot
     ) {
-        let stored = snapshot.events.map(Self.normalizedEvent(from:))
+        let stored = snapshot.events
         guard !stored.isEmpty else {
             return
         }
@@ -1079,7 +987,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
         eventStore?.saveSnapshot(
             StoredCalendarEventsSnapshot(
                 accountID: storedAccountID,
-                events: normalizedEvents.map(Self.storedEvent(from:))
+                events: normalizedEvents
             )
         )
     }
@@ -1251,9 +1159,10 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
             switch result.outcome {
             case .success(let events, let eventColorBackgrounds):
                 fetchedWindow = (windowStart, windowEnd)
-                normalizedEvents = normalize(
+                normalizedEvents = CalendarEventNormalization.normalize(
                     events,
-                    eventColorBackgrounds: eventColorBackgrounds
+                    eventColorBackgrounds: eventColorBackgrounds,
+                    environment: environment
                 )
                 isPresentingStoredEvents = false
                 writeStore()
@@ -1465,9 +1374,10 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
         var nextEvents = normalizedEvents.filter {
             !intersects($0, range: range) && !returnedIDs.contains($0.id)
         }
-        let refreshedEvents = normalize(
+        let refreshedEvents = CalendarEventNormalization.normalize(
             events,
-            eventColorBackgrounds: eventColorBackgrounds
+            eventColorBackgrounds: eventColorBackgrounds,
+            environment: environment
         )
         for event in refreshedEvents {
             nextEvents.removeAll { $0.id == event.id }
@@ -1500,7 +1410,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// Whether one normalized event's presented local dates intersect a
     /// half-open fetched range.
     private func intersects(
-        _ event: NormalizedEvent,
+        _ event: CalendarEvent,
         range: (start: Date, end: Date)
     ) -> Bool {
         switch event.kind {
@@ -1512,7 +1422,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     }
 
     /// Every Monday-first Week Row touched by one normalized event.
-    private func weekStarts(intersecting event: NormalizedEvent) -> Set<Date> {
+    private func weekStarts(intersecting event: CalendarEvent) -> Set<Date> {
         let calendar = environment.calendar
         let firstDate: Date
         let lastDate: Date
@@ -1812,9 +1722,10 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
                 // boundary arrives again here. The fresh copy replaces the
                 // retained one: one entry per event id keeps every Week
                 // Row to one segment per event.
-                let slabEvents = normalize(
+                let slabEvents = CalendarEventNormalization.normalize(
                     events,
-                    eventColorBackgrounds: eventColorBackgrounds
+                    eventColorBackgrounds: eventColorBackgrounds,
+                    environment: environment
                 )
                 let redeliveredIds = Set(slabEvents.map(\.id))
                 normalizedEvents.removeAll { redeliveredIds.contains($0.id) }
@@ -1904,9 +1815,10 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
             switch result.outcome {
             case .success(let events, let eventColorBackgrounds):
                 fetchedWindow = range
-                normalizedEvents = normalize(
+                normalizedEvents = CalendarEventNormalization.normalize(
                     events,
-                    eventColorBackgrounds: eventColorBackgrounds
+                    eventColorBackgrounds: eventColorBackgrounds,
+                    environment: environment
                 )
                 isPresentingStoredEvents = false
                 writeStore()
@@ -2073,224 +1985,6 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
 
     // MARK: Normalization
 
-    /// One event in Planner's classified, local-date form.
-    private struct NormalizedEvent {
-        enum Kind: Equatable {
-            /// An all-day or multiday bar over inclusive local dates, with
-            /// the event's start instant for ordering.
-            case bar(startDate: Date, endDate: Date, startsAt: Date)
-
-            /// An intraday row on one local date.
-            case row(date: Date, startsAt: Date, startTimeText: String)
-        }
-
-        /// The canonical cross-calendar occurrence identity: one entry per
-        /// occurrence across every Selected Source Calendar.
-        let id: String
-        /// The winning Source Calendar's identity and presentation
-        /// attributes, kept intact from the winning copy.
-        let sourceCalendar: GoogleSourceCalendar
-        let title: String
-        let colorHex: String
-        let textTone: CalendarEventTextTone
-        let kind: Kind
-        /// The Event Detail Popover payload, built at normalization and
-        /// projected only when this canonical event identity is selected
-        /// (iOS ADR 0005).
-        let detail: CalendarEventDetail
-    }
-
-    /// Applies Planner's product rules: cancelled and declined events drop
-    /// out, duplicate copies of one canonical occurrence collapse to their
-    /// deterministic winner — the Primary Source Calendar copy when
-    /// present, otherwise the earliest in the deterministic Source
-    /// Calendar order, kept intact with nothing combined across copies —
-    /// blank titles become "Busy", all-day ends turn inclusive, and every
-    /// event classifies as a bar or a row in the environment's local
-    /// dates.
-    private func normalize(
-        _ events: [GoogleSourceCalendarEvent],
-        eventColorBackgrounds: [String: String]
-    ) -> [NormalizedEvent] {
-        let calendar = environment.calendar
-        let timeFormatter = DateFormatter()
-        timeFormatter.calendar = calendar
-        timeFormatter.locale = environment.locale
-        timeFormatter.timeZone = environment.timeZone
-        timeFormatter.setLocalizedDateFormatFromTemplate("jm")
-        let timingContext = CalendarEventTimingLine.Context(
-            calendar: calendar,
-            locale: environment.locale,
-            timeZone: environment.timeZone
-        )
-
-        // Collapse duplicate copies of one canonical occurrence, keeping
-        // first-appearance order of identities so layout stays
-        // deterministic regardless of copy order.
-        var identityOrder: [String] = []
-        var winners: [String: GoogleSourceCalendarEvent] = [:]
-        for sourceEvent in events {
-            guard !sourceEvent.event.isCancelled,
-                  !sourceEvent.event.isDeclinedByViewer
-            else {
-                continue
-            }
-            let identity = CalendarEventCanonicalIdentity.id(of: sourceEvent)
-            if let current = winners[identity] {
-                if SourceCalendarReconciliation.precedes(
-                    sourceEvent.sourceCalendar,
-                    current.sourceCalendar
-                ) {
-                    winners[identity] = sourceEvent
-                }
-            } else {
-                winners[identity] = sourceEvent
-                identityOrder.append(identity)
-            }
-        }
-
-        return identityOrder.compactMap { identity in
-            guard let sourceEvent = winners[identity] else {
-                return nil
-            }
-            let sourceCalendar = sourceEvent.sourceCalendar
-            let event = sourceEvent.event
-
-            let title = event.summary?.trimmedToNil ?? "Busy"
-            // The Event Color (Planning glossary): the explicit Google
-            // event color when one is set and known, otherwise the Source
-            // Calendar's background color.
-            let colorHex = event.colorId
-                .flatMap { eventColorBackgrounds[$0] }
-                ?? sourceCalendar.backgroundColorHex
-            let textTone = CalendarEventsModel.textTone(forHexColor: colorHex)
-
-            // The Event Detail Popover's optional fields, mapped once so
-            // every classification branch publishes the same omission
-            // rules: blank locations and Google links are absent; HTML
-            // notes render plain and blank out to absence.
-            let location = event.location?.trimmedToNil
-            let googleLink = event.googleLink?.trimmedToNil
-            let notes = CalendarEventPlainTextNotes.plainText(
-                fromHTML: event.notes
-            )
-            let attendees = CalendarEventAttendeeNormalization.normalize(
-                event.attendees
-            )
-
-            let makeDetail = { (timing: CalendarEventTiming) in
-                CalendarEventDetail(
-                    title: title,
-                    colorHex: colorHex,
-                    timingText: CalendarEventTimingLine.timingLine(
-                        for: timing,
-                        context: timingContext
-                    ),
-                    location: location,
-                    googleLink: googleLink,
-                    notes: notes,
-                    attendees: attendees.visible,
-                    hiddenAttendeeCount: attendees.hiddenCount
-                )
-            }
-
-            switch (event.start, event.end) {
-            case (
-                .allDay(let startYear, let startMonth, let startDay),
-                .allDay(let endYear, let endMonth, let endDay)
-            ):
-                guard
-                    let startDate = civilDate(
-                        year: startYear,
-                        month: startMonth,
-                        day: startDay
-                    ),
-                    let exclusiveEnd = civilDate(
-                        year: endYear,
-                        month: endMonth,
-                        day: endDay
-                    ),
-                    let endDate = calendar.date(
-                        byAdding: .day,
-                        value: -1,
-                        to: exclusiveEnd
-                    ),
-                    endDate >= startDate
-                else {
-                    return nil
-                }
-                return NormalizedEvent(
-                    id: identity,
-                    sourceCalendar: sourceCalendar,
-                    title: title,
-                    colorHex: colorHex,
-                    textTone: textTone,
-                    kind: .bar(
-                        startDate: startDate,
-                        endDate: endDate,
-                        startsAt: startDate
-                    ),
-                    detail: makeDetail(
-                        CalendarEventTiming(
-                            start: startDate,
-                            end: endDate,
-                            isAllDay: true,
-                            isMultiday: endDate > startDate
-                        )
-                    )
-                )
-            case (.timed(let startsAt), .timed(let endsAt)):
-                let startDate = calendar.startOfDay(for: startsAt)
-                let endDate = calendar.startOfDay(for: endsAt)
-                if endDate > startDate {
-                    return NormalizedEvent(
-                        id: identity,
-                        sourceCalendar: sourceCalendar,
-                        title: title,
-                        colorHex: colorHex,
-                        textTone: textTone,
-                        kind: .bar(
-                            startDate: startDate,
-                            endDate: endDate,
-                            startsAt: startsAt
-                        ),
-                        detail: makeDetail(
-                            CalendarEventTiming(
-                                start: startsAt,
-                                end: endsAt,
-                                isAllDay: false,
-                                isMultiday: true
-                            )
-                        )
-                    )
-                }
-                return NormalizedEvent(
-                    id: identity,
-                    sourceCalendar: sourceCalendar,
-                    title: title,
-                    colorHex: colorHex,
-                    textTone: textTone,
-                    kind: .row(
-                        date: startDate,
-                        startsAt: startsAt,
-                        startTimeText: timeFormatter.string(from: startsAt)
-                    ),
-                    detail: makeDetail(
-                        CalendarEventTiming(
-                            start: startsAt,
-                            end: endsAt,
-                            isAllDay: false,
-                            isMultiday: false
-                        )
-                    )
-                )
-            default:
-                // A mixed or missing start/end pair is not presentable.
-                return nil
-            }
-        }
-    }
-
     // MARK: Layout
 
     /// Computes and publishes the layout of every non-empty Week Row
@@ -2321,7 +2015,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// Lays out one Week Row: bars clipped to the row in globally ordered
     /// lanes, then each Date Cell's rows in start-time order.
     private func layoutWeek(
-        _ events: [NormalizedEvent],
+        _ events: [CalendarEvent],
         weekStart: Date
     ) -> CalendarEventWeekLayout {
         let calendar = environment.calendar
@@ -2448,14 +2142,14 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// Popover's complete day list share this one placement so their lane
     /// ordering can never drift.
     private func placedBarSegments(
-        _ events: [NormalizedEvent],
+        _ events: [CalendarEvent],
         weekStart: Date
     ) -> [CalendarEventBarSegment] {
         let calendar = environment.calendar
         let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart)!
 
         struct PlacedBar {
-            let event: NormalizedEvent
+            let event: CalendarEvent
             let startDate: Date
             let endDate: Date
             let startsAt: Date
@@ -2638,137 +2332,4 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
         refreshCadenceSeconds
     )
 
-    /// The readable text tone on an Event Color: whichever of Planner's
-    /// ink or white has the stronger APCA lightness contrast against it.
-    /// APCA — the W3C's perceptually calibrated WCAG 3 candidate — ranks
-    /// pairings the way the eye reads them; the WCAG 2.x ratio it
-    /// replaces overvalued dark text on mid-dark saturated colors,
-    /// rendering barely readable ink on Google's blues (iOS ADR 0004).
-    static func textTone(forHexColor hexColor: String) -> CalendarEventTextTone {
-        guard let color = EventColorRGB(hex: hexColor) else {
-            return .light
-        }
-        let luminance = color.relativeLuminance
-        let darkLc = apcaContrast(
-            textLuminance: darkTextRelativeLuminance,
-            backgroundLuminance: luminance
-        )
-        let lightLc = apcaContrast(
-            textLuminance: 1.0,
-            backgroundLuminance: luminance
-        )
-        return abs(darkLc) >= abs(lightLc) ? .dark : .light
-    }
-
-    /// The APCA lightness contrast (Lc) of a text color on a background,
-    /// from their WCAG relative luminances: positive for dark text on a
-    /// light ground, negative for light text on a dark ground, with
-    /// polarity-dependent exponents modeling how the eye reads each
-    /// pairing; a pairing too weak to read clips to zero. Constants are
-    /// the published apca-w3 ones.
-    private static func apcaContrast(
-        textLuminance: Double,
-        backgroundLuminance: Double
-    ) -> Double {
-        let blackThreshold = 0.022
-        let text = textLuminance > blackThreshold
-            ? textLuminance
-            : textLuminance + pow(blackThreshold - textLuminance, 1.414)
-        let background = backgroundLuminance > blackThreshold
-            ? backgroundLuminance
-            : backgroundLuminance + pow(blackThreshold - backgroundLuminance, 1.414)
-        guard abs(background - text) >= 0.0005 else {
-            return 0
-        }
-        if background > text {
-            let contrast = pow(background, 0.56) - pow(text, 0.57)
-            return contrast < 0.1 ? 0 : contrast * 1.14 * 100
-        }
-        let contrast = pow(background, 0.62) - pow(text, 0.65)
-        return contrast > -0.1 ? 0 : contrast * 1.14 * 100
-    }
-
-    /// The WCAG relative luminance of the dark text candidate, Planner's
-    /// ink (PlannerPalette.ink: sRGB 0.114, 0.129, 0.071).
-    private static let darkTextRelativeLuminance =
-        EventColorRGB.relativeLuminance(
-            red: 0.114,
-            green: 0.129,
-            blue: 0.071
-        )
-}
-
-private extension String {
-    /// Trims an optional Google string at the model seam, returning
-    /// `nil` when nothing but whitespace remains — the shared
-    /// blank-means-absent rule for titles and optional detail fields.
-    var trimmedToNil: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-}
-
-private extension CalendarEventsModel {
-    /// Maps one in-memory normalized event to its Stored Calendar Event
-    /// record: the full normalized Calendar Event model exactly as the
-    /// surface renders it — never a raw Google payload (iOS ADR 0007).
-    private static func storedEvent(
-        from event: NormalizedEvent
-    ) -> StoredCalendarEvent {
-        let kind: StoredCalendarEvent.Kind
-        switch event.kind {
-        case .bar(let startDate, let endDate, let startsAt):
-            kind = .bar(
-                startDate: startDate,
-                endDate: endDate,
-                startsAt: startsAt
-            )
-        case .row(let date, let startsAt, let startTimeText):
-            kind = .row(
-                date: date,
-                startsAt: startsAt,
-                startTimeText: startTimeText
-            )
-        }
-        return StoredCalendarEvent(
-            id: event.id,
-            sourceCalendar: event.sourceCalendar,
-            title: event.title,
-            colorHex: event.colorHex,
-            textTone: event.textTone,
-            kind: kind,
-            detail: event.detail
-        )
-    }
-
-    /// Maps one Stored Calendar Event record back to the in-memory
-    /// normalized model for launch presentation.
-    private static func normalizedEvent(
-        from stored: StoredCalendarEvent
-    ) -> NormalizedEvent {
-        let kind: NormalizedEvent.Kind
-        switch stored.kind {
-        case .bar(let startDate, let endDate, let startsAt):
-            kind = .bar(
-                startDate: startDate,
-                endDate: endDate,
-                startsAt: startsAt
-            )
-        case .row(let date, let startsAt, let startTimeText):
-            kind = .row(
-                date: date,
-                startsAt: startsAt,
-                startTimeText: startTimeText
-            )
-        }
-        return NormalizedEvent(
-            id: stored.id,
-            sourceCalendar: stored.sourceCalendar,
-            title: stored.title,
-            colorHex: stored.colorHex,
-            textTone: stored.textTone,
-            kind: kind,
-            detail: stored.detail
-        )
-    }
 }

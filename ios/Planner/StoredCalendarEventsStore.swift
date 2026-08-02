@@ -1,44 +1,20 @@
 import Foundation
 
-/// One Stored Calendar Event (iOS Experience glossary; ADR 0007): the full
-/// normalized Calendar Event model exactly as the surface renders it —
-/// canonical identity, winning Source Calendar identity, title, timing,
-/// Event Color, location, notes (plain text, post-normalization),
-/// attendees, and Google link. Raw Google API responses never cross into
-/// this record.
-struct StoredCalendarEvent: Equatable, Sendable, Codable {
-    /// The canonical cross-calendar occurrence identity.
-    let id: String
-    /// The winning Source Calendar's identity and presentation attributes.
-    let sourceCalendar: GoogleSourceCalendar
-    let title: String
-    /// The Event Color as a `#RRGGBB` hex string.
-    let colorHex: String
-    let textTone: CalendarEventTextTone
-    let kind: Kind
-    /// The Event Detail Popover payload, so a stored event's detail opens
-    /// offline exactly as a freshly fetched one's does.
-    let detail: CalendarEventDetail
-
-    /// The normalized bar-or-row classification in local dates, exactly as
-    /// normalized at fetch time.
-    enum Kind: Equatable, Sendable, Codable {
-        /// An all-day or multiday bar over inclusive local dates.
-        case bar(startDate: Date, endDate: Date, startsAt: Date)
-
-        /// An intraday row on one local date.
-        case row(date: Date, startsAt: Date, startTimeText: String)
-    }
-}
-
 /// One account's complete Stored Calendar Events: the device-local mirror
 /// of the Fetched Window. The store holds at most one account's snapshot
 /// at a time — Stored Calendar Events never cross accounts (ADR 0007).
+///
+/// A Stored Calendar Event is the Calendar Event itself: the full
+/// normalized model exactly as the surface renders it — canonical
+/// identity, winning Source Calendar identity, title, timing, Event
+/// Color, location, notes (plain text, post-normalization), attendees,
+/// and Google link. Raw Google API responses never cross into this
+/// record (ADR 0007).
 struct StoredCalendarEventsSnapshot: Equatable, Sendable, Codable {
     /// Google's stable opaque identifier of the account that fetched the
     /// events.
     let accountID: String
-    let events: [StoredCalendarEvent]
+    let events: [CalendarEvent]
 }
 
 /// The persistence boundary for Stored Calendar Events (ADR 0007). The

@@ -72,6 +72,10 @@ _Avoid_: Calendar sync, selection reset, calendar reload
 A Google Calendar event obtained by Planner from a Source Calendar included in the Selected Source Calendars for that fetch.
 _Avoid_: Event item, schedule entry, appointment
 
+**Calendar Event Normalization**:
+The application of Planner's product rules to fetched Google Calendar events: cancelled and declined events drop out, duplicate copies of one canonical occurrence collapse to the Primary Source Calendar copy when present, blank titles become “Busy”, all-day ends turn inclusive, and every event classifies as a Calendar Event Bar or a Calendar Event Row in the viewer's local dates.
+_Avoid_: mapping, conversion, parsing
+
 **Event Color**:
 The color of a Calendar Event: its explicit Google event color when one is set, otherwise the background color of its Source Calendar.
 _Avoid_: Event tint, calendar color, event background

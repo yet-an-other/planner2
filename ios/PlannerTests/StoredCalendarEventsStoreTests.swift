@@ -29,7 +29,7 @@ struct StoredCalendarEventsStoreTests {
             backgroundColorHex: "#039BE5",
             isPrimary: true
         )
-        let bar = StoredCalendarEvent(
+        let bar = CalendarEvent(
             id: "ical:uid-conference@google.com:occurrence:date-2026-7-20",
             sourceCalendar: source,
             title: "Conference",
@@ -57,7 +57,7 @@ struct StoredCalendarEventsStoreTests {
                 hiddenAttendeeCount: 3
             )
         )
-        let row = StoredCalendarEvent(
+        let row = CalendarEvent(
             id: "src:primary@example.com:event:standup",
             sourceCalendar: source,
             title: "Standup",

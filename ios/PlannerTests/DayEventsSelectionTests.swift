@@ -415,7 +415,7 @@ struct DayEventsSelectionTests {
         #expect(bar.colorHex == "#039BE5")
         #expect(
             bar.textTone
-                == CalendarEventsModel.textTone(forHexColor: "#039BE5")
+                == CalendarEventNormalization.textTone(forHexColor: "#039BE5")
         )
     }
 
