@@ -518,53 +518,22 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     @ObservationIgnored
     private var environment: CalendarEnvironment
 
-    /// The last visible range reported by the Calendar Screen, re-checked
-    /// when connectivity returns so owed slabs retry.
+    /// Calendar Event Fetch Orchestration (Planning glossary): every
+    /// fetch-work decision — the initial Fetched Window fetch, Fetched
+    /// Window growth, bounded Calendar Event Refresh, selection
+    /// replacement, browsing freshness, cadence, picker gating, and
+    /// connectivity retry — lives behind this pure reducer. The model
+    /// translates signals into events, executes the emitted fetch
+    /// commands, and reports applied outcomes back.
     @ObservationIgnored
-    private var lastVisibleRange: (start: Date, end: Date)?
-
-    /// Whether the initial Fetched Window fetch is in flight.
-    @ObservationIgnored
-    private var isFetchingInitialWindow = false
-
-    /// Whether a bounded Calendar Event Refresh is in flight.
-    @ObservationIgnored
-    private var isRefreshingEvents = false
-
-    /// Foreground and recovery signals coalesce here while another Calendar
-    /// Event request owns the serialized adapter seam.
-    @ObservationIgnored
-    private var isRefreshPending = false
-
-    /// Routine Calendar Event work pauses while the native Source Calendar
-    /// Picker is open. Signals still coalesce in their existing pending flags.
-    @ObservationIgnored
-    private var isSourceCalendarPickerPresented = false
-
-    /// A final changed selection owes one whole-snapshot, visible-centered
-    /// replacement. It takes priority over slabs and bounded refreshes.
-    @ObservationIgnored
-    private var isSelectionReplacementPending = false
-
-    /// Whether that whole-snapshot replacement currently owns the serialized
-    /// aggregate adapter seam.
-    @ObservationIgnored
-    private var isReplacingSelection = false
-
-    /// A changed visible range leaves one freshness decision owed while
-    /// another Calendar Event request owns the serialized adapter seam.
-    @ObservationIgnored
-    private var needsBrowsingFreshnessCheck = false
-
-    /// A failed Calendar Event Refresh remains owed so connectivity return
-    /// can retry it and other fetch progress can restore its warning.
-    @ObservationIgnored
-    private var refreshFailure: GoogleCalendarEventsFailure?
+    private var orchestration = CalendarEventFetchOrchestration.State()
 
     /// The local-date bounds of the Fetched Window, when it has been
-    /// fetched: `[windowStart, windowEnd)` as start-of-day instants.
+    /// fetched: `[windowStart, windowEnd)` as start-of-day instants. The
+    /// model owns the window as effect-side truth; every change is
+    /// reported to the orchestration.
     @ObservationIgnored
-    private var fetchedWindow: (start: Date, end: Date)?
+    private var fetchedWindow: CalendarEventFetchOrchestration.FetchRange?
 
     /// Every fetched event in normalized form, retained so a slab can
     /// recompute its boundary Week Row from old and new events together.
@@ -575,46 +544,10 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     @ObservationIgnored
     private var normalizedEvents: [CalendarEvent] = []
 
-    /// Successful initial, slab, and refresh completion coverage. This is
-    /// process-local bookkeeping only: it is never persisted and vanishes
-    /// with Disconnect on This Device or model teardown.
-    @ObservationIgnored
-    private var freshnessCoverage: [FreshnessCoverage] = []
-
-    /// In-flight slab directions, so repeated edge approaches can never
-    /// duplicate a fetch.
-    @ObservationIgnored
-    private var isExtendingForward = false
-
-    @ObservationIgnored
-    private var isExtendingBackward = false
-
-    /// A failed slab waits for another visible-range or connectivity signal
-    /// instead of looping immediately through serialized follow-up work.
-    @ObservationIgnored
-    private var isSlabRetryBlocked = false
-
-    /// Whether the iOS scene is foreground-active. Calendar Event Refresh
-    /// cadence exists only while this and the connection are both active.
-    @ObservationIgnored
-    private var isSceneActive = false
-
-    /// The single cancellable five-minute wait. A new Calendar Event request
-    /// cancels it; the next wait begins only after serialized work completes.
+    /// The single cancellable five-minute wait, reconciled against the
+    /// orchestration's cadence decision after every event.
     @ObservationIgnored
     private var cadenceSchedule: (any CalendarEventsCadenceSchedule)?
-
-    /// Whether the module currently treats the Google Account Connection
-    /// as connected; repeated reports of the same state are no-ops, so a
-    /// republished connection can never wedge or duplicate a fetch.
-    @ObservationIgnored
-    private var isConnected = false
-
-    /// Production receives a disclosure-gated, reconciled selection from the
-    /// Source Calendars module. The legacy connection method remains as a
-    /// deterministic test and preview seam for the earlier Primary-only path.
-    @ObservationIgnored
-    private var usesResolvedSourceCalendars = false
 
     /// Monotonic marker of the latest connection decision, so a stale
     /// asynchronous fetch completion can never overwrite newer user intent
@@ -829,24 +762,19 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     func setSelectedSourceCalendars(
         _ selectedSourceCalendars: [GoogleSourceCalendar]?
     ) {
-        guard let adapter else {
+        guard adapter != nil else {
             return
         }
         let selected = selectedSourceCalendars ?? []
         let connected = selectedSourceCalendars != nil
-        guard !usesResolvedSourceCalendars
-                || connected != isConnected
+        guard !orchestration.usesResolvedSourceCalendars
+                || connected != orchestration.isConnected
                 || selected != sourceCalendars
         else {
             return
         }
 
-        usesResolvedSourceCalendars = true
-        isConnected = connected
         connectionGeneration += 1
-        cancelCadence()
-        isSourceCalendarPickerPresented = false
-        isSelectionReplacementPending = false
         // Stored Calendar Events presented at process start stay on the
         // surface across selection publications until the first successful
         // response replaces them atomically: the grid never blanks behind
@@ -866,22 +794,18 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
         selectedEvent = nil
         selectedEventDrilledFromDay = nil
         selectedDayEvents = nil
-        freshnessCoverage = []
-        needsBrowsingFreshnessCheck = false
-        isRefreshPending = false
-        refreshFailure = nil
-        isSlabRetryBlocked = false
-        status = CalendarEventsStatus(message: nil, tone: .info)
-
-        guard connected, !selected.isEmpty else {
+        if connected && selected.isEmpty {
             // The zero-source exception mirrors an empty Fetched Window:
             // the account's Stored Calendar Events empty with it.
-            if connected {
-                writeStore()
-            }
-            return
+            writeStore()
         }
-        beginInitialFetch(adapter: adapter)
+        feed(
+            .connectionPublished(
+                connected: connected,
+                usesResolvedSelection: true,
+                selectionIsEmpty: selected.isEmpty
+            )
+        )
     }
 
     /// The Calendar-data boundary's account publication. An account
@@ -927,7 +851,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// existed — and the first successful response replaces it
     /// atomically.
     func presentStoredCalendarEvents() {
-        guard !isConnected, normalizedEvents.isEmpty,
+        guard !orchestration.isConnected, normalizedEvents.isEmpty,
               let snapshot = eventStore?.loadSnapshot()
         else {
             return
@@ -995,11 +919,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// Pauses new routine work while the native picker is open. Physical work
     /// already in flight may finish; all new triggers continue to coalesce.
     func sourceCalendarPickerDidOpen() {
-        guard isConnected, !isSourceCalendarPickerPresented else {
-            return
-        }
-        isSourceCalendarPickerPresented = true
-        cancelCadence()
+        feed(.pickerPresented)
     }
 
     /// Resumes routine work after an unchanged dismissal, or invalidates older
@@ -1009,61 +929,123 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
         selectedSourceCalendars: [GoogleSourceCalendar],
         selectionChanged: Bool
     ) {
-        guard isConnected, isSourceCalendarPickerPresented else {
+        guard orchestration.isConnected, orchestration.isPickerPresented else {
             return
         }
-        isSourceCalendarPickerPresented = false
-
         if selectionChanged {
             sourceCalendars = selectedSourceCalendars
             connectionGeneration += 1
-            cancelCadence()
-            isSelectionReplacementPending = true
-            refreshFailure = nil
-            status = CalendarEventsStatus(
-                message: CalendarEventsCopy.updatingSelection,
-                tone: .info
-            )
         }
-
-        drainFetchWork()
-        scheduleCadenceIfEligible()
+        feed(.pickerDismissed(selectionChanged: selectionChanged))
     }
 
     /// Legacy Primary-only connection seam retained for deterministic tests
     /// and previews. Production uses `setSelectedSourceCalendars(_:)`.
     func setConnected(_ connected: Bool) {
-        guard let adapter, connected != isConnected else {
+        guard adapter != nil, connected != orchestration.isConnected else {
             return
         }
-
-        usesResolvedSourceCalendars = false
-        isConnected = connected
         connectionGeneration += 1
 
         guard connected else {
-            cancelCadence()
-            isSourceCalendarPickerPresented = false
-            isSelectionReplacementPending = false
             fetchedWindow = nil
             sourceCalendars = []
             normalizedEvents = []
             selectedEvent = nil
             selectedDayEvents = nil
-            freshnessCoverage = []
-            needsBrowsingFreshnessCheck = false
-            // The active request keeps its operation flag until its adapter
-            // call returns. A reconnect queues behind that physical work;
-            // only publication is invalidated immediately.
-            isRefreshPending = false
-            refreshFailure = nil
-            isSlabRetryBlocked = false
             weekLayouts = [:]
-            status = CalendarEventsStatus(message: nil, tone: .info)
+            feed(
+                .connectionPublished(
+                    connected: false,
+                    usesResolvedSelection: false,
+                    selectionIsEmpty: false
+                )
+            )
             return
         }
 
-        beginInitialFetch(adapter: adapter)
+        feed(
+            .connectionPublished(
+                connected: true,
+                usesResolvedSelection: false,
+                selectionIsEmpty: false
+            )
+        )
+    }
+
+    /// Feeds one signal through Calendar Event Fetch Orchestration:
+    /// applies the event, publishes the decided status, executes every
+    /// emitted fetch command, and reconciles cadence against the new
+    /// decision state. A `nil` adapter leaves the module permanently
+    /// inert: no event is ever fed, nothing fetches, nothing renders.
+    private func feed(_ event: CalendarEventFetchOrchestration.Event) {
+        guard let adapter else {
+            return
+        }
+        let commands = CalendarEventFetchOrchestration.handle(
+            &orchestration,
+            event,
+            environment: environment,
+            now: cadenceScheduler.now
+        )
+        status = orchestration.status
+        for command in commands {
+            execute(command, adapter: adapter)
+        }
+        reconcileCadence()
+    }
+
+    /// Starts one serialized Calendar Event request the orchestration
+    /// decided on. The completion — applied, failed, or discarded as
+    /// stale — is reported back as an event.
+    private func execute(
+        _ command: CalendarEventFetchOrchestration.Command,
+        adapter: any GoogleCalendarEventsAdapting
+    ) {
+        switch command {
+        case .beginInitialFetch(let windowStart, let windowEnd):
+            beginInitialFetch(
+                adapter: adapter,
+                windowStart: windowStart,
+                windowEnd: windowEnd
+            )
+        case .extendWindow(let from, let to, let direction):
+            extend(adapter: adapter, from: from, to: to, direction: direction)
+        case .refresh(let start, let end):
+            beginRefresh(adapter: adapter, start: start, end: end)
+        case .replaceSelection(let start, let end):
+            beginSelectionReplacement(adapter: adapter, start: start, end: end)
+        }
+    }
+
+    /// Reconciles the pending cadence wait against the orchestration's
+    /// decision: scheduled only while bounded refresh has every input it
+    /// needs and no serialized work is outstanding, making cadence
+    /// completion-relative instead of wall-clock based.
+    private func reconcileCadence() {
+        guard orchestration.wantsCadence else {
+            cancelCadence()
+            return
+        }
+        guard cadenceSchedule == nil else {
+            return
+        }
+        cadenceSchedule = cadenceScheduler.schedule(
+            after: CalendarEventFetchOrchestration.cadenceInterval
+        ) { [weak self] in
+            guard let self else {
+                return
+            }
+            cadenceSchedule = nil
+            feed(.cadenceFired)
+        }
+    }
+
+    /// Cancels the pending interval synchronously. Its action captures the
+    /// model weakly, so scheduler ownership can never extend model lifetime.
+    private func cancelCadence() {
+        cadenceSchedule?.cancel()
+        cadenceSchedule = nil
     }
 
     /// Fetches the initial Fetched Window — three months before Today
@@ -1071,39 +1053,14 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// Status. A failure reports Planner-owned copy and leaves the window
     /// unfetched: an offline failure retries when connectivity returns.
     private func beginInitialFetch(
-        adapter: any GoogleCalendarEventsAdapting
+        adapter: any GoogleCalendarEventsAdapting,
+        windowStart: Date,
+        windowEnd: Date
     ) {
-        guard fetchedWindow == nil, !hasFetchInFlight,
-              !isSourceCalendarPickerPresented,
-              !usesResolvedSourceCalendars || !sourceCalendars.isEmpty
-        else {
-            return
-        }
-
-        let calendar = environment.calendar
-        let today = calendar.startOfDay(for: environment.now)
-        guard
-            let windowStart = addMonthsClamped(-3, to: today),
-            let lastDay = addMonthsClamped(3, to: today),
-            let windowEnd = calendar.date(
-                byAdding: .day,
-                value: 1,
-                to: lastDay
-            )
-        else {
-            return
-        }
-
-        cancelCadence()
-        isFetchingInitialWindow = true
-        status = CalendarEventsStatus(
-            message: CalendarEventsCopy.loading,
-            tone: .info
-        )
-
         let attempt = connectionGeneration
         let resolvedSourceCalendars = sourceCalendars
-        let usesResolvedSourceCalendars = usesResolvedSourceCalendars
+        let usesResolvedSourceCalendars =
+            orchestration.usesResolvedSourceCalendars
         let sourceCalendarRecovery = sourceCalendarRecovery
         Task { [weak self] in
             let requestedSourceCalendars: [GoogleSourceCalendar]
@@ -1111,12 +1068,11 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
                 requestedSourceCalendars = resolvedSourceCalendars
             } else {
                 let sourceOutcome = await adapter.fetchPrimarySourceCalendar()
-                guard self != nil else {
+                guard let self else {
                     return
                 }
-                guard self?.connectionGeneration == attempt else {
-                    self?.isFetchingInitialWindow = false
-                    self?.resumeAfterStaleFetch()
+                guard self.connectionGeneration == attempt else {
+                    self.feed(.fetchCompleted(.initial, .discarded))
                     return
                 }
 
@@ -1124,9 +1080,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
                 case .success(let sourceCalendar):
                     requestedSourceCalendars = [sourceCalendar]
                 case .unavailable(let failure):
-                    self?.isFetchingInitialWindow = false
-                    self?.publishInitialFailure(failure)
-                    self?.scheduleCadenceIfEligible()
+                    self.feed(.fetchCompleted(.initial, .failed(failure)))
                     return
                 }
             }
@@ -1147,18 +1101,20 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
                 return
             }
             guard attempt == connectionGeneration else {
-                isFetchingInitialWindow = false
-                resumeAfterStaleFetch()
+                feed(.fetchCompleted(.initial, .discarded))
                 return
             }
-            isFetchingInitialWindow = false
             // Adopt the effective selection even when the retry failed: it
             // is the persisted truth later requests must use.
             sourceCalendars = result.sourceCalendars
 
             switch result.outcome {
             case .success(let events, let eventColorBackgrounds):
-                fetchedWindow = (windowStart, windowEnd)
+                let window = CalendarEventFetchOrchestration.FetchRange(
+                    start: windowStart,
+                    end: windowEnd
+                )
+                fetchedWindow = window
                 normalizedEvents = CalendarEventNormalization.normalize(
                     events,
                     eventColorBackgrounds: eventColorBackgrounds,
@@ -1168,34 +1124,11 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
                 writeStore()
                 weekLayouts = [:]
                 publishWeeks(covering: (start: windowStart, end: windowEnd))
-                recordFreshness(
-                    for: (start: windowStart, end: windowEnd),
-                    completedAt: cadenceScheduler.now
-                )
-                clearStatusIfIdle()
-                drainFetchWork()
-                scheduleCadenceIfEligible()
+                feed(.fetchedWindowChanged(to: window))
+                feed(.fetchCompleted(.initial, .applied(window)))
             case .unavailable(let failure):
-                publishInitialFailure(failure)
-                scheduleCadenceIfEligible()
+                feed(.fetchCompleted(.initial, .failed(failure)))
             }
-        }
-    }
-
-    /// Publishes Planner-owned initial-fetch failure copy for either Primary
-    /// Source Calendar discovery or its aggregate Calendar Event request.
-    private func publishInitialFailure(_ failure: GoogleCalendarEventsFailure) {
-        status = switch failure {
-        case .offline:
-            CalendarEventsStatus(
-                message: CalendarEventsCopy.offline,
-                tone: .warning
-            )
-        case .sourceUnavailable, .failed:
-            CalendarEventsStatus(
-                message: CalendarEventsCopy.failed,
-                tone: .error
-            )
         }
     }
 
@@ -1244,69 +1177,24 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// slice; leaving the foreground cancels cadence and any queued refresh
     /// signal while allowing a physical request already in flight to finish.
     func setSceneActive(_ active: Bool) {
-        guard active != isSceneActive else {
-            return
-        }
-
-        isSceneActive = active
-        guard active else {
-            isRefreshPending = false
-            cancelCadence()
-            return
-        }
-        guard isConnected, let adapter else {
-            return
-        }
-        if isSelectionReplacementPending {
-            drainFetchWork()
-            scheduleCadenceIfEligible()
-        } else if fetchedWindow == nil {
-            beginInitialFetch(adapter: adapter)
-        } else {
-            requestRefresh()
-        }
+        feed(.sceneActive(active))
     }
 
     /// Requests a bounded Calendar Event Refresh after the app returns to
     /// the foreground. One pending signal survives initial, slab, or refresh
     /// work and later uses the newest visible range.
     func refreshOnForeground() {
-        if isSceneActive {
-            requestRefresh()
-        } else {
-            setSceneActive(true)
-        }
+        feed(.foregroundRefresh)
     }
 
-    /// Coalesces one refresh signal against current scene and range state.
-    private func requestRefresh() {
-        guard adapter != nil, isConnected, isSceneActive,
-              (fetchedWindow != nil || isSelectionReplacementPending),
-              lastVisibleRange != nil
-        else {
-            return
-        }
-        isRefreshPending = true
-        drainFetchWork()
-    }
-
-    /// Starts the already-authorized refresh decision. The latest visible
-    /// dates grow by one month on each side and clamp to the Fetched Window;
-    /// refresh never expands it.
+    /// Runs the orchestration's bounded Calendar Event Refresh decision.
+    /// The latest visible dates grow by one month on each side and clamp
+    /// to the Fetched Window; refresh never expands it.
     private func beginRefresh(
         adapter: any GoogleCalendarEventsAdapting,
-        window: (start: Date, end: Date),
-        visible: (start: Date, end: Date)
-    ) -> Bool {
-        guard let range = boundedRefreshRange(window: window, visible: visible)
-        else {
-            return false
-        }
-        let refreshStart = range.start
-        let refreshEnd = range.end
-
-        cancelCadence()
-        isRefreshingEvents = true
+        start refreshStart: Date,
+        end refreshEnd: Date
+    ) {
         let attempt = connectionGeneration
         let requestedSourceCalendars = sourceCalendars
         let sourceCalendarRecovery = sourceCalendarRecovery
@@ -1321,15 +1209,18 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
             guard let self else {
                 return
             }
-            isRefreshingEvents = false
             guard attempt == connectionGeneration else {
-                resumeAfterStaleFetch()
+                feed(.fetchCompleted(.refresh, .discarded))
                 return
             }
             // Adopt the effective selection even when the retry failed: it
             // is the persisted truth later requests must use.
             sourceCalendars = result.sourceCalendars
 
+            let range = CalendarEventFetchOrchestration.FetchRange(
+                start: refreshStart,
+                end: refreshEnd
+            )
             switch result.outcome {
             case .success(let events, let eventColorBackgrounds):
                 applyRefresh(
@@ -1338,20 +1229,11 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
                     range: (start: refreshStart, end: refreshEnd)
                 )
                 writeStore()
-                recordFreshness(
-                    for: (start: refreshStart, end: refreshEnd),
-                    completedAt: cadenceScheduler.now
-                )
-                refreshFailure = nil
-                clearStatusIfIdle()
+                feed(.fetchCompleted(.refresh, .applied(range)))
             case .unavailable(let failure):
-                refreshFailure = failure
-                clearStatusIfIdle()
+                feed(.fetchCompleted(.refresh, .failed(failure)))
             }
-            drainFetchWork()
-            scheduleCadenceIfEligible()
         }
-        return true
     }
 
     /// Atomically replaces Calendar Events intersecting one successful
@@ -1456,51 +1338,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// initial window, failed Calendar Event Refresh, or failed slab retries
     /// against the latest visible range.
     private func handleConnectivityReturn() {
-        guard isConnected, let adapter else {
-            return
-        }
-
-        isSlabRetryBlocked = false
-        if isSelectionReplacementPending {
-            drainFetchWork()
-        } else if fetchedWindow == nil {
-            beginInitialFetch(adapter: adapter)
-        } else if isRefreshingEvents || refreshFailure != nil {
-            // Preserve this recovery signal if the request that observed the
-            // offline state has not completed yet.
-            requestRefresh()
-        } else if let lastVisibleRange {
-            showVisibleRange(
-                from: lastVisibleRange.start,
-                through: lastVisibleRange.end
-            )
-        }
-    }
-
-    /// Clears the status once no fetch work remains in flight; failure
-    /// copy stays until fresh progress or a success supersedes it.
-    private func clearStatusIfIdle() {
-        guard !isFetchingInitialWindow,
-              !isRefreshingEvents,
-              !isExtendingForward,
-              !isExtendingBackward
-        else {
-            return
-        }
-        status = switch refreshFailure {
-        case .offline:
-            CalendarEventsStatus(
-                message: CalendarEventsCopy.refreshOffline,
-                tone: .warning
-            )
-        case .sourceUnavailable, .failed:
-            CalendarEventsStatus(
-                message: CalendarEventsCopy.refreshFailed,
-                tone: .warning
-            )
-        case nil:
-            CalendarEventsStatus(message: nil, tone: .info)
-        }
+        feed(.connectivityReturned)
     }
 
     /// Reports the currently visible local-date range (as Week Row start
@@ -1510,165 +1348,7 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// the next approach retries it. Approaches before the initial window
     /// lands do nothing — the initial fetch owns that range.
     func showVisibleRange(from visibleStart: Date, through visibleEnd: Date) {
-        if lastVisibleRange?.start != visibleStart
-            || lastVisibleRange?.end != visibleEnd
-        {
-            needsBrowsingFreshnessCheck = true
-        }
-        lastVisibleRange = (visibleStart, visibleEnd)
-        isSlabRetryBlocked = false
-        drainFetchWork()
-        scheduleCadenceIfEligible()
-    }
-
-    /// Calendar API requests share one serialized seam. Slab expansion leads
-    /// a pending refresh so the latter can clamp against the latest Fetched
-    /// Window; all decisions use the newest visible range.
-    private func drainFetchWork(allowSlab: Bool = true) {
-        guard !hasFetchInFlight, let adapter, isConnected,
-              !isSourceCalendarPickerPresented
-        else {
-            return
-        }
-
-        if isSelectionReplacementPending {
-            beginSelectionReplacement(adapter: adapter)
-            return
-        }
-
-        guard let window = fetchedWindow, let visible = lastVisibleRange else {
-            return
-        }
-
-        let calendar = environment.calendar
-        if allowSlab, !isSlabRetryBlocked,
-           let lastFetchedDay = calendar.date(
-               byAdding: .day,
-               value: -1,
-               to: window.end
-           ),
-           let forwardTrigger = addMonthsClamped(-1, to: lastFetchedDay),
-           visible.end >= forwardTrigger,
-           let newLastDay = addMonthsClamped(2, to: lastFetchedDay),
-           let proposedEnd = calendar.date(
-               byAdding: .day,
-               value: 1,
-               to: newLastDay
-           ),
-           let extendedRange = extendedCalendarRange(),
-           case let newEnd = min(proposedEnd, extendedRange.end),
-           newEnd > window.end
-        {
-            isExtendingForward = true
-            extend(
-                adapter: adapter,
-                from: window.end,
-                to: newEnd,
-                direction: .forward
-            )
-            return
-        }
-
-        if allowSlab, !isSlabRetryBlocked,
-           let backwardTrigger = addMonthsClamped(1, to: window.start),
-           visible.start <= backwardTrigger,
-           let proposedStart = addMonthsClamped(-2, to: window.start),
-           let extendedRange = extendedCalendarRange(),
-           case let newStart = max(proposedStart, extendedRange.start),
-           newStart < window.start
-        {
-            isExtendingBackward = true
-            extend(
-                adapter: adapter,
-                from: newStart,
-                to: window.start,
-                direction: .backward
-            )
-            return
-        }
-
-        if needsBrowsingFreshnessCheck, isSceneActive,
-           let range = boundedRefreshRange(window: window, visible: visible)
-        {
-            needsBrowsingFreshnessCheck = false
-            if !isFresh(range, at: cadenceScheduler.now) {
-                isRefreshPending = true
-            }
-        }
-
-        guard isRefreshPending, isSceneActive else {
-            return
-        }
-        isRefreshPending = false
-        if !beginRefresh(adapter: adapter, window: window, visible: visible) {
-            // A visible range can sit beyond a failed expansion slab. Keep
-            // the coalesced refresh owed, but re-arm cadence instead of
-            // losing it or spinning while no bounded overlap exists.
-            isRefreshPending = true
-            scheduleCadenceIfEligible()
-        }
-    }
-
-    /// Starts one five-minute wait only when bounded refresh has every input
-    /// it needs. The wait begins after all immediately coalesced fetch work
-    /// drains, making cadence completion-relative instead of wall-clock based.
-    private func scheduleCadenceIfEligible() {
-        guard cadenceSchedule == nil, !hasFetchInFlight, isConnected,
-              !isSourceCalendarPickerPresented, isSceneActive,
-              (fetchedWindow != nil || isSelectionReplacementPending),
-              lastVisibleRange != nil
-        else {
-            return
-        }
-        cadenceSchedule = cadenceScheduler.schedule(
-            after: Self.refreshCadence
-        ) { [weak self] in
-            guard let self else {
-                return
-            }
-            cadenceSchedule = nil
-            if isSelectionReplacementPending {
-                drainFetchWork()
-                scheduleCadenceIfEligible()
-            } else {
-                requestRefresh()
-            }
-        }
-    }
-
-    /// Cancels the pending interval synchronously. Its action captures the
-    /// model weakly, so scheduler ownership can never extend model lifetime.
-    private func cancelCadence() {
-        cadenceSchedule?.cancel()
-        cadenceSchedule = nil
-    }
-
-    private var hasFetchInFlight: Bool {
-        isFetchingInitialWindow || isRefreshingEvents || isExtendingForward
-            || isExtendingBackward || isReplacingSelection
-    }
-
-    /// Once an obsolete physical request releases the serialized adapter
-    /// seam, continue the current connection's initial fetch or queued work.
-    private func resumeAfterStaleFetch() {
-        guard isConnected, let adapter else {
-            return
-        }
-        if isSelectionReplacementPending {
-            drainFetchWork()
-            scheduleCadenceIfEligible()
-        } else if fetchedWindow == nil {
-            beginInitialFetch(adapter: adapter)
-        } else {
-            drainFetchWork()
-            scheduleCadenceIfEligible()
-        }
-    }
-
-    /// One slab direction of the Fetched Window.
-    private enum ExtensionDirection {
-        case forward
-        case backward
+        feed(.visibleRange(start: visibleStart, end: visibleEnd))
     }
 
     /// Fetches one slab and, on success, grows the window over it and
@@ -1680,14 +1360,14 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
         adapter: any GoogleCalendarEventsAdapting,
         from fetchStart: Date,
         to fetchEnd: Date,
-        direction: ExtensionDirection
+        direction: CalendarEventFetchOrchestration.ExtensionDirection
     ) {
-        cancelCadence()
+        let kind: CalendarEventFetchOrchestration.FetchKind =
+            switch direction {
+            case .forward: .slabForward
+            case .backward: .slabBackward
+            }
         let attempt = connectionGeneration
-        status = CalendarEventsStatus(
-            message: CalendarEventsCopy.loading,
-            tone: .info
-        )
         let requestedSourceCalendars = sourceCalendars
         let sourceCalendarRecovery = sourceCalendarRecovery
         Task { [weak self] in
@@ -1702,15 +1382,8 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
             guard let self else {
                 return
             }
-
-            switch direction {
-            case .forward:
-                isExtendingForward = false
-            case .backward:
-                isExtendingBackward = false
-            }
             guard attempt == connectionGeneration else {
-                resumeAfterStaleFetch()
+                feed(.fetchCompleted(kind, .discarded))
                 return
             }
             sourceCalendars = result.sourceCalendars
@@ -1740,32 +1413,20 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
                     fetchedWindow?.start = fetchStart
                 }
                 publishWeeks(covering: (start: fetchStart, end: fetchEnd))
-                recordFreshness(
-                    for: (start: fetchStart, end: fetchEnd),
-                    completedAt: cadenceScheduler.now
+                feed(.fetchedWindowChanged(to: fetchedWindow))
+                feed(
+                    .fetchCompleted(
+                        kind,
+                        .applied(
+                            CalendarEventFetchOrchestration.FetchRange(
+                                start: fetchStart,
+                                end: fetchEnd
+                            )
+                        )
+                    )
                 )
-                isSlabRetryBlocked = false
-                clearStatusIfIdle()
-                drainFetchWork()
-                scheduleCadenceIfEligible()
             case .unavailable(let failure):
-                status = switch failure {
-                case .offline:
-                    CalendarEventsStatus(
-                        message: CalendarEventsCopy.offlinePartial,
-                        tone: .warning
-                    )
-                case .sourceUnavailable, .failed:
-                    CalendarEventsStatus(
-                        message: CalendarEventsCopy.failedPartial,
-                        tone: .warning
-                    )
-                }
-                // Do not immediately retry the failed slab. A pending
-                // foreground refresh may still run inside the fetched range.
-                isSlabRetryBlocked = true
-                drainFetchWork(allowSlab: false)
-                scheduleCadenceIfEligible()
+                feed(.fetchCompleted(kind, .failed(failure)))
             }
         }
     }
@@ -1774,22 +1435,10 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
     /// dates after a final Selected Source Calendars change. The prior snapshot
     /// and Fetched Window stay intact until the complete aggregate succeeds.
     private func beginSelectionReplacement(
-        adapter: any GoogleCalendarEventsAdapting
+        adapter: any GoogleCalendarEventsAdapting,
+        start rangeStart: Date,
+        end rangeEnd: Date
     ) {
-        guard !isReplacingSelection,
-              let visible = lastVisibleRange,
-              let range = selectionReplacementRange(visible: visible)
-        else {
-            return
-        }
-
-        cancelCadence()
-        isSelectionReplacementPending = false
-        isReplacingSelection = true
-        status = CalendarEventsStatus(
-            message: CalendarEventsCopy.updatingSelection,
-            tone: .info
-        )
         let attempt = connectionGeneration
         let requestedSourceCalendars = sourceCalendars
         let sourceCalendarRecovery = sourceCalendarRecovery
@@ -1799,21 +1448,24 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
                 adapter: adapter,
                 recovery: sourceCalendarRecovery,
                 from: requestedSourceCalendars,
-                start: range.start,
-                end: range.end
+                start: rangeStart,
+                end: rangeEnd
             )
             guard let self else {
                 return
             }
-            isReplacingSelection = false
             guard attempt == connectionGeneration else {
-                resumeAfterStaleFetch()
+                feed(.fetchCompleted(.selectionReplacement, .discarded))
                 return
             }
             sourceCalendars = result.sourceCalendars
 
             switch result.outcome {
             case .success(let events, let eventColorBackgrounds):
+                let range = CalendarEventFetchOrchestration.FetchRange(
+                    start: rangeStart,
+                    end: rangeEnd
+                )
                 fetchedWindow = range
                 normalizedEvents = CalendarEventNormalization.normalize(
                     events,
@@ -1823,167 +1475,16 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
                 isPresentingStoredEvents = false
                 writeStore()
                 weekLayouts = [:]
-                publishWeeks(covering: range)
-                freshnessCoverage = []
-                recordFreshness(
-                    for: range,
-                    completedAt: cadenceScheduler.now
-                )
-                refreshFailure = nil
-                isSelectionReplacementPending = false
+                publishWeeks(covering: (start: rangeStart, end: rangeEnd))
                 reconcileSelectedEvent()
                 reconcileSelectedDayEvents()
-                clearStatusIfIdle()
-                drainFetchWork()
-                scheduleCadenceIfEligible()
+                feed(.fetchedWindowChanged(to: range))
+                feed(.fetchCompleted(.selectionReplacement, .applied(range)))
             case .unavailable(let failure):
-                // Keep the prior snapshot, Fetched Window, selected detail,
-                // and freshness. The new durable selection remains desired.
-                refreshFailure = failure
-                isSelectionReplacementPending = true
-                clearStatusIfIdle()
-                scheduleCadenceIfEligible()
+                feed(.fetchCompleted(.selectionReplacement, .failed(failure)))
             }
         }
     }
-
-    /// Three clamped calendar months around the latest visible Date Cells,
-    /// clipped to the complete Week Rows of the Extended Calendar Range.
-    private func selectionReplacementRange(
-        visible: (start: Date, end: Date)
-    ) -> (start: Date, end: Date)? {
-        let calendar = environment.calendar
-        guard
-            let bufferedStart = addMonthsClamped(-3, to: visible.start),
-            let bufferedLastDay = addMonthsClamped(3, to: visible.end),
-            let bufferedEnd = calendar.date(
-                byAdding: .day,
-                value: 1,
-                to: bufferedLastDay
-            ),
-            let extended = extendedCalendarRange()
-        else {
-            return nil
-        }
-
-        let start = max(calendar.startOfDay(for: bufferedStart), extended.start)
-        let end = min(calendar.startOfDay(for: bufferedEnd), extended.end)
-        return start < end ? (start, end) : nil
-    }
-
-    /// The half-open complete Week Rows from the week containing ten years
-    /// before Today through the week containing ten years after Today.
-    private func extendedCalendarRange() -> (start: Date, end: Date)? {
-        let calendar = environment.calendar
-        let today = calendar.startOfDay(for: environment.now)
-        guard
-            let firstDate = addYearsClamped(-10, to: today),
-            let finalDate = addYearsClamped(10, to: today),
-            let end = calendar.date(
-                byAdding: .day,
-                value: 7,
-                to: startOfMondayWeek(containing: finalDate)
-            )
-        else {
-            return nil
-        }
-        return (
-            startOfMondayWeek(containing: firstDate),
-            end
-        )
-    }
-
-    // MARK: Freshness
-
-    /// One successful request's half-open date coverage and completion time.
-    private struct FreshnessCoverage {
-        let start: Date
-        let end: Date
-        let completedAt: Date
-    }
-
-    /// The visible dates plus one month on each side, clipped to the Fetched
-    /// Window. Both foreground and browsing refresh decisions use this one
-    /// calculation so freshness can never authorize a different range from
-    /// the request it suppresses or starts.
-    private func boundedRefreshRange(
-        window: (start: Date, end: Date),
-        visible: (start: Date, end: Date)
-    ) -> (start: Date, end: Date)? {
-        guard
-            let bufferedStart = addMonthsClamped(-1, to: visible.start),
-            let bufferedEnd = addMonthsClamped(1, to: visible.end)
-        else {
-            return nil
-        }
-
-        let start = max(bufferedStart, window.start)
-        let end = min(bufferedEnd, window.end)
-        return start < end ? (start, end) : nil
-    }
-
-    /// Records only successful request completion. Coverage older than the
-    /// freshness horizon can no longer satisfy a future query, so it is
-    /// discarded as newer successes arrive to keep this memory-only list
-    /// bounded during long foreground sessions.
-    private func recordFreshness(
-        for range: (start: Date, end: Date),
-        completedAt: Date
-    ) {
-        let cutoff = completedAt.addingTimeInterval(
-            -Self.refreshCadenceSeconds
-        )
-        freshnessCoverage.removeAll { coverage in
-            coverage.completedAt < cutoff
-                || (range.start <= coverage.start
-                    && range.end >= coverage.end
-                    && completedAt >= coverage.completedAt)
-        }
-        freshnessCoverage.append(
-            FreshnessCoverage(
-                start: range.start,
-                end: range.end,
-                completedAt: completedAt
-            )
-        )
-    }
-
-    /// Whether recent successful requests jointly cover every instant in a
-    /// bounded refresh range. Overlapping initial, slab, and refresh ranges
-    /// can form the coverage together; any gap makes the range stale.
-    private func isFresh(
-        _ range: (start: Date, end: Date),
-        at now: Date
-    ) -> Bool {
-        let cutoff = now.addingTimeInterval(-Self.refreshCadenceSeconds)
-        let eligible = freshnessCoverage
-            .filter {
-                $0.completedAt >= cutoff
-                    && $0.completedAt <= now
-                    && $0.end > range.start
-                    && $0.start < range.end
-            }
-            .sorted {
-                if $0.start != $1.start {
-                    return $0.start < $1.start
-                }
-                return $0.end > $1.end
-            }
-
-        var coveredThrough = range.start
-        for coverage in eligible {
-            if coverage.start > coveredThrough {
-                return false
-            }
-            coveredThrough = max(coveredThrough, coverage.end)
-            if coveredThrough >= range.end {
-                return true
-            }
-        }
-        return false
-    }
-
-    // MARK: Normalization
 
     // MARK: Layout
 
@@ -2226,16 +1727,6 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
 
     // MARK: Local dates
 
-    private func civilDate(year: Int, month: Int, day: Int) -> Date? {
-        var components = DateComponents()
-        components.calendar = environment.calendar
-        components.timeZone = environment.timeZone
-        components.year = year
-        components.month = month
-        components.day = day
-        return components.date
-    }
-
     private func startOfMondayWeek(containing date: Date) -> Date {
         let calendar = environment.calendar
         let localDate = calendar.startOfDay(for: date)
@@ -2248,88 +1739,8 @@ final class CalendarEventsModel: SelectedSourceCalendarsConsuming,
         )!
     }
 
-    private func addMonthsClamped(_ amount: Int, to date: Date) -> Date? {
-        let calendar = environment.calendar
-        let source = calendar.dateComponents(
-            [.era, .year, .month, .day],
-            from: date
-        )
-        guard let year = source.year, let month = source.month,
-              let day = source.day
-        else {
-            return nil
-        }
-
-        var firstOfTargetMonth = DateComponents()
-        firstOfTargetMonth.calendar = calendar
-        firstOfTargetMonth.timeZone = calendar.timeZone
-        firstOfTargetMonth.era = source.era
-        firstOfTargetMonth.year = year
-        firstOfTargetMonth.month = month + amount
-        firstOfTargetMonth.day = 1
-
-        guard
-            let targetMonth = calendar.date(from: firstOfTargetMonth),
-            let validDays = calendar.range(
-                of: .day,
-                in: .month,
-                for: targetMonth
-            )
-        else {
-            return nil
-        }
-
-        var target = firstOfTargetMonth
-        target.day = min(day, validDays.count)
-        return calendar.date(from: target)
-    }
-
-    private func addYearsClamped(_ amount: Int, to date: Date) -> Date? {
-        let calendar = environment.calendar
-        let source = calendar.dateComponents(
-            [.era, .year, .month, .day],
-            from: date
-        )
-        guard let year = source.year, let month = source.month,
-              let day = source.day
-        else {
-            return nil
-        }
-
-        var firstOfTargetMonth = DateComponents()
-        firstOfTargetMonth.calendar = calendar
-        firstOfTargetMonth.timeZone = calendar.timeZone
-        firstOfTargetMonth.era = source.era
-        firstOfTargetMonth.year = year + amount
-        firstOfTargetMonth.month = month
-        firstOfTargetMonth.day = 1
-
-        guard
-            let targetMonth = calendar.date(from: firstOfTargetMonth),
-            let validDays = calendar.range(
-                of: .day,
-                in: .month,
-                for: targetMonth
-            )
-        else {
-            return nil
-        }
-
-        var target = firstOfTargetMonth
-        target.day = min(day, validDays.count)
-        return calendar.date(from: target)
-    }
-
     /// A Week Row renders at most this many bar lanes at the fixed
     /// 96-point height; further lanes count into Events Overflow instead
     /// of rendering.
     private static let maxVisibleBarLanes = 3
-
-    /// Foreground Calendar Event Refresh waits five minutes after the prior
-    /// serialized Calendar Event request attempt completes.
-    private static let refreshCadenceSeconds: TimeInterval = 5 * 60
-    private static let refreshCadence: Duration = .seconds(
-        refreshCadenceSeconds
-    )
-
 }
