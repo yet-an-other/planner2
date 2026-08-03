@@ -17,7 +17,7 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   build
 
-device_id="$({
+device="$({
   xcrun simctl list devices available --json |
     python3 -c '
 import json, sys
@@ -25,11 +25,16 @@ devices = json.load(sys.stdin)["devices"]
 for runtime_devices in devices.values():
     for device in runtime_devices:
         if device["isAvailable"] and device["name"].startswith("iPhone"):
-            print(device["udid"])
+            print(device["name"] + "|" + device["udid"])
             raise SystemExit
 raise SystemExit("No available iPhone Simulator")
 '
 })"
+device_name="${device%%|*}"
+device_id="${device##*|}"
+# The pick is the simctl list's first available iPhone; runner image
+# updates can change which device and runtime that is, so log it.
+echo "Testing on $device_name ($device_id)"
 
 xcrun simctl boot "$device_id" 2>/dev/null || true
 xcrun simctl bootstatus "$device_id" -b

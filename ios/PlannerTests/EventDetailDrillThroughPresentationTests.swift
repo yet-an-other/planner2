@@ -16,6 +16,13 @@ import UIKit
 /// Date Cell's Events Overflow marker — the same anchor that presented the
 /// Day Events Popover — so native presentations serialize instead of
 /// racing.
+///
+/// The suite observes the presentation itself — a presented controller
+/// that survives the dismissal transition alongside the surviving model
+/// selection — and never the presented content's accessibility labels:
+/// since iOS 26 SwiftUI renders popover content out of process, so the
+/// in-process view hierarchy of the presented controller carries no
+/// accessibility elements even while the popover is fully visible.
 @Suite("Event Detail Drill-Through Presentation")
 @MainActor
 struct EventDetailDrillThroughPresentationTests {
@@ -108,34 +115,10 @@ struct EventDetailDrillThroughPresentationTests {
         return top === window.rootViewController ? nil : top
     }
 
-    /// Collects every accessibility label in a view hierarchy, including
-    /// SwiftUI-provided accessibility container elements.
-    private func collectAccessibilityLabels(
-        of element: NSObject,
-        into labels: inout [String],
-        depth: Int = 0
-    ) {
-        guard depth < 25 else { return }
-        if let label = element.accessibilityLabel, !label.isEmpty {
-            labels.append(label)
-        }
-        var children: [NSObject] = element.accessibilityElements as? [NSObject]
-            ?? []
-        if let view = element as? UIView {
-            children.append(contentsOf: view.subviews)
-        }
-        for child in children {
-            collectAccessibilityLabels(of: child, into: &labels, depth: depth + 1)
-        }
-    }
-
-    private func presentedLabels(in window: UIWindow) -> [String] {
-        guard let presented = topPresentedViewController(in: window) else {
-            return []
-        }
-        var labels: [String] = []
-        collectAccessibilityLabels(of: presented.view, into: &labels)
-        return labels
+    /// Whether a native overlay is currently presented above the window's
+    /// root view controller.
+    private func overlayPresented(in window: UIWindow) -> Bool {
+        topPresentedViewController(in: window) != nil
     }
 
     /// Hosts the real Calendar Screen in a key window inside the app test
@@ -143,20 +126,23 @@ struct EventDetailDrillThroughPresentationTests {
     /// to one event with the production tap's exact state sequence: one
     /// model mutation that closes the day list and selects the event, so
     /// the two native presentations swap in a single view update on the
-    /// same anchor. Returns the presented overlay's accessibility labels
-    /// once the presentation settles.
+    /// same anchor. Returns whether the Event Detail Popover presented and
+    /// survived well past the day sheet's dismissal transition, which
+    /// occupies roughly a second: an overlay remains presented, the drilled
+    /// selection survives (a teardown writes `false` through the popover's
+    /// source binding and clears it), and the day list stays closed.
     private func drillThrough(
         model: CalendarEventsModel,
         window: UIWindow,
         eventIndex: Int
-    ) async -> [String] {
+    ) async -> Bool {
         // Summon the Day Events Popover exactly as the marker does.
         model.selectDayEvents(on: Self.denseDay)
         let dayListPresented = await eventually {
-            topPresentedViewController(in: window) != nil
+            overlayPresented(in: window)
         }
         #expect(dayListPresented, "the Day Events Popover never presented")
-        guard dayListPresented else { return [] }
+        guard dayListPresented else { return false }
 
         // The exact production drill-through sequence
         // (DayEventsPopoverPresentation.onSelectEvent): a single mutation.
@@ -165,12 +151,14 @@ struct EventDetailDrillThroughPresentationTests {
             drilledFromDay: Self.denseDay
         )
 
-        // The presentation must survive well past the day sheet's
-        // dismissal transition, which occupies roughly a second.
-        _ = await eventually(timeout: .seconds(2)) {
-            presentedLabels(in: window).contains("WHEN")
-        }
-        return presentedLabels(in: window)
+        // Let the dismissal and presentation transitions settle, then
+        // verify the surviving state: any overlay presented after this
+        // window can only be the Event Detail Popover, since the day
+        // list's binding has been false since the mutation.
+        _ = await eventually(timeout: .seconds(2)) { false }
+        return overlayPresented(in: window)
+            && model.selectedEvent?.id == canonicalID("dense-\(eventIndex)")
+            && model.selectedDayEvents == nil
     }
 
     /// Hosts the real Calendar Screen with the dense day loaded and returns
@@ -224,15 +212,14 @@ struct EventDetailDrillThroughPresentationTests {
     func visibleEventDrillsThrough() async {
         let (model, window) = await hostDenseDay()
         defer { window.isHidden = true }
-        let labels = await drillThrough(
+        let presented = await drillThrough(
             model: model,
             window: window,
             eventIndex: 1
         )
-        #expect(labels.contains("Dense 1"), "labels: \(labels)")
         #expect(
-            labels.contains("WHEN"),
-            "the Event Detail Popover did not present; labels: \(labels)"
+            presented,
+            "the drilled-through Event Detail Popover did not survive"
         )
     }
 
@@ -240,15 +227,14 @@ struct EventDetailDrillThroughPresentationTests {
     func capHiddenEventDrillsThrough() async {
         let (model, window) = await hostDenseDay()
         defer { window.isHidden = true }
-        let labels = await drillThrough(
+        let presented = await drillThrough(
             model: model,
             window: window,
             eventIndex: 5
         )
-        #expect(labels.contains("Dense 5"), "labels: \(labels)")
         #expect(
-            labels.contains("WHEN"),
-            "the Event Detail Popover did not present; labels: \(labels)"
+            presented,
+            "the cap-hidden drill-through Event Detail Popover did not survive"
         )
     }
 
@@ -257,17 +243,18 @@ struct EventDetailDrillThroughPresentationTests {
         let (model, window) = await hostDenseDay()
         defer { window.isHidden = true }
         for eventIndex in [1, 5, 2] {
-            let labels = await drillThrough(
+            let presented = await drillThrough(
                 model: model,
                 window: window,
                 eventIndex: eventIndex
             )
-            let message = "round dense-\(eventIndex): the Event Detail "
-                + "Popover did not present; labels: \(labels)"
-            #expect(labels.contains("WHEN"), "\(message)")
+            #expect(
+                presented,
+                "round dense-\(eventIndex): the Event Detail Popover did not survive"
+            )
             model.dismissEventDetail()
             _ = await eventually {
-                topPresentedViewController(in: window) == nil
+                !overlayPresented(in: window)
             }
         }
     }
