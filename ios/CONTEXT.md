@@ -24,6 +24,10 @@ _Avoid_: Settings button, calendar filter, gear, preferences
 The native configuration surface for changing the Selected Source Calendars.
 _Avoid_: Settings screen, calendar filter, Event Detail Popover, preferences
 
+**Calendar Data**:
+The Source Calendars and Calendar Events derived from the Google Account Connection, flowing only after the current connection disclosure is acknowledged, and suspended and wiped by Disconnect on This Device.
+_Avoid_: account data, sync state, calendar cache
+
 **Stored Calendar Events**:
 The per-account, device-local copy of the Fetched Window's Calendar Events, excluded from backup, presented at process start and replaced by Calendar Event Refresh, wiped by Disconnect on This Device.
 _Avoid_: cached events, local events, offline events, snapshot

@@ -708,27 +708,6 @@ struct StoredCalendarEventsTests {
         )
     }
 
-    @Test("The hub publishes the disclosure-gated account to every Calendar-data module in order")
-    func hubFansOutAccountPublication() {
-        final class RecordingConsumer: CalendarDataAccountConsuming {
-            var received: [String?] = []
-            func setCalendarDataAccountID(_ accountID: String?) {
-                received.append(accountID)
-            }
-        }
-        let sources = RecordingConsumer()
-        let events = RecordingConsumer()
-        let hub = CalendarDataAccountConsumerHub(
-            consumers: [sources, events]
-        )
-
-        hub.setCalendarDataAccountID("google-account-1")
-        hub.setCalendarDataAccountID(nil)
-
-        #expect(sources.received == ["google-account-1", nil])
-        #expect(events.received == ["google-account-1", nil])
-    }
-
     @Test("Stored events open their detail and day list offline")
     func storedEventsSupportPopoversOffline() async {
         let store = FakeStoredCalendarEventsStore()

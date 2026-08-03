@@ -22,30 +22,10 @@ protocol GoogleSourceCalendarsAdapting {
 
 /// Receives the account that may begin Calendar-data behavior after the
 /// current disclosure has been acknowledged. `nil` suspends all such work.
+/// The Calendar Data coordinator is the connection's one consumer.
 @MainActor
 protocol CalendarDataAccountConsuming: AnyObject {
     func setCalendarDataAccountID(_ accountID: String?)
-}
-
-/// Fans the Calendar-data boundary's account publication out to every
-/// Calendar-data module: the Source Calendars module first — its
-/// selection publication settles the Calendar Events module's connection
-/// state — then the Calendar Events module, whose Stored Calendar Events
-/// read, write-through, and Disconnect on This Device wipe follow the
-/// same disclosure-gated account (ADR 0007).
-@MainActor
-final class CalendarDataAccountConsumerHub: CalendarDataAccountConsuming {
-    private let consumers: [any CalendarDataAccountConsuming]
-
-    init(consumers: [any CalendarDataAccountConsuming]) {
-        self.consumers = consumers
-    }
-
-    func setCalendarDataAccountID(_ accountID: String?) {
-        for consumer in consumers {
-            consumer.setCalendarDataAccountID(accountID)
-        }
-    }
 }
 
 /// Receives the reconciled Selected Source Calendars. `nil` means Calendar
