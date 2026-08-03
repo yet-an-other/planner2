@@ -28,6 +28,10 @@ _Avoid_: Settings modal, calendar dialog, preferences screen
 A Calendar Header area for short connection information, progress messages, or errors related to the Calendar Surface.
 _Avoid_: Toast, alert, notification bar
 
+**Separate-Layer Overlay**:
+A transient, read-only overlay summoned from the Calendar Surface but not part of it: anchored to its trigger, non-modal, and dismissed by close button, Escape, outside-click, or surface-scroll, with focus returned to its trigger. The Event Detail Popover and Day Events Popover are Planner's two Separate-Layer Overlays; at most one is open at a time.
+_Avoid_: popup, modal, dialog
+
 **Saved Busy Block**:
 A privacy-preserving placeholder persisted by the Web Experience for offline use that retains a Calendar Event's timing and color but not its title.
 _Avoid_: Cached event, local event, offline event

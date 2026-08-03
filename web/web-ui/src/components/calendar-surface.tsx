@@ -22,8 +22,7 @@ import {
   type SourceCalendar,
 } from '@/lib/google-calendar-events'
 import { withTokenRefresh } from '@/lib/with-token-refresh'
-import { useEventDetailPopover } from '@/lib/use-event-detail-popover'
-import { useDayEventsPopover } from '@/lib/use-day-events-popover'
+import { useSeparateLayerOverlays } from '@/lib/use-separate-layer-overlays'
 import { CalendarHeader } from './calendar-header'
 import { EventDetailPopover } from './event-detail-popover'
 import { DayEventsPopover } from './day-events-popover'
@@ -111,19 +110,28 @@ export function CalendarSurface() {
     visibleRange: visibleDateRange,
     onRefresh: refreshAfterReconciliation,
   })
-  const eventDetailPopover = useEventDetailPopover({
+  // The Calendar Surface's Separate-Layer Overlays (Web Experience
+  // glossary): mutual exclusivity (ADR 0004) is structural inside the
+  // module — each opener closes the sibling there, so it holds for both
+  // mouse and keyboard activation at every call site.
+  const overlays = useSeparateLayerOverlays({
     scrollContainerRef: scrollParentRef,
     isConnected: googleAccountConnected,
     events,
   })
-  const dayEventsPopover = useDayEventsPopover({
-    scrollContainerRef: scrollParentRef,
-  })
   const {
     date: openDayEventsDate,
-    update: updateDayEventsPopover,
-    close: closeDayEventsPopover,
-  } = dayEventsPopover
+    dayEvents: openDayEvents,
+    anchorRect: openDayAnchorRect,
+    popoverRef: dayPopoverRef,
+    triggerRef: dayTriggerRef,
+  } = overlays.dayList
+  const {
+    event: openDetailEvent,
+    anchorRect: openDetailAnchorRect,
+    popoverRef: detailPopoverRef,
+  } = overlays.detail
+  const { updateDayList, closeDayList } = overlays
 
   useEffect(() => {
     const openDate = openDayEventsDate
@@ -134,32 +142,11 @@ export function CalendarSurface() {
     )
     const cell = layoutWeekEvents(events, weekStart).cells[dayIndex]
     if (cell?.items.some((item) => item.kind === 'overflow')) {
-      updateDayEventsPopover(cell.dayEvents)
+      updateDayList(cell.dayEvents)
     } else {
-      closeDayEventsPopover()
+      closeDayList()
     }
-  }, [events, openDayEventsDate, updateDayEventsPopover, closeDayEventsPopover])
-
-  // Mutual exclusivity (ADR 0004): at most one separate-layer overlay is open
-  // at a time. Each opener closes the other overlay first, at the wiring level —
-  // so it holds for both mouse and keyboard activation (a keyboard activate
-  // fires `click`, not the outside-click `mousedown` that would otherwise close
-  // the day list).
-  function openWeekEvents(
-    dayEvents: import('@/lib/google-calendar-events').CalendarEvent[],
-    date: Date,
-    trigger: HTMLElement,
-  ) {
-    eventDetailPopover.close()
-    dayEventsPopover.open(dayEvents, date, trigger)
-  }
-  function openEventDetail(
-    event: import('@/lib/google-calendar-events').CalendarEvent,
-    trigger: HTMLElement,
-  ) {
-    dayEventsPopover.close()
-    eventDetailPopover.open(event, trigger)
-  }
+  }, [events, openDayEventsDate, updateDayList, closeDayList])
 
   // TanStack Virtual intentionally returns non-memoizable helpers; keep the virtualizer local to this component.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -298,8 +285,8 @@ export function CalendarSurface() {
                     const top = bar.laneIndex * 24
                     const textColor = getContrastTextColor(bar.event.color)
                     const isOpen =
-                      eventDetailPopover.selectedEvent !== null &&
-                      calendarEventKey(eventDetailPopover.selectedEvent) ===
+                      openDetailEvent !== null &&
+                      calendarEventKey(openDetailEvent) ===
                         calendarEventKey(bar.event)
                     const positionStyle = {
                       left: `${left}%`,
@@ -323,7 +310,7 @@ export function CalendarSurface() {
                           )}
                           key={calendarEventKey(bar.event)}
                           onClick={(event) =>
-                            openEventDetail(bar.event, event.currentTarget)
+                            overlays.openDetailFor(bar.event, event.currentTarget)
                           }
                           style={positionStyle}
                           title={bar.event.title}
@@ -410,22 +397,22 @@ export function CalendarSurface() {
                                 connected={googleAccountConnected}
                                 isOpen={
                                   item.kind === 'row' &&
-                                  eventDetailPopover.selectedEvent !== null &&
-                                  calendarEventKey(eventDetailPopover.selectedEvent) ===
+                                  openDetailEvent !== null &&
+                                  calendarEventKey(openDetailEvent) ===
                                     calendarEventKey(item.event)
                                 }
                                 onOpen={(trigger) =>
                                   item.kind === 'row' &&
-                                  openEventDetail(item.event, trigger)
+                                  overlays.openDetailFor(item.event, trigger)
                                 }
                                 dayEvents={cellLayout.dayEvents}
                                 cellDate={date}
                                 isDayPopoverOpen={
-                                  dayEventsPopover.date !== null &&
-                                  isSameCalendarDate(dayEventsPopover.date, date)
+                                  openDayEventsDate !== null &&
+                                  isSameCalendarDate(openDayEventsDate, date)
                                 }
                                 onOpenDayEvents={(dayEvents, day, trigger) =>
-                                  openWeekEvents(dayEvents, day, trigger)
+                                  overlays.openDayListFor(dayEvents, day, trigger)
                                 }
                               />
                             ))}
@@ -442,31 +429,31 @@ export function CalendarSurface() {
       </div>
 
       <EventDetailPopover
-        anchorRect={eventDetailPopover.anchorRect}
-        event={eventDetailPopover.selectedEvent}
-        onClose={eventDetailPopover.close}
-        popoverRef={eventDetailPopover.popoverRef}
+        anchorRect={openDetailAnchorRect}
+        event={openDetailEvent}
+        onClose={overlays.closeDetail}
+        popoverRef={detailPopoverRef}
       />
 
       <DayEventsPopover
-        anchorRect={dayEventsPopover.anchorRect}
-        dayEvents={dayEventsPopover.dayEvents}
-        date={dayEventsPopover.date}
-        onClose={dayEventsPopover.close}
+        anchorRect={openDayAnchorRect}
+        dayEvents={openDayEvents}
+        date={openDayEventsDate}
+        onClose={overlays.closeDayList}
         onSelectEvent={
           googleAccountConnected
             ? (event) => {
                 // Anchor the drill-through to the "+N more" trigger (the cell),
                 // which stays mounted — not the list item, which unmounts with
                 // the day list and would leave the detail popover floating.
-                const trigger = dayEventsPopover.triggerRef.current
+                const trigger = dayTriggerRef.current
                 if (trigger) {
-                  openEventDetail(event, trigger)
+                  overlays.openDetailFor(event, trigger)
                 }
               }
             : undefined
         }
-        popoverRef={dayEventsPopover.popoverRef}
+        popoverRef={dayPopoverRef}
       />
 
       {sourceCalendars.pickerOpen && (
