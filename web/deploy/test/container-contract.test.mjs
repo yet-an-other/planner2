@@ -13,7 +13,18 @@ describe('Planner runtime image contract', () => {
     assert.match(runtimeStage, /adduser[^\n]+10001[^\n]+planner/)
     assert.match(runtimeStage, /COPY --from=build --chown=10001:10001/)
     assert.match(runtimeStage, /USER 10001:10001/)
-    assert.doesNotMatch(runtimeStage, /RUN (?!add(?:group|user))/)
+    // Beyond the fixed user, the only permitted runtime-stage mutation is
+    // stripping the base image's package managers: the runtime executes
+    // the bundled server with node alone, and npm's bundled dependencies
+    // draw fixable CRITICAL scanner findings.
+    assert.match(
+      runtimeStage,
+      /RUN rm -rf \/usr\/local\/lib\/node_modules\/npm/
+    )
+    assert.doesNotMatch(
+      runtimeStage,
+      /RUN (?!(?:add(?:group|user)|rm -rf \/usr\/local\/lib\/node_modules\/npm))/
+    )
   })
 
   it('documents all runtime-only configuration without build-time OAuth arguments', async () => {
