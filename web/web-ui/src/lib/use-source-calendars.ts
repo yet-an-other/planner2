@@ -3,26 +3,24 @@ import {
   fetchCalendarList as fetchCalendarListFromGoogle,
   type SourceCalendar,
 } from './google-calendar-events'
-import type {
-  GoogleAccountConnectionState,
-  HeaderStatus,
-} from './use-google-account-connection'
+import type { GoogleAccountConnectionState } from './use-google-account-connection'
 import {
   loadPersistedSelection,
   persistSelection,
-  reconcileSelection,
 } from './source-calendar-selection'
+import {
+  handleSourceCalendars,
+  initialSourceCalendarsState,
+  type SourceCalendarId,
+  type SourceCalendarsCommand,
+  type SourceCalendarsSignal,
+  type SourceCalendarsState,
+} from './source-calendar-reconciliation'
 
-/** Stable identifier for a Source Calendar (Google's calendar id). */
-export type SourceCalendarId = string
+export type { SourceCalendarId } from './source-calendar-reconciliation'
 
 /** Loads the Source Calendar list using a connected access token. */
 export type FetchCalendarList = (accessToken: string) => Promise<SourceCalendar[]>
-
-const LIST_FAILED_STATUS: HeaderStatus = {
-  message: 'Calendar list could not be loaded',
-  tone: 'error',
-}
 
 type UseSourceCalendarsParams = {
   connection: GoogleAccountConnectionState
@@ -37,225 +35,139 @@ type UseSourceCalendarsParams = {
  * the list-loading/error status. Calendar Event fetching consumes the resolved
  * `selectionCalendars`.
  *
- * Selection is session-only in this module; persistence is a separate concern.
+ * Every decision lives in Source Calendar Reconciliation
+ * (`source-calendar-reconciliation.ts`); this hook is the React adapter
+ * that feeds it signals, executes its fetch and persistence commands,
+ * and settles reconcile promises from its resolutions.
  */
 export function useSourceCalendars({
   connection,
   fetchCalendarList = fetchCalendarListFromGoogle,
 }: UseSourceCalendarsParams) {
-  const [available, setAvailable] = useState<SourceCalendar[]>([])
-  const [selectedIds, setSelectedIds] = useState<SourceCalendarId[]>([])
-  const [status, setStatus] = useState<HeaderStatus | null>(null)
-  const [isLoadingList, setIsLoadingList] = useState(false)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const availableRef = useRef(available)
-  const selectedIdsRef = useRef(selectedIds)
-  const connectionIdentity =
-    connection.status === 'connected' ? connection.profile.email : 'disconnected'
-  const connectionIdentityRef = useRef(connectionIdentity)
+  const [state, setState] = useState<SourceCalendarsState>(
+    initialSourceCalendarsState,
+  )
+  const stateRef = useRef(state)
+  const accessTokenRef = useRef<string | null>(null)
+  accessTokenRef.current =
+    connection.status === 'connected' ? connection.accessToken : null
+  const deferredsRef = useRef(
+    new Map<number, (calendars: SourceCalendar[]) => void>(),
+  )
   const reconcileRequestRef = useRef(0)
-  const reconciliationEpochRef = useRef(0)
-  const reconcileInFlightRef = useRef<Promise<SourceCalendar[]> | null>(null)
-  const queuedReconcileRef = useRef<Promise<SourceCalendar[]> | null>(null)
-  useEffect(() => {
-    availableRef.current = available
-    selectedIdsRef.current = selectedIds
-    if (connectionIdentityRef.current !== connectionIdentity) {
-      reconcileRequestRef.current += 1
-      reconciliationEpochRef.current += 1
-    }
-    connectionIdentityRef.current = connectionIdentity
-  }, [available, selectedIds, connectionIdentity])
 
-  // Adjust state during render when the connection transitions. This is the
-  // React "adjust state when a prop changes" pattern: on connect we start the
-  // list-loading indicator, on disconnect we clear everything.
-  const [prevStatus, setPrevStatus] = useState(connection.status)
-  if (connection.status !== prevStatus) {
-    setPrevStatus(connection.status)
-    if (connection.status === 'connected') {
-      setIsLoadingList(true)
-    } else {
-      setAvailable([])
-      setSelectedIds([])
-      setStatus(null)
-      setIsLoadingList(false)
-      setPickerOpen(false)
-    }
-  }
+  const feedRef = useRef<(signal: SourceCalendarsSignal) => void>(() => {})
 
-  // Fetches the calendar list. All setState calls sit after the await, so this
-  // is safe to call from an effect (no synchronous setState in the effect body).
-  // A failed refetch keeps the previously-loaded list rather than wiping it.
-  const refreshList = useCallback(
-    async (accessToken: string, expectedIdentity: string) => {
-      try {
-        const calendars = await fetchCalendarList(accessToken)
-        if (connectionIdentityRef.current !== expectedIdentity) return []
-        setAvailable(calendars)
-        setStatus(null)
-        return calendars
-      } catch {
-        if (connectionIdentityRef.current === expectedIdentity) {
-          setStatus(LIST_FAILED_STATUS)
+  const execute = useCallback(
+    (command: SourceCalendarsCommand) => {
+      switch (command.type) {
+        case 'fetchList': {
+          const accessToken = accessTokenRef.current
+          if (!accessToken) {
+            return
+          }
+          fetchCalendarList(accessToken)
+            .then((list) =>
+              feedRef.current({
+                type: 'listLoaded',
+                fetchId: command.fetchId,
+                list,
+              }),
+            )
+            .catch(() =>
+              feedRef.current({ type: 'listFailed', fetchId: command.fetchId }),
+            )
+          return
         }
-        return []
-      } finally {
-        if (connectionIdentityRef.current === expectedIdentity) {
-          setIsLoadingList(false)
-        }
+        case 'persistSelection':
+          persistSelection(command.email, command.ids)
+          return
       }
     },
     [fetchCalendarList],
   )
 
-  // Eagerly load the calendar list on connect and default the selection to the
-  // primary calendar (so the surface behaves as before until the user chooses).
-  // setState lives only in the async callbacks; the injected fetch is external
-  // so the react-hooks/set-state-in-effect rule is satisfied.
-  useEffect(() => {
-    if (connection.status !== 'connected') {
-      return
-    }
-    const accountEmail = connection.profile.email
-    let cancelled = false
-    fetchCalendarList(connection.accessToken)
-      .then((calendars) => {
-        if (cancelled) {
-          return
+  const feed = useCallback(
+    (signal: SourceCalendarsSignal) => {
+      const { state: next, commands, resolutions } = handleSourceCalendars(
+        stateRef.current,
+        signal,
+      )
+      stateRef.current = next
+      setState(next)
+      for (const resolution of resolutions) {
+        const resolve = deferredsRef.current.get(resolution.id)
+        if (resolve) {
+          deferredsRef.current.delete(resolution.id)
+          resolve(resolution.calendars)
         }
-        setAvailable(calendars)
-        setStatus(null)
-        setSelectedIds(
-          reconcileSelection(loadPersistedSelection(accountEmail), calendars),
-        )
-      })
-      .catch(() => {
-        if (cancelled) {
-          return
-        }
-        setStatus(LIST_FAILED_STATUS)
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoadingList(false)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [connection, fetchCalendarList])
-
-  const openPicker = useCallback(() => {
-    if (connection.status !== 'connected') return
-    const expectedIdentity = connection.profile.email
-    // Complete the refetch before mounting the picker so its draft cannot have
-    // choices replaced underneath it.
-    setIsLoadingList(true)
-    void refreshList(connection.accessToken, expectedIdentity).then(() => {
-      if (connectionIdentityRef.current === expectedIdentity) {
-        setPickerOpen(true)
       }
-    })
-  }, [connection, refreshList])
-
-  const closePicker = useCallback(() => setPickerOpen(false), [])
-
-  const saveSelection = useCallback(
-    (ids: SourceCalendarId[]) => {
-      // Minimum-one: the picker disables Save at zero, so an empty draft never
-      // reaches here; guard defensively regardless.
-      if (ids.length === 0) {
-        return
+      for (const command of commands) {
+        execute(command)
       }
-      if (connection.status === 'connected') {
-        persistSelection(connection.profile.email, ids)
-      }
-      setSelectedIds(ids)
-      setPickerOpen(false)
     },
-    [connection],
+    [execute],
+  )
+  feedRef.current = feed
+
+  // Connection publications drive the machine: connect starts the eager
+  // list load (with the persisted selection as payload), disconnect
+  // clears everything.
+  const connectionEmail =
+    connection.status === 'connected' ? connection.profile.email : null
+  useEffect(() => {
+    if (connection.status === 'connected') {
+      feed({
+        type: 'connected',
+        email: connection.profile.email,
+        persistedIds: loadPersistedSelection(connection.profile.email),
+      })
+    } else {
+      feed({ type: 'disconnected' })
+    }
+  }, [connection.status, connectionEmail, feed])
+
+  const openPicker = useCallback(
+    () => feed({ type: 'pickerOpenRequested' }),
+    [feed],
+  )
+  const closePicker = useCallback(
+    () => feed({ type: 'pickerClosed' }),
+    [feed],
+  )
+  const saveSelection = useCallback(
+    (ids: SourceCalendarId[]) => feed({ type: 'selectionSaved', ids }),
+    [feed],
+  )
+
+  const reconcileCalendars = useCallback((): Promise<SourceCalendar[]> => {
+    const id = ++reconcileRequestRef.current
+    const promise = new Promise<SourceCalendar[]>((resolve) => {
+      deferredsRef.current.set(id, resolve)
+    })
+    feed({ type: 'reconcileRequested', id })
+    return promise
+  }, [feed])
+
+  const cancelPendingReconciliation = useCallback(
+    () => feed({ type: 'cancelPendingReconciliation' }),
+    [feed],
   )
 
   const selectionCalendars = useMemo(
-    () => available.filter((calendar) => selectedIds.includes(calendar.id)),
-    [available, selectedIds],
+    () =>
+      state.available.filter((calendar) =>
+        state.selectedIds.includes(calendar.id),
+      ),
+    [state.available, state.selectedIds],
   )
 
-  /**
-   * Align the committed selection with Google's complete current list. Failure
-   * is deliberately non-destructive and returns the last known selection so an
-   * event refresh can still proceed.
-   */
-  const performReconciliation = useCallback(async (): Promise<SourceCalendar[]> => {
-    if (connection.status !== 'connected') return []
-
-    const expectedIdentity = connection.profile.email
-    const request = ++reconcileRequestRef.current
-    try {
-      const calendars = await fetchCalendarList(connection.accessToken)
-      if (
-        connectionIdentityRef.current !== expectedIdentity ||
-        reconcileRequestRef.current !== request
-      ) return []
-      const nextIds = reconcileSelection(selectedIdsRef.current, calendars)
-      availableRef.current = calendars
-      selectedIdsRef.current = nextIds
-      setAvailable(calendars)
-      setSelectedIds(nextIds)
-      setStatus(null)
-      persistSelection(connection.profile.email, nextIds)
-      return calendars.filter((calendar) => nextIds.includes(calendar.id))
-    } catch {
-      if (
-        connectionIdentityRef.current !== expectedIdentity ||
-        reconcileRequestRef.current !== request
-      ) return []
-      setStatus(LIST_FAILED_STATUS)
-      return availableRef.current.filter((calendar) =>
-        selectedIdsRef.current.includes(calendar.id),
-      )
-    }
-  }, [connection, fetchCalendarList])
-
-  const reconcileCalendars = useCallback((): Promise<SourceCalendar[]> => {
-    const epoch = reconciliationEpochRef.current
-    const run = () => {
-      if (reconciliationEpochRef.current !== epoch) return Promise.resolve([])
-      const promise = performReconciliation()
-      reconcileInFlightRef.current = promise
-      void promise.finally(() => {
-        if (reconcileInFlightRef.current === promise) {
-          reconcileInFlightRef.current = null
-        }
-      })
-      return promise
-    }
-
-    const inFlight = reconcileInFlightRef.current
-    if (!inFlight) return run()
-    if (queuedReconcileRef.current) return queuedReconcileRef.current
-
-    const queued = inFlight.then(run, run).finally(() => {
-      if (queuedReconcileRef.current === queued) queuedReconcileRef.current = null
-    })
-    queuedReconcileRef.current = queued
-    return queued
-  }, [performReconciliation])
-
-  const cancelPendingReconciliation = useCallback(() => {
-    reconcileRequestRef.current += 1
-    reconciliationEpochRef.current += 1
-    reconcileInFlightRef.current = null
-    queuedReconcileRef.current = null
-  }, [])
-
   return {
-    available,
+    available: state.available,
     selectionCalendars,
-    status,
-    isLoadingList,
-    pickerOpen,
+    status: state.status,
+    isLoadingList: state.isLoadingList,
+    pickerOpen: state.pickerOpen,
     openPicker,
     closePicker,
     saveSelection,

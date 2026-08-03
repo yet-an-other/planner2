@@ -1,14 +1,15 @@
-import type { SourceCalendar } from './google-calendar-events'
-import type { SourceCalendarId } from './use-source-calendars'
+import type { SourceCalendarId } from './source-calendar-reconciliation'
 
 /**
- * Per-device persistence of the Selected Source Calendars (ADR 0003). The
- * selection is stored in `localStorage` as a JSON array of stable Google
- * calendar ids, keyed per Google account so two accounts in one browser keep
- * independent selections.
+ * Per-device persistence of the Selected Source Calendars (web ADR 0003).
+ * The selection is stored in `localStorage` as a JSON array of stable
+ * Google calendar ids, keyed per Google account so two accounts in one
+ * browser keep independent selections.
  *
- * This is the codebase's first persistence. The reconcile logic is pure and
- * tested independently of storage; the load/persist helpers are thin wrappers.
+ * This is the storage adapter behind Source Calendar Reconciliation: the
+ * reducer in `source-calendar-reconciliation.ts` owns every persistence
+ * decision and crosses this seam only as signal payload (reads at
+ * connect) and command (writes on connect, reconcile, and save).
  */
 
 const STORAGE_PREFIX = 'planner.sourceCalendars.'
@@ -52,34 +53,4 @@ export function persistSelection(
     // Storage may be unavailable (private mode, quota); selection stays
     // session-only. Nothing to do.
   }
-}
-
-/**
- * The default Selected Source Calendars before the user has chosen anything: the
- * primary calendar, or — if Google reports no primary — the first available
- * calendar so the surface is never empty (minimum-one).
- */
-export function defaultSelectionIds(calendars: SourceCalendar[]): SourceCalendarId[] {
-  const primary = calendars.find((calendar) => calendar.primary)
-  if (primary) {
-    return [primary.id]
-  }
-  return calendars.length > 0 ? [calendars[0].id] : []
-}
-
-/**
- * Reconciles a persisted selection against the live calendar list: keeps only
- * stored ids that are still available (dropping deleted or access-revoked
- * calendars), and falls back to the default selection when none survive — so a
- * stale or empty persisted selection can never leave the surface empty.
- *
- * Pure: no storage access, no side effects.
- */
-export function reconcileSelection(
-  storedIds: SourceCalendarId[],
-  available: SourceCalendar[],
-): SourceCalendarId[] {
-  const availableIds = new Set(available.map((calendar) => calendar.id))
-  const surviving = storedIds.filter((id) => availableIds.has(id))
-  return surviving.length > 0 ? surviving : defaultSelectionIds(available)
 }
