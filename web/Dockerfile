@@ -21,6 +21,20 @@ RUN pnpm --filter @planner/web-ui build && pnpm --filter @planner/web-server bui
 FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# The runtime only executes the bundled server with node. The base image's
+# package managers (npm, corepack, yarn) ship their own dependency trees —
+# npm's bundled tar draws fixable CRITICAL scanner findings — and nothing
+# here installs packages, so strip them out of the final image.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm \
+           /usr/local/bin/npx \
+           /usr/local/bin/corepack \
+           /usr/local/bin/yarn \
+           /usr/local/bin/yarnpkg \
+           /usr/local/bin/pnpm \
+           /usr/local/bin/pnpx \
+           /opt/yarn-v*
 # A fixed uid/gid matches the workload security context and needs no writable home.
 RUN addgroup -S -g 10001 planner && adduser -S -D -H -u 10001 -G planner planner
 # The built SPA, served at '/'. serveStatic resolves this relative to cwd.
