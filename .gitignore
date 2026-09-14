@@ -15,3 +15,6 @@ ios/Configurations/GoogleConnection.local.xcconfig
 
 # Pi subagent session artifacts
 .pi-subagents/
+
+# Pi settings
+.pi/
