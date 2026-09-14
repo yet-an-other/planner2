@@ -72,6 +72,10 @@ _Avoid_: Calendar sync, selection reset, calendar reload
 A Google Calendar event obtained by Planner from a Source Calendar included in the Selected Source Calendars for that fetch.
 _Avoid_: Event item, schedule entry, appointment
 
+**Calendar Event Attachment**:
+A reference to a Google Drive file attached to a Calendar Event, carrying a title, a MIME type, an icon, and a link to open the file. Calendar Event Attachments are presented by the Event Detail Popover.
+_Avoid_: file, document, upload, attachment link
+
 **Calendar Event Normalization**:
 The application of Planner's product rules to fetched Google Calendar events: cancelled and declined events drop out, duplicate copies of one canonical occurrence collapse to the Primary Source Calendar copy when present, blank titles become “Busy”, all-day ends turn inclusive, and every event classifies as a Calendar Event Bar or a Calendar Event Row in the viewer's local dates.
 _Avoid_: mapping, conversion, parsing
@@ -109,7 +113,7 @@ A transient, read-only overlay that lists the Calendar Events for one Date Cell,
 _Avoid_: Day list, event popup, agenda, more-events modal, overflow menu
 
 **Event Detail Popover**:
-A transient, read-only overlay that presents the details of one Calendar Event, including a link to that event in Google Calendar. It is summoned from Calendar Event Bar and Calendar Event Row presentations, and each delivery experience presents it in a platform-appropriate form.
+A transient, read-only overlay that presents the details of one Calendar Event, including its Calendar Event Attachments and a link to that event in Google Calendar. It is summoned from Calendar Event Bar and Calendar Event Row presentations, and each delivery experience presents it in a platform-appropriate form.
 _Avoid_: Event modal, event popup, detail card, edit dialog
 
 **Today**:
