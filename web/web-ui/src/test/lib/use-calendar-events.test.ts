@@ -222,6 +222,7 @@ describe('useCalendarEvents', () => {
         htmlLink: null,
         location: null,
         description: null,
+        attachments: [],
         attendees: [],
       })
       expect(result.current.status).toBe(null)

@@ -46,8 +46,16 @@ export type EventDetail = {
   location: string | null
   /** Plain-text notes; HTML is stripped at normalization. Null when absent. */
   description: string | null
+  /** Google Drive references attached to the Calendar Event. */
+  attachments: CalendarEventAttachment[]
   /** Always an array; possibly empty when there are no invitees. */
   attendees: Attendee[]
+}
+
+export type CalendarEventAttachment = {
+  title: string | null
+  mimeType: string | null
+  fileUrl: string | null
 }
 
 /**
@@ -113,6 +121,11 @@ export type GoogleCalendarEventResource = {
     self?: boolean
     displayName?: string
     email?: string
+  }>
+  attachments?: Array<{
+    title?: string
+    mimeType?: string
+    fileUrl?: string
   }>
   colorId?: string
   htmlLink?: string
@@ -348,6 +361,11 @@ export function normalizeGoogleCalendarEvents(
       htmlLink: event.htmlLink ?? null,
       location: event.location?.trim() || null,
       description: buildDescription(event.description),
+      attachments: (event.attachments ?? []).map((attachment) => ({
+        title: attachment.title?.trim() || null,
+        mimeType: attachment.mimeType?.trim() || null,
+        fileUrl: attachment.fileUrl?.trim() || null,
+      })),
       attendees: mapAttendees(event.attendees),
     }
 

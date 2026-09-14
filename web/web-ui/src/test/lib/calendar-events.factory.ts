@@ -15,6 +15,7 @@ function emptyDetail(): EventDetail {
     htmlLink: null,
     location: null,
     description: null,
+    attachments: [],
     attendees: [],
   }
 }

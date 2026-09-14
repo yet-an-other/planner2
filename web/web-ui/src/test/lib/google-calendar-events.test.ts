@@ -158,6 +158,39 @@ describe('normalizeGoogleCalendarEvents', () => {
     ])
   })
 
+  it('carries every Google attachment through Calendar Event Normalization', () => {
+    const [event] = normalizeGoogleCalendarEvents(
+      [
+        {
+          id: 'evt-attachments',
+          summary: 'Review files',
+          attachments: [
+            {
+              title: 'Launch brief',
+              mimeType: 'application/vnd.google-apps.document',
+              fileUrl: 'https://drive.google.com/open?id=document-1',
+            },
+            {
+              mimeType: 'application/pdf',
+            },
+          ],
+          start: { dateTime: '2026-06-17T14:00:00' },
+          end: { dateTime: '2026-06-17T15:00:00' },
+        },
+      ],
+      PRIMARY_COLOR,
+    )
+
+    expect(event.detail.attachments).toEqual([
+      {
+        title: 'Launch brief',
+        mimeType: 'application/vnd.google-apps.document',
+        fileUrl: 'https://drive.google.com/open?id=document-1',
+      },
+      { title: null, mimeType: 'application/pdf', fileUrl: null },
+    ])
+  })
+
   it('strips HTML from the description and keeps plain text', () => {
     const [event] = normalizeGoogleCalendarEvents(
       [

@@ -33,6 +33,7 @@ function makeEvent(id: string, title = 'Event'): CalendarEvent {
       htmlLink: null,
       location: null,
       description: null,
+      attachments: [],
       attendees: [],
     },
   }

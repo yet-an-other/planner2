@@ -55,7 +55,13 @@ export function loadSavedBusyBlocks(): CalendarEvent[] {
       const end = new Date(value.end)
       if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return []
       const id = `saved-${index}-${value.start}`
-      const detail = { htmlLink: null, location: null, description: null, attendees: [] }
+      const detail = {
+        htmlLink: null,
+        location: null,
+        description: null,
+        attachments: [],
+        attendees: [],
+      }
 
       if (value.kind === 'bar') {
         return [{

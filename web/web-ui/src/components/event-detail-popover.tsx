@@ -1,7 +1,20 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { MapPin } from 'lucide-react'
-import type { Attendee, CalendarEvent } from '@/lib/google-calendar-events'
+import {
+  File,
+  FileSpreadsheet,
+  FileText,
+  FileType,
+  Image,
+  MapPin,
+  Presentation,
+  type LucideIcon,
+} from 'lucide-react'
+import type {
+  Attendee,
+  CalendarEvent,
+  CalendarEventAttachment,
+} from '@/lib/google-calendar-events'
 import { buildLocationHref } from '@/lib/location-links'
 import { computePopoverPlacement } from '@/lib/popover-placement'
 import { formatEventTiming } from '@/lib/event-timing'
@@ -188,6 +201,15 @@ export function EventDetailPopover({
           </div>
         )}
 
+        {event.detail.attachments.length > 0 && (
+          <div>
+            <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8b8f72]">
+              Attachments
+            </dt>
+            <AttachmentList attachments={event.detail.attachments} />
+          </div>
+        )}
+
         {event.detail.attendees.length > 0 && (
           <div>
             <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8b8f72]">
@@ -280,6 +302,84 @@ function DescriptionText({ text }: { text: string }) {
       )}
     </>
   )
+}
+
+/** Renders every Calendar Event Attachment in the order Google returned it. */
+function AttachmentList({
+  attachments,
+}: {
+  attachments: CalendarEventAttachment[]
+}) {
+  return (
+    <dd className="mt-0.5 space-y-0.5 text-sm">
+      {attachments.map((attachment, index) => {
+        const title = attachment.title ?? 'Untitled attachment'
+        const content = (
+          <>
+            <AttachmentIcon mimeType={attachment.mimeType} />
+            <span className="truncate">{title}</span>
+          </>
+        )
+
+        return attachment.fileUrl === null ? (
+          <div className="flex min-w-0 items-center gap-1.5" key={index}>
+            {content}
+          </div>
+        ) : (
+          <a
+            className="flex min-w-0 items-center gap-1.5 truncate text-[#2952a3] underline underline-offset-2 hover:text-[#777b60]"
+            href={attachment.fileUrl}
+            key={index}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            {content}
+          </a>
+        )
+      })}
+    </dd>
+  )
+}
+
+type AttachmentCategory =
+  | 'Image'
+  | 'PDF'
+  | 'Document'
+  | 'Spreadsheet'
+  | 'Presentation'
+  | 'Generic'
+
+const ATTACHMENT_ICONS: Record<AttachmentCategory, LucideIcon> = {
+  Image,
+  PDF: FileType,
+  Document: FileText,
+  Spreadsheet: FileSpreadsheet,
+  Presentation,
+  Generic: File,
+}
+
+function AttachmentIcon({ mimeType }: { mimeType: string | null }) {
+  const category = attachmentCategory(mimeType)
+  const Icon = ATTACHMENT_ICONS[category]
+  return (
+    <Icon
+      aria-label={`${category} attachment`}
+      className="h-4 w-4 shrink-0"
+      role="img"
+    />
+  )
+}
+
+function attachmentCategory(mimeType: string | null): AttachmentCategory {
+  const mime = mimeType?.toLowerCase() ?? ''
+  if (mime.startsWith('image/')) return 'Image'
+  if (mime === 'application/pdf') return 'PDF'
+  if (/spreadsheet|excel|sheet|csv/.test(mime)) return 'Spreadsheet'
+  if (/presentation|powerpoint/.test(mime)) return 'Presentation'
+  if (/document|wordprocessingml|msword|opendocument\.text/.test(mime)) {
+    return 'Document'
+  }
+  return 'Generic'
 }
 
 /** Renders the attendee list. The section is omitted entirely when empty. */

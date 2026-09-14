@@ -208,6 +208,134 @@ describe('EventDetailPopover content', () => {
     expect(dialog).not.toHaveTextContent('Description')
   })
 
+  it('lists linked attachments after notes and before attendees', () => {
+    const event = makeRow({
+      id: 'evt-attachments',
+      title: 'Review files',
+      date: new Date(2026, 5, 19, 14, 0),
+      startTime: '14:00',
+      detail: {
+        description: 'Read before the meeting',
+        attachments: [
+          {
+            title: 'Launch brief',
+            mimeType: 'application/vnd.google-apps.document',
+            fileUrl: 'https://drive.google.com/open?id=document-1',
+          },
+          {
+            title: 'Budget',
+            mimeType: 'application/vnd.google-apps.spreadsheet',
+            fileUrl: 'https://drive.google.com/open?id=spreadsheet-1',
+          },
+        ],
+        attendees: [
+          { displayName: 'Ada', email: 'ada@example.com', responseStatus: 'accepted' },
+        ],
+      },
+    })
+
+    render(<EventDetailPopover event={event} anchorRect={anchoredRect} onClose={vi.fn()} />)
+
+    const notesHeading = screen.getByText('Notes')
+    const attachmentsHeading = screen.getByText('Attachments')
+    const attendeesHeading = screen.getByText('Attendees')
+    expect(
+      notesHeading.compareDocumentPosition(attachmentsHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      attachmentsHeading.compareDocumentPosition(attendeesHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+
+    for (const [title, href] of [
+      ['Launch brief', 'https://drive.google.com/open?id=document-1'],
+      ['Budget', 'https://drive.google.com/open?id=spreadsheet-1'],
+    ]) {
+      const link = screen.getByRole('link', { name: new RegExp(title, 'i') })
+      expect(link).toHaveAttribute('href', href)
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+      expect(link).toHaveClass('truncate')
+    }
+  })
+
+  it('maps attachment MIME categories to native labelled icons', () => {
+    const event = makeRow({
+      id: 'evt-attachment-icons',
+      title: 'Review files',
+      date: new Date(2026, 5, 19, 14, 0),
+      startTime: '14:00',
+      detail: {
+        attachments: [
+          { title: 'Photo', mimeType: 'image/jpeg', fileUrl: null },
+          { title: 'Guide', mimeType: 'application/pdf', fileUrl: null },
+          {
+            title: 'Brief',
+            mimeType: 'application/vnd.google-apps.document',
+            fileUrl: null,
+          },
+          {
+            title: 'Budget',
+            mimeType: 'application/vnd.google-apps.spreadsheet',
+            fileUrl: null,
+          },
+          {
+            title: 'Pitch',
+            mimeType: 'application/vnd.google-apps.presentation',
+            fileUrl: null,
+          },
+          { title: 'Archive', mimeType: 'application/zip', fileUrl: null },
+        ],
+      },
+    })
+
+    render(<EventDetailPopover event={event} anchorRect={anchoredRect} onClose={vi.fn()} />)
+
+    for (const category of [
+      'Image',
+      'PDF',
+      'Document',
+      'Spreadsheet',
+      'Presentation',
+      'Generic',
+    ]) {
+      expect(
+        screen.getByRole('img', { name: `${category} attachment` }),
+      ).toBeInTheDocument()
+    }
+  })
+
+  it('shows the fallback title as plain text when an attachment has no link', () => {
+    const event = makeRow({
+      id: 'evt-unlinked-attachment',
+      title: 'Review file',
+      date: new Date(2026, 5, 19, 14, 0),
+      startTime: '14:00',
+      detail: {
+        attachments: [{ title: null, mimeType: null, fileUrl: null }],
+      },
+    })
+
+    render(<EventDetailPopover event={event} anchorRect={anchoredRect} onClose={vi.fn()} />)
+
+    const fallbackTitle = screen.getByText('Untitled attachment')
+    expect(fallbackTitle.closest('a')).toBeNull()
+  })
+
+  it('omits the attachments section entirely when the attachment list is empty', () => {
+    const event = makeRow({
+      id: 'evt-no-attachments',
+      title: 'Focus block',
+      date: new Date(2026, 5, 19, 14, 0),
+      startTime: '14:00',
+    })
+
+    render(<EventDetailPopover event={event} anchorRect={anchoredRect} onClose={vi.fn()} />)
+
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('Attachments')
+  })
+
   it('omits the attendees section entirely when the attendee list is empty', () => {
     const event = makeRow({
       id: 'evt-none',
