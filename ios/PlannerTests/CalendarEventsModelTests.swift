@@ -3556,6 +3556,91 @@ struct CalendarEventsModelTests {
         #expect(selectedDetail(model, id: canonicalID("flight-os-368"))?.notes == notes)
     }
 
+    @Test("Event Detail attachment rows expose MIME symbols and link behavior")
+    func eventDetailAttachmentRowsExposeSymbolsAndLinks() throws {
+        let attachments = [
+            CalendarEventAttachment(
+                title: "Photo",
+                mimeType: "image/png",
+                fileURL: "https://drive.google.com/photo"
+            ),
+            CalendarEventAttachment(
+                title: "PDF",
+                mimeType: "application/pdf",
+                fileURL: nil
+            ),
+            CalendarEventAttachment(
+                title: "Document",
+                mimeType: "application/vnd.google-apps.document",
+                fileURL: nil
+            ),
+            CalendarEventAttachment(
+                title: "Spreadsheet",
+                mimeType: "application/vnd.google-apps.spreadsheet",
+                fileURL: nil
+            ),
+            CalendarEventAttachment(
+                title: "Presentation",
+                mimeType: "application/vnd.google-apps.presentation",
+                fileURL: nil
+            ),
+            CalendarEventAttachment(
+                title: "Archive",
+                mimeType: "application/zip",
+                fileURL: nil
+            ),
+        ]
+
+        let section = try #require(
+            IOSEventDetailPopover.attachmentSection(for: attachments)
+        )
+        let rows = section.rows
+
+        #expect(section.title == "Attachments")
+        #expect(rows.map(\.systemImageName) == [
+            "photo",
+            "doc.richtext",
+            "doc.text",
+            "tablecells",
+            "rectangle.on.rectangle",
+            "paperclip",
+        ])
+        #expect(rows.map(\.accessibilityLabel) == attachments.map(\.title))
+        #expect(
+            rows.map(\.destination) == [
+                URL(string: "https://drive.google.com/photo"),
+                nil,
+                nil,
+                nil,
+                nil,
+                nil,
+            ]
+        )
+    }
+
+    @Test("Event Detail lists every attachment without access filtering")
+    func eventDetailListsEveryAttachment() throws {
+        let attachments = (1...25).map { index in
+            CalendarEventAttachment(
+                title: "Attachment \(index)",
+                mimeType: nil,
+                fileURL: nil
+            )
+        }
+
+        let section = try #require(
+            IOSEventDetailPopover.attachmentSection(for: attachments)
+        )
+
+        #expect(section.rows.map(\.title) == attachments.map(\.title))
+        #expect(section.rows.allSatisfy { $0.destination == nil })
+    }
+
+    @Test("Event Detail attachment rows are absent for an empty attachment list")
+    func emptyEventDetailAttachmentsStayAbsent() {
+        #expect(IOSEventDetailPopover.attachmentSection(for: []) == nil)
+    }
+
     @Test("Compact Event Detail Popovers fill the sheet width")
     func compactEventDetailPopoversFillSheetWidth() {
         #expect(IOSEventDetailPopover.contentMaxWidth(for: .compact) == .infinity)

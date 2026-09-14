@@ -37,6 +37,15 @@ struct GoogleCalendarEventAttendee: Equatable, Sendable {
     let responseStatus: String?
 }
 
+/// One attachment decoded from a full Google Calendar Event resource.
+/// Planner does not request or load Google's attachment icon; presentation
+/// derives an SF Symbol from the MIME type instead.
+struct GoogleCalendarEventAttachment: Equatable, Sendable {
+    let title: String?
+    let mimeType: String?
+    let fileURL: String?
+}
+
 /// One decoded Google Calendar event crossing the adapter seam. The shape is
 /// Google's; classification, filtering, and presentation rules belong to the
 /// model, and raw Google errors never cross this boundary.
@@ -64,6 +73,9 @@ struct GoogleCalendarEvent: Equatable, Sendable {
     let notes: String?
     /// Google's attendee list, possibly empty.
     let attendees: [GoogleCalendarEventAttendee]
+    /// Google's attachment metadata from the full Event resource. Entries
+    /// stay unfiltered even when Drive later denies access.
+    let attachments: [GoogleCalendarEventAttachment]
 
     init(
         id: String,
@@ -78,7 +90,8 @@ struct GoogleCalendarEvent: Equatable, Sendable {
         googleLink: String? = nil,
         location: String? = nil,
         notes: String? = nil,
-        attendees: [GoogleCalendarEventAttendee] = []
+        attendees: [GoogleCalendarEventAttendee] = [],
+        attachments: [GoogleCalendarEventAttachment] = []
     ) {
         self.id = id
         self.iCalUID = iCalUID
@@ -93,6 +106,7 @@ struct GoogleCalendarEvent: Equatable, Sendable {
         self.location = location
         self.notes = notes
         self.attendees = attendees
+        self.attachments = attachments
     }
 }
 

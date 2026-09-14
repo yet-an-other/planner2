@@ -19,7 +19,7 @@ The Web Experience already persists Saved Busy Blocks (web ADR 0001) — timing 
 
 The iOS Experience persists **Stored Calendar Events**: a per-Google-account, device-local copy of the Fetched Window's Calendar Events.
 
-- **Content.** The full normalized Calendar Event model exactly as the surface renders it — title, timing, Event Color, location, notes, attendees, and Google link. Raw Google API payloads are never persisted.
+- **Content.** The full normalized Calendar Event model exactly as the surface renders it — title, timing, Event Color, location, notes, Calendar Event Attachments, attendees, and Google link. Raw Google API payloads are never persisted.
 - **Volume.** The store mirrors the Fetched Window. Entries falling out of the window, and events from deselected Source Calendars, disappear on the next write — no separate eviction policy.
 - **Freshness.** Not persisted. Stored Calendar Events are presented at process start and treated as always stale; when connected, the existing per-process freshness pipeline fetches as if coverage were empty, and Calendar Event Refresh replaces the stored view atomically. Deletions and moves made elsewhere while offline surface only on the next successful refresh — accepted as the honest semantic of a read-only last-known-good mirror.
 - **Writes.** Write-through: every successful initial, slab, or Calendar Event Refresh response updates the store with the in-memory model, so a crash or force-quit never resurrects events older than the last successful response.

@@ -266,6 +266,85 @@ struct GoogleCalendarAPIAdapterTests {
         #expect(outcome == .unavailable(.failed))
     }
 
+    @Test("Event attachment JSON reaches normalized Calendar Event detail")
+    func eventAttachmentJSONReachesNormalizedDetail() async {
+        let sourceCalendar = GoogleSourceCalendar(
+            id: "primary",
+            summary: "Primary",
+            backgroundColorHex: "#039BE5",
+            isPrimary: true
+        )
+        let adapter = GoogleCalendarAPIAdapter(
+            accessTokenProvider: { "test-token" },
+            loadRequest: { request in
+                let url = request.url!
+                let json =
+                    url.path == "/calendar/v3/colors"
+                    ? #"{"event":{}}"#
+                    : """
+                    {"items":[{
+                      "id":"planning",
+                      "summary":"Planning",
+                      "start":{"dateTime":"2026-07-22T11:00:00Z"},
+                      "end":{"dateTime":"2026-07-22T11:30:00Z"},
+                      "attachments":[
+                        {
+                          "title":"  Roadmap  ",
+                          "mimeType":"application/pdf",
+                          "fileUrl":"https://drive.google.com/file/d/roadmap"
+                        },
+                        {
+                          "mimeType":"image/png"
+                        }
+                      ]
+                    }]}
+                    """
+                let response = HTTPURLResponse(
+                    url: url,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (Data(json.utf8), response)
+            }
+        )
+
+        let outcome = await adapter.fetchEvents(
+            from: [sourceCalendar],
+            start: Date(timeIntervalSince1970: 1_784_073_600),
+            end: Date(timeIntervalSince1970: 1_785_000_000)
+        )
+
+        guard case .success(let sourceEvents, let colors) = outcome else {
+            Issue.record("Expected one decoded event")
+            return
+        }
+        let normalized = CalendarEventNormalization.normalize(
+            sourceEvents,
+            eventColorBackgrounds: colors,
+            environment: CalendarEnvironment(
+                now: Date(timeIntervalSince1970: 1_784_116_800),
+                calendar: Calendar(identifier: .gregorian),
+                locale: Locale(identifier: "en_US_POSIX"),
+                timeZone: TimeZone(secondsFromGMT: 0)!
+            )
+        )
+        #expect(
+            normalized.first?.detail.attachments == [
+                CalendarEventAttachment(
+                    title: "Roadmap",
+                    mimeType: "application/pdf",
+                    fileURL: "https://drive.google.com/file/d/roadmap"
+                ),
+                CalendarEventAttachment(
+                    title: "Untitled attachment",
+                    mimeType: "image/png",
+                    fileURL: nil
+                ),
+            ]
+        )
+    }
+
     @Test("Event decoding retains iCalUID and originalStartTime")
     func eventDecodingRetainsOccurrenceIdentity() async {
         let adapter = GoogleCalendarAPIAdapter(

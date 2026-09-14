@@ -389,6 +389,12 @@ final class GoogleCalendarAPIAdapter:
             }
         }
 
+        struct Attachment: Decodable, Sendable {
+            let title: String?
+            let mimeType: String?
+            let fileUrl: String?
+        }
+
         let id: String?
         let iCalUID: String?
         let status: String?
@@ -401,6 +407,7 @@ final class GoogleCalendarAPIAdapter:
         let htmlLink: String?
         let location: String?
         let description: String?
+        let attachments: [Attachment]?
     }
 
     /// Maps one decoded event into the seam's Google-shaped value, dropping
@@ -435,6 +442,13 @@ final class GoogleCalendarAPIAdapter:
                     displayName: $0.displayName,
                     email: $0.email,
                     responseStatus: $0.responseStatus
+                )
+            },
+            attachments: (dto.attachments ?? []).map {
+                GoogleCalendarEventAttachment(
+                    title: $0.title,
+                    mimeType: $0.mimeType,
+                    fileURL: $0.fileUrl
                 )
             }
         )

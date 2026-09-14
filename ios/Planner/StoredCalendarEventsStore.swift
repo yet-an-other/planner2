@@ -7,8 +7,9 @@ import Foundation
 /// A Stored Calendar Event is the Calendar Event itself: the full
 /// normalized model exactly as the surface renders it — canonical
 /// identity, winning Source Calendar identity, title, timing, Event
-/// Color, location, notes (plain text, post-normalization), attendees,
-/// and Google link. Raw Google API responses never cross into this
+/// Color, location, notes (plain text, post-normalization), Calendar Event
+/// Attachments, attendees, and Google link. Raw Google API responses never
+/// cross into this
 /// record (ADR 0007).
 struct StoredCalendarEventsSnapshot: Equatable, Sendable, Codable {
     /// Google's stable opaque identifier of the account that fetched the

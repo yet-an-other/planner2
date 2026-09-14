@@ -210,6 +210,14 @@ enum CalendarEventNormalization {
             let notes = CalendarEventPlainTextNotes.plainText(
                 fromHTML: event.notes
             )
+            let attachments = event.attachments.map { attachment in
+                CalendarEventAttachment(
+                    title: attachment.title?.trimmedToNil
+                        ?? "Untitled attachment",
+                    mimeType: attachment.mimeType?.trimmedToNil,
+                    fileURL: attachment.fileURL?.trimmedToNil
+                )
+            }
             let attendees = CalendarEventAttendeeNormalization.normalize(
                 event.attendees
             )
@@ -225,6 +233,7 @@ enum CalendarEventNormalization {
                     location: location,
                     googleLink: googleLink,
                     notes: notes,
+                    attachments: attachments,
                     attendees: attendees.visible,
                     hiddenAttendeeCount: attendees.hiddenCount
                 )

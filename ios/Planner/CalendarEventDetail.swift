@@ -27,6 +27,9 @@ struct CalendarEventDetail: Equatable, Sendable, Codable {
     /// normalization), or `nil` when the event has none — the Notes
     /// section is omitted rather than shown empty.
     let notes: String?
+    /// Calendar Event Attachments in Google's order; empty when the event
+    /// has none, so the Attachments section is omitted.
+    let attachments: [CalendarEventAttachment]
     /// The first five attendees, display-name primary with the response
     /// status as text; empty when the event has none — the Attendees
     /// section is omitted rather than shown empty.
@@ -42,6 +45,7 @@ struct CalendarEventDetail: Equatable, Sendable, Codable {
         location: String? = nil,
         googleLink: String? = nil,
         notes: String? = nil,
+        attachments: [CalendarEventAttachment] = [],
         attendees: [CalendarEventAttendee] = [],
         hiddenAttendeeCount: Int = 0
     ) {
@@ -51,9 +55,69 @@ struct CalendarEventDetail: Equatable, Sendable, Codable {
         self.location = location
         self.googleLink = googleLink
         self.notes = notes
+        self.attachments = attachments
         self.attendees = attendees
         self.hiddenAttendeeCount = hiddenAttendeeCount
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case title
+        case colorHex
+        case timingText
+        case location
+        case googleLink
+        case notes
+        case attachments
+        case attendees
+        case hiddenAttendeeCount
+    }
+
+    /// Older Stored Calendar Events snapshots predate attachments. They
+    /// decode with an empty list so an app update does not discard the
+    /// account's last-known-good schedule.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        title = try values.decode(String.self, forKey: .title)
+        colorHex = try values.decode(String.self, forKey: .colorHex)
+        timingText = try values.decode(String.self, forKey: .timingText)
+        location = try values.decodeIfPresent(String.self, forKey: .location)
+        googleLink = try values.decodeIfPresent(String.self, forKey: .googleLink)
+        notes = try values.decodeIfPresent(String.self, forKey: .notes)
+        attachments = try values.decodeIfPresent(
+            [CalendarEventAttachment].self,
+            forKey: .attachments
+        ) ?? []
+        attendees = try values.decode(
+            [CalendarEventAttendee].self,
+            forKey: .attendees
+        )
+        hiddenAttendeeCount = try values.decode(
+            Int.self,
+            forKey: .hiddenAttendeeCount
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(title, forKey: .title)
+        try values.encode(colorHex, forKey: .colorHex)
+        try values.encode(timingText, forKey: .timingText)
+        try values.encodeIfPresent(location, forKey: .location)
+        try values.encodeIfPresent(googleLink, forKey: .googleLink)
+        try values.encodeIfPresent(notes, forKey: .notes)
+        try values.encode(attachments, forKey: .attachments)
+        try values.encode(attendees, forKey: .attendees)
+        try values.encode(hiddenAttendeeCount, forKey: .hiddenAttendeeCount)
+    }
+}
+
+/// One normalized Calendar Event Attachment presented by Event Detail and
+/// persisted with Stored Calendar Events. The title has already received
+/// Planner's fallback; MIME type and URL remain optional Google metadata.
+struct CalendarEventAttachment: Equatable, Sendable, Codable {
+    let title: String
+    let mimeType: String?
+    let fileURL: String?
 }
 
 /// One event's display timing in Planner's uniform shape, so the timing

@@ -47,6 +47,18 @@ struct StoredCalendarEventsStoreTests {
                 location: "Berlin",
                 googleLink: "https://calendar.google.com/event?eid=abc",
                 notes: "Bring badge",
+                attachments: [
+                    CalendarEventAttachment(
+                        title: "Venue map",
+                        mimeType: "image/png",
+                        fileURL: "https://drive.google.com/file/d/map"
+                    ),
+                    CalendarEventAttachment(
+                        title: "Untitled attachment",
+                        mimeType: nil,
+                        fileURL: nil
+                    ),
+                ],
                 attendees: [
                     CalendarEventAttendee(label: "Ada", status: .accepted),
                     CalendarEventAttendee(
@@ -90,7 +102,22 @@ struct StoredCalendarEventsStoreTests {
             .saveSnapshot(snapshot)
 
         let relaunched = FileStoredCalendarEventsStore(baseDirectory: base)
-        #expect(relaunched.loadSnapshot() == snapshot)
+        let loaded = relaunched.loadSnapshot()
+        #expect(loaded == snapshot)
+        #expect(
+            loaded?.events.first?.detail.attachments == [
+                CalendarEventAttachment(
+                    title: "Venue map",
+                    mimeType: "image/png",
+                    fileURL: "https://drive.google.com/file/d/map"
+                ),
+                CalendarEventAttachment(
+                    title: "Untitled attachment",
+                    mimeType: nil,
+                    fileURL: nil
+                ),
+            ]
+        )
     }
 
     @Test("The adapter pins its platform storage attributes")

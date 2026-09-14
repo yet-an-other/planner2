@@ -1,5 +1,62 @@
 import SwiftUI
 
+/// The Event Detail Popover's optional Attachments section projection.
+/// Absence hides the whole section; a present value carries the heading and
+/// every row in Google order.
+struct IOSEventDetailAttachmentSection: Equatable, Sendable {
+    let title: String
+    let rows: [IOSEventDetailAttachmentRow]
+}
+
+/// One attachment row as the Event Detail Popover exposes it to SwiftUI and
+/// accessibility. The destination controls whether the row is a native Link;
+/// a missing URL leaves the same title as plain text.
+struct IOSEventDetailAttachmentRow: Equatable, Sendable {
+    let title: String
+    let systemImageName: String
+    let destination: URL?
+    let accessibilityLabel: String
+
+    init(attachment: CalendarEventAttachment) {
+        title = attachment.title
+        systemImageName = Self.systemImageName(for: attachment.mimeType)
+        destination = attachment.fileURL.flatMap { URL(string: $0) }
+        accessibilityLabel = attachment.title
+    }
+
+    private static func systemImageName(for mimeType: String?) -> String {
+        let mimeType = mimeType?.lowercased() ?? ""
+        if mimeType.hasPrefix("image/") {
+            return "photo"
+        }
+        if mimeType == "application/pdf" {
+            return "doc.richtext"
+        }
+        if mimeType.contains("spreadsheet")
+            || mimeType.contains("excel")
+            || mimeType.contains("sheet")
+            || mimeType.contains("csv")
+        {
+            return "tablecells"
+        }
+        if mimeType.contains("presentation")
+            || mimeType.contains("powerpoint")
+            || mimeType.contains("slideshow")
+        {
+            return "rectangle.on.rectangle"
+        }
+        if mimeType.hasPrefix("text/")
+            || mimeType.contains("document")
+            || mimeType.contains("wordprocessing")
+            || mimeType.contains("msword")
+            || mimeType.contains("rtf")
+        {
+            return "doc.text"
+        }
+        return "paperclip"
+    }
+}
+
 /// The Event Detail Popover on the iOS Calendar Surface (Planning
 /// glossary; iOS ADR 0005): a transient, read-only, native anchored
 /// popover presenting one Calendar Event's details, adapting to a sheet
@@ -117,6 +174,21 @@ struct IOSEventDetailPopover: View {
                         }
                     }
 
+                    if let attachments = Self.attachmentSection(
+                        for: detail.attachments
+                    ) {
+                        IOSEventDetailPopoverSection(title: attachments.title) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(
+                                    Array(attachments.rows.enumerated()),
+                                    id: \.offset
+                                ) { _, row in
+                                    IOSEventDetailAttachmentRowView(row: row)
+                                }
+                            }
+                        }
+                    }
+
                     if !detail.attendees.isEmpty {
                         IOSEventDetailPopoverSection(title: Self.attendeesSectionTitle) {
                             VStack(alignment: .leading, spacing: 4) {
@@ -191,10 +263,27 @@ struct IOSEventDetailPopover: View {
     /// user-expandable when long notes or attendee lists need more room.
     static let compactDetents: Set<PresentationDetent> = [.medium, .large]
 
+    /// The popover's observable Attachments section projection. Tests pin
+    /// this seam rather than private MIME or view-construction helpers.
+    static func attachmentSection(
+        for attachments: [CalendarEventAttachment]
+    ) -> IOSEventDetailAttachmentSection? {
+        guard !attachments.isEmpty else {
+            return nil
+        }
+        return IOSEventDetailAttachmentSection(
+            title: attachmentsSectionTitle,
+            rows: attachments.map {
+                IOSEventDetailAttachmentRow(attachment: $0)
+            }
+        )
+    }
+
     private static let closeAccessibilityLabel = "Close"
     private static let whenSectionTitle = "When"
     private static let whereSectionTitle = "Where"
     private static let notesSectionTitle = "Notes"
+    private static let attachmentsSectionTitle = "Attachments"
     private static let attendeesSectionTitle = "Attendees"
     private static let openInGoogleCalendarTitle = "Open in Google Calendar →"
 
@@ -233,6 +322,44 @@ struct IOSEventDetailPopover: View {
                 }
                 result.append(attributedLink)
             }
+        }
+    }
+}
+
+/// One Calendar Event Attachment row. Linked rows use SwiftUI's native Link,
+/// while rows without a destination remain plain text. The icon is decorative;
+/// VoiceOver announces the same single-line title visible on screen and the
+/// Link supplies its native link trait.
+private struct IOSEventDetailAttachmentRowView: View {
+    let row: IOSEventDetailAttachmentRow
+
+    var body: some View {
+        if let destination = row.destination {
+            Link(destination: destination) {
+                content(isLinked: true)
+            }
+            .accessibilityLabel(row.accessibilityLabel)
+        } else {
+            content(isLinked: false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(row.accessibilityLabel)
+        }
+    }
+
+    private func content(isLinked: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: row.systemImageName)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(PlannerPalette.monthText)
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            Text(row.title)
+                .font(.subheadline)
+                .foregroundStyle(PlannerPalette.ink)
+                .underline(isLinked)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -477,6 +604,37 @@ private struct EventDetailRefreshValidationPreview: View {
             location: "Harbor House",
             googleLink: "https://www.google.com/calendar/event?eid=ghi789",
             notes: "Agenda and logistics at https://example.com/offsite-agenda.\n\n09:00 — Arrival and coffee\n09:30 — Retrospective on the spring release\n11:00 — Roadmap workshop, part one\n12:30 — Lunch at the harbor\n13:30 — Roadmap workshop, part two\n15:00 — Break\n15:30 — Unconference sessions\n16:45 — Wrap-up and next steps"
+        ),
+        onClose: {}
+    )
+    .frame(width: 360, height: 420)
+}
+
+#Preview("Attachments · Linked and Plain") {
+    IOSEventDetailPopover(
+        detail: CalendarEventDetail(
+            title: "Quarterly Planning",
+            colorHex: "#039BE5",
+            timingText: "Wed, Jul 22, 2026 · 1:00 PM – 2:00 PM",
+            notes: "Review before the meeting.",
+            attachments: [
+                CalendarEventAttachment(
+                    title: "Roadmap.pdf",
+                    mimeType: "application/pdf",
+                    fileURL: "https://drive.google.com/file/d/roadmap"
+                ),
+                CalendarEventAttachment(
+                    title: "Untitled attachment",
+                    mimeType: "application/vnd.google-apps.spreadsheet",
+                    fileURL: nil
+                ),
+            ],
+            attendees: [
+                CalendarEventAttendee(
+                    label: "Ada Lovelace",
+                    status: .accepted
+                ),
+            ]
         ),
         onClose: {}
     )
