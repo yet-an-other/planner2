@@ -73,7 +73,7 @@ A Google Calendar event obtained by Planner from a Source Calendar included in t
 _Avoid_: Event item, schedule entry, appointment
 
 **Calendar Event Attachment**:
-A reference to a Google Drive file attached to a Calendar Event, carrying a title, a MIME type, an icon, and a link to open the file. Calendar Event Attachments are presented by the Event Detail Popover.
+A reference to a Google Drive file attached to a Calendar Event, carrying a title, a MIME type, and a link to open the file. Calendar Event Attachments are presented by the Event Detail Popover.
 _Avoid_: file, document, upload, attachment link
 
 **Calendar Event Normalization**:
