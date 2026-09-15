@@ -57,13 +57,27 @@ struct IOSEventDetailAttachmentRow: Equatable, Sendable {
     }
 }
 
+/// The Event Detail Popover's whole-field copy targets: the full strings the
+/// title, timing line, Where, and attendee labels display. Long-press Copy
+/// and the VoiceOver Copy action copy exactly these, so values the popover
+/// does not show (an attendee's email, a response status, a Maps URL) are
+/// never copied. Notes select by range instead, and headings, statuses,
+/// the Source Calendar row, attachments, and links are not copy targets.
+struct IOSEventDetailCopyableFields: Equatable, Sendable {
+    let title: String
+    let timing: String
+    let location: String?
+    let attendeeLabels: [String]
+}
+
 /// The Event Detail Popover on the iOS Calendar Surface (Planning
 /// glossary; iOS ADR 0005): a transient, read-only, native anchored
 /// popover presenting one Calendar Event's details, adapting to a sheet
 /// on compact widths. It renders from the Calendar Events model's selected
 /// canonical identity projection, so successful replacement updates it and
-/// disappearance or Disconnect on This Device dismisses it. The surface stays
-/// write-read-only: no edit affordances exist.
+/// disappearance or Disconnect on This Device dismisses it. The title, timing
+/// line, Where, and attendee labels copy as whole fields, and Notes selects
+/// by range. The surface stays write-read-only: no edit affordances exist.
 struct IOSEventDetailPopover: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -89,6 +103,7 @@ struct IOSEventDetailPopover: View {
     }
 
     var body: some View {
+        let copyable = Self.copyableFields(for: detail)
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -100,9 +115,10 @@ struct IOSEventDetailPopover: View {
                             .fill(Color(eventHex: detail.colorHex))
                             .frame(width: 4)
 
-                        Text(detail.title)
+                        Text(copyable.title)
                             .font(.headline)
                             .foregroundStyle(PlannerPalette.ink)
+                            .eventDetailCopyable(copyable.title)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 8)
@@ -148,12 +164,13 @@ struct IOSEventDetailPopover: View {
                     }
 
                     IOSEventDetailPopoverSection(title: Self.whenSectionTitle) {
-                        Text(detail.timingText)
+                        Text(copyable.timing)
                             .font(.subheadline)
                             .foregroundStyle(PlannerPalette.ink)
+                            .eventDetailCopyable(copyable.timing)
                     }
 
-                    if let location = detail.location {
+                    if let location = copyable.location {
                         IOSEventDetailPopoverSection(title: Self.whereSectionTitle) {
                             IOSEventDetailLocationText(location: location)
                         }
@@ -161,16 +178,14 @@ struct IOSEventDetailPopover: View {
 
                     if let notes = detail.notes {
                         IOSEventDetailPopoverSection(title: Self.notesSectionTitle) {
-                            // Plain text with tappable http(s) URLs;
-                            // long notes scroll within the section.
-                            ScrollView {
-                                Text(Self.linkedNotes(notes))
-                                    .font(.subheadline)
-                                    .foregroundStyle(PlannerPalette.ink)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .frame(maxHeight: Self.notesMaxHeight)
+                            // Range-selectable plain text with tappable
+                            // http(s) URLs; long notes scroll within the
+                            // section.
+                            IOSEventDetailNotesText(
+                                notes: notes,
+                                maxHeight: Self.notesMaxHeight
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
 
@@ -195,13 +210,17 @@ struct IOSEventDetailPopover: View {
                                 ForEach(
                                     Array(detail.attendees.enumerated()),
                                     id: \.offset
-                                ) { _, attendee in
+                                ) { index, attendee in
+                                    let label = copyable.attendeeLabels[index]
                                     HStack(alignment: .firstTextBaseline) {
-                                        Text(attendee.label)
+                                        // A truncated label still copies
+                                        // in full.
+                                        Text(label)
                                             .font(.subheadline)
                                             .foregroundStyle(PlannerPalette.ink)
                                             .lineLimit(1)
                                             .truncationMode(.tail)
+                                            .eventDetailCopyable(label)
                                         Spacer(minLength: 8)
                                         // The response status as text,
                                         // never color alone.
@@ -263,6 +282,20 @@ struct IOSEventDetailPopover: View {
     /// user-expandable when long notes or attendee lists need more room.
     static let compactDetents: Set<PresentationDetent> = [.medium, .large]
 
+    /// The popover's whole-field copy projection. The view renders these
+    /// fields from it, so tests pin exactly what each field displays and
+    /// copies.
+    static func copyableFields(
+        for detail: CalendarEventDetail
+    ) -> IOSEventDetailCopyableFields {
+        IOSEventDetailCopyableFields(
+            title: detail.title,
+            timing: detail.timingText,
+            location: detail.location,
+            attendeeLabels: detail.attendees.map(\.label)
+        )
+    }
+
     /// The popover's observable Attachments section projection. Tests pin
     /// this seam rather than private MIME or view-construction helpers.
     static func attachmentSection(
@@ -301,28 +334,24 @@ struct IOSEventDetailPopover: View {
     }
 
     /// The Notes section's height cap, the web popover's 10-rem cap.
-    private static let notesMaxHeight: CGFloat = 160
+    static let notesMaxHeight: CGFloat = 160
 
-    /// Renders the pinned, presentation-only text/link segments into one
-    /// attributed string. The view owns only styling and the native link
-    /// attribute; URL boundary behavior lives in the pure helper.
-    private static func linkedNotes(_ notes: String) -> AttributedString {
-        CalendarEventTextLinks.splitIntoSegments(notes).reduce(
-            into: AttributedString()
-        ) { result, segment in
-            switch segment {
-            case .text(let text):
-                result.append(AttributedString(text))
-            case .link(let urlText):
-                var attributedLink = AttributedString(urlText)
-                if let url = URL(string: urlText) {
-                    attributedLink.link = url
-                    attributedLink.foregroundColor = PlannerPalette.link
-                    attributedLink.underlineStyle = .single
-                }
-                result.append(attributedLink)
+    /// The VoiceOver action name on every whole-field copy target.
+    static let copyAccessibilityActionName = "Copy"
+}
+
+extension View {
+    /// Whole-field copy for one Event Detail Popover field: long-press
+    /// offers the system edit-menu Copy for the field's full visible string,
+    /// even when the line is truncated, and VoiceOver gets a Copy action for
+    /// the same string. Values the field does not show are never copied.
+    func eventDetailCopyable(_ text: String) -> some View {
+        textSelection(.enabled)
+            .accessibilityAction(
+                named: Text(IOSEventDetailPopover.copyAccessibilityActionName)
+            ) {
+                UIPasteboard.general.string = text
             }
-        }
     }
 }
 
@@ -370,20 +399,21 @@ private struct IOSEventDetailAttachmentRowView: View {
 /// or address string renders as text with a Google Maps search link on
 /// the pin affordance; a location that is itself an http(s) URL renders
 /// as a direct link. Mirrors the Web Experience's location-links module.
+/// The location text copies as a whole field in every form.
 private struct IOSEventDetailLocationText: View {
     let location: String
 
     var body: some View {
         let href = CalendarEventLocationLinks.href(for: location)
         if case let .some(.direct(url)) = href {
-            Link(destination: url) {
-                Text(location)
-                    .font(.subheadline)
-                    .foregroundStyle(PlannerPalette.link)
-                    .underline()
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            // A link run inside Text rather than a SwiftUI Link: long-
+            // pressing a Link opens its URL, while a link run still opens
+            // on tap and leaves long-press to Copy.
+            Text(Self.directLink(location, url: url))
+                .font(.subheadline)
+                .eventDetailCopyable(location)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         } else if case let .some(.maps(url)) = href {
             HStack(alignment: .top, spacing: 6) {
                 Link(destination: url) {
@@ -397,6 +427,7 @@ private struct IOSEventDetailLocationText: View {
                 Text(location)
                     .font(.subheadline)
                     .foregroundStyle(PlannerPalette.ink)
+                    .eventDetailCopyable(location)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -406,12 +437,21 @@ private struct IOSEventDetailLocationText: View {
             Text(location)
                 .font(.subheadline)
                 .foregroundStyle(PlannerPalette.ink)
+                .eventDetailCopyable(location)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private static let mapsAccessibilityLabel = "Open in Google Maps"
+
+    private static func directLink(_ location: String, url: URL) -> AttributedString {
+        var link = AttributedString(location)
+        link.link = url
+        link.foregroundColor = PlannerPalette.link
+        link.underlineStyle = .single
+        return link
+    }
 }
 
 /// One labelled section of the Event Detail Popover: a small uppercase
