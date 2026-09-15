@@ -498,7 +498,7 @@ struct CalendarEventNormalizationTests {
         }
         #expect(startTimeText == "9:00 AM")
         #expect(snapshot.events[0].detail.location == "Berlin")
-        #expect(snapshot.events.allSatisfy(\.detail.attachments.isEmpty))
+        #expect(snapshot.events.allSatisfy { $0.detail.attachments.isEmpty })
     }
 
     @Test("The text tone follows the resolved Event Color")
