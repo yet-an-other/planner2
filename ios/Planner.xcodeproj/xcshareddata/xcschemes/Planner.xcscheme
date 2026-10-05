@@ -55,6 +55,17 @@
                ReferencedContainer = "container:Planner.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A00000000000000000000215"
+               BuildableName = "PlannerUITests.xctest"
+               BlueprintName = "PlannerUITests"
+               ReferencedContainer = "container:Planner.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

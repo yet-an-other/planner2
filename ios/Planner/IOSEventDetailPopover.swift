@@ -415,14 +415,20 @@ private struct IOSEventDetailLocationText: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if case let .some(.maps(url)) = href {
-            HStack(alignment: .top, spacing: 6) {
-                Link(destination: url) {
-                    Image(systemName: "mappin")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(PlannerPalette.link)
-                        .padding(.top, 2)
-                }
-                .accessibilityLabel(Self.mapsAccessibilityLabel)
+            // The pin glyph sits in the heading gutter, nudged a few
+            // points left of the "Where" heading so the address keeps a
+            // small gap to it; the address itself aligns with the other
+            // sections' detail text. The 44×44pt fingertip-sized tap
+            // target is a transparent overlay anchored at the glyph —
+            // above the text, so the address's leading stretch taps open
+            // Maps while the rest keeps long-press Copy.
+            HStack(alignment: .top, spacing: 0) {
+                Image(systemName: "mappin")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(PlannerPalette.link)
+                    .padding(.top, 2)
+                    .frame(width: 20, alignment: .leading)
+                    .accessibilityHidden(true)
 
                 Text(location)
                     .font(.subheadline)
@@ -431,6 +437,15 @@ private struct IOSEventDetailLocationText: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .overlay(alignment: .topLeading) {
+                Link(destination: url) {
+                    Color.clear
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel(Self.mapsAccessibilityLabel)
+            }
+            .padding(.leading, -20)
         } else {
             // An unbuildable Maps URL degrades to plain text rather than
             // a dead link.
